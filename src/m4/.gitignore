@@ -1,5 +1,7 @@
 # ignore all files in this dir...
 *
 
-# ... except for this one.
+# ... except for these...
 !.gitignore
+!hashpipe.m4
+!xgpu.m4
