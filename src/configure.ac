@@ -6,7 +6,7 @@ AC_INIT([FULL-PACKAGE-NAME], [VERSION], [BUG-REPORT-ADDRESS])
 AM_INIT_AUTOMAKE([foreign])
 LT_INIT
 AM_SILENT_RULES([yes])
-AC_CONFIG_SRCDIR([hashpipe_status.h])
+AC_CONFIG_SRCDIR([paper_databuf.h])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
 
@@ -15,12 +15,6 @@ AC_ARG_WITH([cuda],
                            [Location of CUDA files (/usr/local/cuda)]),
             [CUDADIR="$withval"],
             [CUDADIR=/usr/local/cuda])
-
-AC_ARG_WITH([xgpu],
-            AC_HELP_STRING([--with-xgpu=DIR],
-                           [Location of xGPU headers/libs (/usr/local)]),
-            [XGPUDIR="$withval"],
-            [XGPUDIR=/usr/local])
 
 # Set CFLAGS to nothing if it is not set by the user.  This prevents AC_PROG_CC
 # from setting the (supposedly reserved-for-the-user!) variable CFLAGS in
@@ -31,66 +25,13 @@ AS_VAR_SET_IF(CFLAGS,[],[CFLAGS=])
 
 # Checks for programs.
 AC_PROG_CC
+AX_CHECK_HASHPIPE
+AX_CHECK_XGPUINFO
 
 # Checks for libraries.
-
-# Save original LDFLAGS
-orig_LDFLAGS="${LDFLAGS}"
-
-AC_CHECK_LIB([cfitsio], [ffclos])
-
-LDFLAGS="${orig_LDFLAGS} -L${XGPUDIR}/lib"
-AC_CHECK_LIB([xgpu], [xgpuInit],
-             # Found
-             AC_SUBST(XGPU_LIBDIR,${XGPUDIR}/lib),
-             # Not found there, check XGPUDIR
-             AS_UNSET(ac_cv_lib_xgpu_xgpuInit)
-             LDFLAGS="${orig_LDFLAGS} -L${XGPUDIR}"
-             AC_CHECK_LIB([xgpu], [xgpuInit],
-                          # Found
-                          AC_SUBST(XGPU_LIBDIR,${XGPUDIR}),
-                          # Not found there, error
-                          AC_MSG_ERROR([xGPU library not found])))
-LDFLAGS="${orig_LDFLAGS}"
-
-AC_CHECK_FILE([${XGPUDIR}/include/xgpu.h],
-              # Found
-              AC_SUBST(XGPU_INCDIR,${XGPUDIR}/include),
-              # Not found there, check XGPUDIR
-              AC_CHECK_FILE([${XGPUDIR}/xgpu.h],
-                            # Found
-                            AC_SUBST(XGPU_INCDIR,${XGPUDIR}),
-                            # Not found there, error
-                            AC_MSG_ERROR([xgpu.h header file not found])))
-
-
-AC_CHECK_FILE([${XGPUDIR}/bin/xgpuinfo],
-              # Found
-              AC_SUBST(XGPU_BINDIR,${XGPUDIR}/bin),
-              # Not found there, check XGPUDIR
-              AC_CHECK_FILE([${XGPUDIR}/xgpuinfo],
-                            # Found
-                            AC_SUBST(XGPU_BINDIR,${XGPUDIR}),
-                            # Not found there, error
-                            AC_MSG_ERROR([xgpuinfo program not found])))
-
-AC_DEFINE_UNQUOTED([XGPU_NSTATION],
-                   [`${XGPU_BINDIR}/xgpuinfo | sed -n '/Number of stations: /{s/.*: //;p}'`],
-                   [Number of stations == Ninputs/2])
-
-AC_DEFINE_UNQUOTED([XGPU_NFREQUENCY],
-                   [`${XGPU_BINDIR}/xgpuinfo | sed -n '/Number of frequencies: /{s/.*: //;p}'`],
-                   [Number of frequency channels per xGPU instance])
-
-AC_DEFINE_UNQUOTED([XGPU_NTIME],
-                   [`${XGPU_BINDIR}/xgpuinfo | sed -n '/time samples per GPU integration: /{s/.*: //;p}'`],
-                   [Number of time samples (i.e. spectra) per xGPU integration])
-
 ## FIXME: Replace `main' with a function in `-lm':
 #AC_CHECK_LIB([m], [main])
-
 AC_CHECK_LIB([pthread], [pthread_create])
-
 ## FIXME: Replace `main' with a function in `-lrt':
 #AC_CHECK_LIB([rt], [main])
 

@@ -1,6 +1,14 @@
-To build HASHPIPE from a freshly cloned repository you need to have autoconf
-anf automake and libtool installed.  Once those are in place, your can run the
-following commands to build HASHPIPE:
+To build the paper_gpu HASHPIPE plugin from a freshly cloned repository you
+need to have following pre-requisites installed:
+
+HASHPIPE
+xGPU
+autotools (autoconf, automake, libtool) [building-only]
+
+The autotools tools are only needed for the build process; they are not needed
+at runtime.
+
+Once those are in place, your can run the following commands to build HASHPIPE:
 
 $ cd src
 $ autoreconf -is
@@ -8,6 +16,38 @@ $ ./configure
 $ make
 $ sudo make install
 
-Instead of "sudo make install", you can also run "make staging", which will
-perform a local install to a directory named "staging" under the "src"
-subdirectory.
+The autoreconf step must be able to find the autoconf macros for HASHPIPE and
+xGPU.  These autoconf macros are installed as part of the HASHPIPE and xGPU
+packages.  If these packages were installed to non-system locations, you will
+likely have to pass "-I /path/to/hashpipe/aclocal" and/or "-I
+/path/to/xgpu/aclocal" on the autoreconf command line.  This is needed so that
+the appropriate options and tests are added to the generated "configure"
+script, which can be included in a distribution tarball.  When the configure
+script is run (quite possibly on a different system from which it was
+genreated), it may also need to told the locations of the local HASHPIPE and
+xGPU installations via the --with-hashpipe=DIR and --with-xgpu=DIR command line
+options.  When running the autoreconf and configure commands back to back on
+the same system specifying nearly the same location(s) twice can seem somewhat
+redundant.
+
+Example 1:
+
+If HASHIPE is installed under "/usr/local", its hashpipe.m4 file will be
+installed in "/usr/local/share/aclocal".  In that case, you will likely have to
+use a "-I" option on autoreconf command line, but not to configure since
+"/usr/local" is the default place that configure will search for hashpipe.  The
+autoreconf and configure commands could look like this:
+
+$ autoreconf -is -I /usr/local/share/aclocal
+$ ./configure
+
+Example 2:
+
+If HASHPIPE is installed under "/usr/local/xgpu16_256_32_titan", its xgpu.m4
+file will be installed in "/usr/lcoal/xgpu16_256_32_titan/share/aclocal".  In
+that case you will likely have to use both a "-I" option on the autoreconf
+command line and a "--with-xgpu" option on the configure command line.  The
+autoreconf and configure commands could look like this:
+
+$ autoreconf -is -I /usr/local/xgpu16_256_32_titan/share/aclocal
+$ ./configure --with-xgpu=/usr/local/xgpu16_256_32_titan
