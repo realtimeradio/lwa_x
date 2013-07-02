@@ -10,12 +10,6 @@ AC_CONFIG_SRCDIR([paper_databuf.h])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
 
-AC_ARG_WITH([cuda],
-            AC_HELP_STRING([--with-cuda=DIR],
-                           [Location of CUDA files (/usr/local/cuda)]),
-            [CUDADIR="$withval"],
-            [CUDADIR=/usr/local/cuda])
-
 # Set CFLAGS to nothing if it is not set by the user.  This prevents AC_PROG_CC
 # from setting the (supposedly reserved-for-the-user!) variable CFLAGS in
 # Makefile, which prevents AM_CFLAGS in Makefile.am from setting an
