@@ -19,32 +19,31 @@ AS_VAR_SET_IF(CFLAGS,[],[CFLAGS=])
 
 # Checks for programs.
 AC_PROG_CC
+
+# Check for HASHPIPE and xGPU
 AX_CHECK_HASHPIPE
 AX_CHECK_XGPUINFO
 
 # Checks for libraries.
-## FIXME: Replace `main' with a function in `-lm':
-#AC_CHECK_LIB([m], [main])
 AC_CHECK_LIB([pthread], [pthread_create])
-## FIXME: Replace `main' with a function in `-lrt':
-#AC_CHECK_LIB([rt], [main])
+AC_CHECK_LIB([rt], [clock_gettime])
 
 # Checks for header files.
-AC_CHECK_HEADERS([arpa/inet.h fcntl.h limits.h netdb.h netinet/in.h stdint.h stdlib.h string.h sys/socket.h sys/time.h unistd.h])
+AC_CHECK_HEADERS([netdb.h stdint.h stdlib.h string.h sys/socket.h sys/time.h unistd.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
+AC_C_INLINE
+AC_TYPE_INT32_T
 AC_TYPE_INT64_T
-AC_TYPE_INT8_T
-AC_TYPE_MODE_T
+AC_TYPE_OFF_T
 AC_TYPE_SIZE_T
-AC_HEADER_STDBOOL
+AC_TYPE_UINT32_T
 AC_TYPE_UINT64_T
 AC_TYPE_UINT8_T
 
 # Checks for library functions.
 AC_FUNC_MALLOC
-AC_FUNC_REALLOC
-AC_CHECK_FUNCS([floor getcwd gettimeofday memmove memset rint socket sqrt strchr strrchr strstr strtoul])
+AC_CHECK_FUNCS([clock_gettime memset socket])
 
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
