@@ -47,6 +47,8 @@ case ${hostname} in
 #      # Save core  8 for symmetry with core 0
 #      # Save core 15 for eth4 and eth5
 #      #
+#      # Setup for four GPU devices (two GTX690s == two dual-GTX680s).
+#      #
 #      #                               GPU       NET FLF GPU OUT
 #      # mask  bind_host               DEV  XID  CPU CPU CPU CPU
 #      "0x007e ${hostname}-2.tenge.pvt  0  $xid0  1   2   3   2" # Instance 0, eth2
@@ -56,7 +58,7 @@ case ${hostname} in
 #    );;
 
     instances=(
-      # Setup parameters for four instances,
+      # Setup parameters for four instances.
       # 2 x E5-2630 (6-cores @ 2.3 GHz, 15 MB L3, 7.2 GT/s QPI, 1333 MHz DRAM)
       # Fluff thread and output thread share a core.
       # Save core  0 for OS.
@@ -64,12 +66,14 @@ case ${hostname} in
       # Save core  6 for symmetry with core 0
       # Save core 11 for eth4 and eth5
       #
+      # Setup for two GPU devices (two TITANs).
+      #
       #                               GPU       NET FLF GPU OUT
       # mask  bind_host               DEV  XID  CPU CPU CPU CPU
       "0x001e ${hostname}-2.tenge.pvt  0  $xid0  1   2   3   3" # Instance 0, eth2
-      "0x001e ${hostname}-3.tenge.pvt  1  $xid1  4   2   3   3" # Instance 1, eth3
-      "0x0780 ${hostname}-4.tenge.pvt  2  $xid2  7   8   9   9" # Instance 2, eth4
-      "0x0780 ${hostname}-5.tenge.pvt  3  $xid3 10   8   9   9" # Instance 3, eth5
+      "0x001e ${hostname}-3.tenge.pvt  0  $xid1  4   2   3   3" # Instance 1, eth3
+      "0x0780 ${hostname}-4.tenge.pvt  1  $xid2  7   8   9   9" # Instance 2, eth4
+      "0x0780 ${hostname}-5.tenge.pvt  1  $xid3 10   8   9   9" # Instance 3, eth5
     );;
 
   asa*)
@@ -185,3 +189,7 @@ do
     sleep 10
   fi
 done
+
+# Final sleep to let last instance come up before we exit
+# (not really needed, but makes for cleaner terminal output).
+sleep 10
