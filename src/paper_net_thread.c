@@ -394,7 +394,8 @@ static void *run(hashpipe_thread_args_t * args)
     /* Read network params */
     struct hashpipe_udp_params up = {
 	.bindhost = "0.0.0.0",
-	.bindport = 8511
+	.bindport = 8511,
+	.packet_size = 8200
     };
     hashpipe_status_lock_busywait_safe(&st);
     // Get info from status buffer if present (no change if not present)
@@ -449,7 +450,7 @@ static void *run(hashpipe_thread_args_t * args)
         if (up.packet_size != p.packet_size) {
             if (p.packet_size != -1) {
                 #ifdef DEBUG_NET
-                hashpipe_warn("paper_net_thread", "Incorrect pkt size");
+                hashpipe_warn("paper_net_thread", "Incorrect pkt size (%d)", p.packet_size);
                 #endif
                 continue;
             } else {
