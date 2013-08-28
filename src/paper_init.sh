@@ -33,10 +33,10 @@ case ${hostname} in
 
   snb*)
     # Calculate XIDs based on mypx
-    xid0=$(( 4*(mypx-1)    ))
-    xid1=$(( 4*(mypx-1) + 1))
-    xid2=$(( 4*(mypx-1) + 2))
-    xid3=$(( 4*(mypx-1) + 3))
+    xid0=$((  0 + (mypx-1) ))
+    xid1=$((  8 + (mypx-1) ))
+    xid2=$(( 16 + (mypx-1) ))
+    xid3=$(( 24 + (mypx-1) ))
 
 #    instances=(
 #      # Setup parameters for four instances.
