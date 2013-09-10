@@ -33,7 +33,7 @@
 static void *run(hashpipe_thread_args_t * args, int doCPU)
 {
     // Local aliases to shorten access to args fields
-    paper_input_databuf_t *db_in = (paper_input_databuf_t *)args->ibuf;
+    paper_gpu_input_databuf_t *db_in = (paper_gpu_input_databuf_t *)args->ibuf;
     paper_output_databuf_t *db_out = (paper_output_databuf_t *)args->obuf;
     hashpipe_status_t st = args->st;
     const char * status_key = args->thread_desc->skey;
