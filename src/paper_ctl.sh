@@ -12,7 +12,7 @@ intcount=4096
 intsync=
 
 function get_sync_mcnt() {
-  echo $(( $(check_hashpipe_status -I $instance_id -Q GPUMCNT 2>/dev/null) + 8192 ))
+  echo $(( $(hashpipe_check_status -I $instance_id -Q GPUMCNT 2>/dev/null) + 8192 ))
 }
 
 function start() {
@@ -26,13 +26,13 @@ function start() {
     fi
   fi
 
-  check_hashpipe_status -I $instance_id -k INTSYNC  -s $intsync
-  check_hashpipe_status -I $instance_id -k INTCOUNT -s $intcount
-  check_hashpipe_status -I $instance_id -k INTSTAT  -s start
+  hashpipe_check_status -I $instance_id -k INTSYNC  -s $intsync
+  hashpipe_check_status -I $instance_id -k INTCOUNT -s $intcount
+  hashpipe_check_status -I $instance_id -k INTSTAT  -s start
 }
 
 function stop() {
-  check_hashpipe_status -I $instance_id -k INTSTAT  -s stop
+  hashpipe_check_status -I $instance_id -k INTSTAT  -s stop
 }
 
 function help() {
