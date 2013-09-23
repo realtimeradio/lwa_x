@@ -73,8 +73,9 @@ int paper_fluff(const uint64_t const * const in, uint64_t * out)
   for(m=0; m<Nm; m++) {
     for(f=0; f<Nf; f++) {
         // Each F engine provides 32 samples per channel per time, which fluffs
-        // to 64 bytes, which equals two 256 byte words.
-        p_out = (__m256i *)out + m*Nt*Nc*Nf*2;
+        // to 64 bytes, which equals two 256 bit words.
+        // p_out = out + mcnt offset + feng offset
+        p_out = (__m256i *)out + m*Nt*Nc*Nf*2 + f*2;
         for(w=0; w<N_WORD128_PER_PACKET/2; w++) {
 
           // Load 128 bits (16 bytes) with _mm_stream_load_si128
