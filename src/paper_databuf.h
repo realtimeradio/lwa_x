@@ -98,9 +98,10 @@ typedef uint8_t paper_input_header_cache_alignment[
 #define Nc N_CHAN_PER_PACKET
 
 // Computes paper_input_databuf_t data word (uint64_t) offset for complex data
-// word (8 inputs) corresponding to the given parameters.
+// word corresponding to the given parameters.
+// NB: N_INPUTS_PER_FENGINE must be multiple of sizeof(uint64_t)
 #define paper_input_databuf_data_idx(m,f,t,c) \
-  (c+Nc*(t+Nt*(f+Nf*m)))
+  ((N_INPUTS_PER_FENGINE/sizeof(uint64_t))*(c+Nc*(t+Nt*(f+Nf*m))))
 
 typedef struct paper_input_block {
   paper_input_header_t header;
