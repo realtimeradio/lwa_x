@@ -171,25 +171,24 @@ then
   exit 1
 fi
 
-while [ -n "$1" ]
+for instidx in "$@"
 do
-  args="${instances[$1]}"
+  args="${instances[$instidx]}"
   if [ -n "${args}" ]
   then
     echo
-    echo Starting instance $1
-    init $1 $args &
-    echo Instance $1 pid $!
-  else
-    echo Instance $1 not defined for host $hostname
-  fi
-  shift
-  if [ -n "$1" ]
-  then
+    echo Starting instance $instidx
+    init $instidx $args &
+    echo Instance $instidx pid $!
+    # Sleep to let instance come up
     sleep 10
+  else
+    echo Instance $instidx not defined for host $hostname
   fi
 done
 
-# Final sleep to let last instance come up before we exit
-# (not really needed, but makes for cleaner terminal output).
-sleep 10
+# Zero out MISSEDPK counts
+for instidx in "$@"
+do
+  hashpipe_check_status -I $instidx -k MISSEDPK -s 0
+done
