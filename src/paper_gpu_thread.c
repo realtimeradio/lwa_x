@@ -170,8 +170,20 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
         int doDump = 0;
         // Dump if this is the last block or we are doing both CPU and GPU
         // (GPU and CPU test mode always dumps every input block)
-        if(db_in->block[curblock_in].header.mcnt == last_mcount || doCPU) {
+        if(db_in->block[curblock_in].header.mcnt >= last_mcount || doCPU) {
           doDump = 1;
+
+          // Check whether we missed the end of integration.  If we get a block
+          // whose mcnt is greater than last_mcount, then for some reason (e.g.
+          // networking problems) we didn't see a block whose mcnt was
+          // last_mcount.  This should "never" happen, but it has been seen to
+          // occur when the 10 GbE links have many errors.
+          if(db_in->block[curblock_in].header.mcnt > last_mcount) {
+            // Can't do much error recovery, so just log it.
+            fprintf(stderr, "--- mcnt=%06lx > last_mcnt=%06lx ---\n",
+                db_in->block[curblock_in].header.mcnt, last_mcount);
+          }
+
           // Wait for new output block to be free
           while ((rv=paper_output_databuf_wait_free(db_out, curblock_out)) != HASHPIPE_OK) {
               if (rv==HASHPIPE_TIMEOUT) {
@@ -185,11 +197,6 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
                   break;
               }
           }
-        } else if(db_in->block[curblock_in].header.mcnt > last_mcount) {
-          // Missed end of integration
-          // TODO Handle in a better way thn just logging
-          fprintf(stderr, "--- mcnt=%06lx > last_mcnt=%06lx ---\n",
-              db_in->block[curblock_in].header.mcnt, last_mcount);
         }
 
         clock_gettime(CLOCK_MONOTONIC, &start);
