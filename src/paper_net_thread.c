@@ -35,6 +35,7 @@ typedef struct {
 // previous packet).
 typedef struct {
     int initialized;
+    int32_t  self_xid;
     uint64_t mcnt_start;
     uint64_t mcnt_offset;
     uint64_t mcnt_prior;
@@ -180,6 +181,10 @@ int set_block_filled(paper_input_databuf_t *paper_input_databuf_p, block_info_t 
 	// as dropped packets.
 	block_missed_feng    = block_missed_pkt_cnt / N_PACKETS_PER_BLOCK_PER_F;
 	block_missed_mod_cnt = block_missed_pkt_cnt % N_PACKETS_PER_BLOCK_PER_F;
+
+	// Reinitialize our XID to -1 (unknown until read from status buffer)
+	binfo->self_xid = -1;
+
 	hashpipe_status_lock_busywait_safe(st_p);
 	hputu4(st_p->buf, "NETBKOUT", block_i);
 	hputu4(st_p->buf, "MISSEDFE", block_missed_feng);
@@ -191,6 +196,8 @@ int set_block_filled(paper_input_databuf_t *paper_input_databuf_p, block_info_t 
 	//  fprintf(stderr, "got %d packets instead of %d\n",
 	//	    binfo->block_active[block_i], N_PACKETS_PER_BLOCK);
 	}
+	// Update our XID from status buffer
+	hgeti4(st_p->buf, "XID", &binfo->self_xid);
 	hashpipe_status_unlock_safe(st_p);
 
     	binfo->block_active[block_i] = 0;
@@ -212,6 +219,11 @@ static inline int calc_block_indexes(block_info_t *binfo, packet_header_t * pkt_
 	hashpipe_error(__FUNCTION__,
 		"current packet FID %u out of range (0-%d)",
 		pkt_header->fid, Nf-1);
+	return -1;
+    } else if(pkt_header->xid != binfo->self_xid && binfo->self_xid != -1) {
+	hashpipe_error(__FUNCTION__,
+		"unexpected packet XID %d (expected %d)",
+		pkt_header->xid, binfo->self_xid);
 	return -1;
     } else {
 	binfo->mcnt_offset = pkt_header->mcnt - binfo->mcnt_start;
@@ -272,7 +284,14 @@ static inline void initialize_block_info(paper_input_databuf_t *paper_input_data
 			set_block_filled(paper_input_databuf_p, binfo, i);
 		}
 	}
-    }		
+    }
+
+    // Initialize our XID to -1 (unknown until read from status buffer)
+    binfo->self_xid = -1;
+    // Update our XID from status buffer
+    hashpipe_status_lock_busywait_safe(st_p);
+    hgeti4(st_p->buf, "XID", &binfo->self_xid);
+    hashpipe_status_unlock_safe(st_p);
 
     // On program startup block_i will be zero.  If we are restarting,  this will set
     // us up to restart at the beginning of block_i.
