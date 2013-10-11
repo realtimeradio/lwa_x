@@ -208,6 +208,11 @@ static inline int calc_block_indexes(block_info_t *binfo, packet_header_t * pkt_
 	    //hashpipe_error(__FUNCTION__, "current packet mcnt less than mcnt start");
 	    //pthread_exit(NULL);
 	    return -1;
+    } else if(pkt_header->fid >= Nf) {
+	hashpipe_error(__FUNCTION__,
+		"current packet FID %u out of range (0-%d)",
+		pkt_header->fid, Nf-1);
+	return -1;
     } else {
 	binfo->mcnt_offset = pkt_header->mcnt - binfo->mcnt_start;
     }
