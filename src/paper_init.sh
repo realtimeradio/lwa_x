@@ -161,8 +161,9 @@ function init() {
     -c $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
     -c $outcpu paper_gpu_output_thread \
+     < /dev/null \
     1> px${mypx}.out.$instance \
-    2> px${mypx}.err.$instance
+    2> px${mypx}.err.$instance &
 }
 
 if [ -z "$1" ]
@@ -178,7 +179,7 @@ do
   then
     echo
     echo Starting instance px$mypx/$instidx
-    init $instidx $args &
+    init $instidx $args
     echo Instance px$mypx/$instidx pid $!
     # Sleep to let instance come up
     sleep 10
