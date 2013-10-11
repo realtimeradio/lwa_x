@@ -177,9 +177,9 @@ do
   if [ -n "${args}" ]
   then
     echo
-    echo Starting instance $instidx
+    echo Starting instance px$mypx/$instidx
     init $instidx $args &
-    echo Instance $instidx pid $!
+    echo Instance px$mypx/$instidx pid $!
     # Sleep to let instance come up
     sleep 10
   else
@@ -190,5 +190,6 @@ done
 # Zero out MISSEDPK counts
 for instidx in "$@"
 do
+  echo Resetting MISSEDPK counts for px$mypx/$instidx
   hashpipe_check_status -I $instidx -k MISSEDPK -s 0
 done
