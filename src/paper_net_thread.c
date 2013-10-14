@@ -401,11 +401,32 @@ static void *run(hashpipe_thread_args_t * args)
     hashpipe_status_t st = args->st;
     const char * status_key = args->thread_desc->skey;
 
+    st_p = &st;	// allow global (this source file) access to the status buffer
+
+    // Flag that holds off the net thread
+    int holdoff = 1;
+
+    // Force ourself into the hold off state
+    hashpipe_status_lock_safe(&st);
+    hputi4(st.buf, "NETHOLD", 1);
+    hashpipe_status_unlock_safe(&st);
+
+    while(holdoff) {
+	// We're not in any hurry to startup
+	sleep(1);
+	hashpipe_status_lock_safe(&st);
+	// Look for NETHOLD value
+	hgeti4(st.buf, "NETHOLD", &holdoff);
+	if(!holdoff) {
+	    // Done holding, so delete the key
+	    hdel(st.buf, "NETHOLD");
+	}
+	hashpipe_status_unlock_safe(&st);
+    }
+
 #ifdef DEBUG_SEMS
     fprintf(stderr, "s/tid %lu/NET/' <<.\n", pthread_self());
 #endif
-
-    st_p = &st;		// allow global (this source file) access to the status buffer
 
 #if 0
     /* Copy status buffer */
@@ -421,7 +442,7 @@ static void *run(hashpipe_thread_args_t * args)
 	.bindport = 8511,
 	.packet_size = 8200
     };
-    hashpipe_status_lock_busywait_safe(&st);
+    hashpipe_status_lock_safe(&st);
     // Get info from status buffer if present (no change if not present)
     hgets(st.buf, "BINDHOST", 80, up.bindhost);
     hgeti4(st.buf, "BINDPORT", &up.bindport);
