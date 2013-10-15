@@ -481,6 +481,7 @@ static void *run(hashpipe_thread_args_t * args)
     float ns_per_proc = 0.0;
     struct timespec start, stop;
     struct timespec recv_start, recv_stop;
+
     while (run_threads()) {
 
 #ifndef TIMING_TEST
@@ -492,19 +493,28 @@ static void *run(hashpipe_thread_args_t * args)
 	    clock_gettime(CLOCK_MONOTONIC, &recv_stop);
 	} while (p.packet_size == -1 && (errno == EAGAIN || errno == EWOULDBLOCK) && run_threads());
 	if(!run_threads()) break;
-        if (up.packet_size != p.packet_size) {
-            if (p.packet_size != -1) {
-                #ifdef DEBUG_NET
-                hashpipe_warn("paper_net_thread", "Incorrect pkt size (%d)", p.packet_size);
-                #endif
-                continue;
-            } else {
+	// Make sure received packet size (p.packet_size) matches expected
+	// packet size (up.packet_size).  Allow for optional 8 byte CRC in
+	// received packet.  Zlib's crc32 function is too slow to use in
+	// realtime, so CRCs cannot be checked on the fly.  If data errors are
+	// suspected, a separate CRC checking utility should be used to read
+	// the packets from the network and verify CRCs.
+        if (up.packet_size != p.packet_size && up.packet_size != p.packet_size-8) {
+	    // If an error was returned instead of a valid packet size
+            if (p.packet_size == -1) {
+		// Log error and exit
                 hashpipe_error("paper_net_thread",
                         "hashpipe_udp_recv returned error");
                 perror("hashpipe_udp_recv");
                 pthread_exit(NULL);
+            } else {
+		// Log warning and ignore wrongly sized packet
+                #ifdef DEBUG_NET
+                hashpipe_warn("paper_net_thread", "Incorrect pkt size (%d)", p.packet_size);
+                #endif
+                continue;
             }
-        }
+	}
 #endif
 	packet_count++;
 
