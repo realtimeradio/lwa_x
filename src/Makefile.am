@@ -16,7 +16,8 @@ paper_threads = paper_fake_net_thread.c       \
 		paper_gpu_output_thread.c     \
 		paper_gpu_thread.c            \
 		paper_fluff_thread.c          \
-		paper_net_thread.c
+		paper_net_thread.c            \
+		paper_crc_thread.c
 
 paper_fluff = paper_fluff.h \
 	      paper_fluff.c
@@ -31,6 +32,7 @@ paper_gpu_la_LDFLAGS += -L"@HASHPIPE_LIBDIR@" -Wl,-rpath,"@HASHPIPE_LIBDIR@"
 
 # Installed scripts
 dist_bin_SCRIPTS = paper_init.sh \
+		   paper_crc_init.sh \
 		   xeng_init.sh
 
 # Non-installed test programs

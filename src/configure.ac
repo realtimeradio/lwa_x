@@ -27,9 +27,10 @@ AX_CHECK_XGPUINFO
 # Checks for libraries.
 AC_CHECK_LIB([pthread], [pthread_create])
 AC_CHECK_LIB([rt], [clock_gettime])
+AC_CHECK_LIB([z], [crc32])
 
 # Checks for header files.
-AC_CHECK_HEADERS([netdb.h stdint.h stdlib.h string.h sys/socket.h sys/time.h unistd.h])
+AC_CHECK_HEADERS([netdb.h stdint.h stdlib.h string.h sys/socket.h sys/time.h unistd.h zlib.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_C_INLINE
@@ -43,7 +44,7 @@ AC_TYPE_UINT8_T
 
 # Checks for library functions.
 AC_FUNC_MALLOC
-AC_CHECK_FUNCS([clock_gettime memset socket])
+AC_CHECK_FUNCS([clock_gettime memset socket crc32])
 
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
