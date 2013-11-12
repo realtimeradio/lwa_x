@@ -33,7 +33,9 @@ paper_gpu_la_LDFLAGS += -L"@HASHPIPE_LIBDIR@" -Wl,-rpath,"@HASHPIPE_LIBDIR@"
 # Installed scripts
 dist_bin_SCRIPTS = paper_init.sh \
 		   paper_crc_init.sh \
-		   xeng_init.sh
+		   xeng_init.sh \
+		   xtor_down.sh \
+		   xtor_up.sh
 
 # Non-installed test programs
 noinst_PROGRAMS = paper_fluff_test
