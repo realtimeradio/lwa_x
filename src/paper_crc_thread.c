@@ -78,18 +78,18 @@ static void *run(hashpipe_thread_args_t * args)
 
     // Force ourself into the hold off state
     hashpipe_status_lock_safe(&st);
-    hputi4(st.buf, "CRCHOLD", 1);
+    hputi4(st.buf, "NETHOLD", 1);
     hashpipe_status_unlock_safe(&st);
 
     while(holdoff) {
 	// We're not in any hurry to startup
 	sleep(1);
 	hashpipe_status_lock_safe(&st);
-	// Look for CRCHOLD value
-	hgeti4(st.buf, "CRCHOLD", &holdoff);
+	// Look for NETHOLD value
+	hgeti4(st.buf, "NETHOLD", &holdoff);
 	if(!holdoff) {
 	    // Done holding, so delete the key
-	    hdel(st.buf, "CRCHOLD");
+	    hdel(st.buf, "NETHOLD");
 	}
 	hashpipe_status_unlock_safe(&st);
     }
