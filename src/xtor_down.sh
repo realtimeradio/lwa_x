@@ -1,22 +1,52 @@
 #!/bin/bash
 
-# Script to totally take down the paper correlator X engines.
-#
-# Usage: xtor_down.sh [SLICES]
-#
-# SLICES is optional.  It is a list of numbers corresponding to pxN hosts.  If
-# not given, it defaults to {1..8}, i.e. all pxN hosts for PSA256.
-#
-# Examples:
-#
-#   # Shutdown px1..px8
-#   $ xtor_down.sh
-#
-#   # Shutdown px3 only
-#   $ xtor_down.sh 3
-#
-#   # Shutdown px1, px2, and px3 only
-#   $ xtor_down.sh 1 2 3
+show_help_and_exit() {
+cat <<.
+Script to totally take down the paper correlator X engines.
+
+Usage: xtor_down.sh [-h] [SLICES]
+
+The -h option shows this help message.
+
+SLICES is optional.  It is a list of numbers corresponding to pxN hosts.  If
+not given, it defaults to {1..8}, i.e. all pxN hosts for PSA256.
+
+Examples:
+
+  # Shutdown px1..px8
+  $ xtor_down.sh
+
+  # Shutdown px3 only
+  $ xtor_down.sh 3
+
+  # Shutdown px1, px2, and px3 only
+  $ xtor_down.sh 1 2 3
+.
+exit $1
+}
+
+while getopts :h-: opt
+do
+  case $opt in
+    h)
+      show_help_and_exit 0
+      ;;
+    -)
+      if [ $OPTARG == 'help' ]
+      then
+        show_help_and_exit 0
+      else
+        echo Invalid option: --$OPTARG
+        show_help_and_exit 1
+      fi
+      ;;
+    ?)
+      echo Invalid option: -$OPTARG
+      show_help_and_exit 1
+      ;;
+  esac
+done
+shift $((OPTIND-1))
 
 # Name of PAPER server
 PAPER=paper1

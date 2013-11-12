@@ -1,32 +1,37 @@
 #!/bin/bash
 
-# Script to bring up the PAPER correlator.  Assumes that correlator is
-# completely down (e.g. after power up or after running xtor_down.sh).
+show_help_and_exit() {
+cat <<.
+Script to bring up the PAPER correlator.  Assumes that correlator is
+completely down (e.g. after power up or after running xtor_down.sh).
 
-# Usage: xtor_up.sh [-f [-m MODE]] [-x|-c] [SLICES]
+Usage: xtor_up.sh [-f [-m MODE]] [-x|-c] [SLICES]
 
-# Passing the "-f" option brings up the F engines.
-# Passing the "-x" option brings up the X engines.
-# Passing the "-c" option brings up the CRC check engines.
-# Passing both -x and -c is not allowed.
-#
-# Passing -m MODE allows setting the corner turner mode of the F engines.
-#
-# MODE=0 == 8-way correlator (8 ROACH2s + 8 X Boxes)
-# MODE=1 == 4-way correlator (4 ROACH2s + 4 X Boxes)
-# MODE=2 == 2-way correlator (2 ROACH2s + 4 X Boxes)
-# MODE=3 == 1-way correlator (1 ROACH2  + 1 X Boxes)
-#
-# Examples:
-#
-#   # Bring up the PAPER correlator
-#   $ xtor_up.sh
-#
-#   # Bring up slice 1 F engine only (pf1) with corner tuner mode 3
-#   $ xtor_up.sh -f -m 3 1
-#
-#   # Bring up slices 1..4 CRC check engines only (px1..px4)
-#   $ xtor_up.sh -c 1..4
+Passing the "-f" option brings up the F engines.
+Passing the "-x" option brings up the X engines.
+Passing the "-c" option brings up the CRC check engines.
+Passing both -x and -c is not allowed.
+
+Passing -m MODE allows setting the corner turner mode of the F engines.
+
+MODE=0 == 8-way correlator (8 ROACH2s + 8 X Boxes)
+MODE=1 == 4-way correlator (4 ROACH2s + 4 X Boxes)
+MODE=2 == 2-way correlator (2 ROACH2s + 4 X Boxes)
+MODE=3 == 1-way correlator (1 ROACH2  + 1 X Boxes)
+
+Examples:
+
+  # Bring up the PAPER correlator
+  $ xtor_up.sh
+
+  # Bring up slice 1 F engine only (pf1) with corner tuner mode 3
+  $ xtor_up.sh -f -m 3 1
+
+  # Bring up slices 1..4 CRC check engines only (px1..px4)
+  $ xtor_up.sh -c 1..4
+.
+exit $1
+}
 
 do_f=
 do_x=
@@ -35,7 +40,7 @@ paper_init=paper_init.sh
 xc=X
 ctmode=0
 
-while getopts :fxcm: opt
+while getopts :fxcm:h-: opt
 do
   case $opt in
     f)
@@ -52,10 +57,21 @@ do
       paper_init=paper_crc_init.sh
       xc=C
       ;;
+    h)
+      show_help_and_exit 0
+      ;;
+    -)
+      if [ $OPTARG == 'help' ]
+      then
+        show_help_and_exit 0
+      else
+        echo Invalid option: --$OPTARG
+        show_help_and_exit 1
+      fi
+      ;;
     ?)
       echo Invalid option: -$OPTARG
-      echo usage: `basename $0` [-f] [-x] [-c] [SLICES]
-      exit
+      show_help_and_exit 1
       ;;
   esac
 done
