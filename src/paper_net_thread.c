@@ -23,6 +23,14 @@
 
 #define DEBUG_NET
 
+#ifndef MIN
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
+
 typedef struct {
     uint64_t mcnt;
     int      fid;	// Fengine ID
@@ -473,12 +481,22 @@ static void *run(hashpipe_thread_args_t * args)
 
     /* Main loop */
     uint64_t packet_count = 0;
-    uint64_t elapsed_wait_ns = 0;
-    uint64_t elapsed_recv_ns = 0;
-    uint64_t elapsed_proc_ns = 0;
-    float ns_per_wait = 0.0;
-    float ns_per_recv = 0.0;
-    float ns_per_proc = 0.0;
+    uint64_t wait_ns = 0; // ns for most recent wait
+    uint64_t recv_ns = 0; // ns for most recent recv
+    uint64_t proc_ns = 0; // ns for most recent proc
+    uint64_t min_wait_ns = 99999; // min ns per single wait
+    uint64_t min_recv_ns = 99999; // min ns per single recv
+    uint64_t min_proc_ns = 99999; // min ns per single proc
+    uint64_t max_wait_ns = 0;     // max ns per single wait
+    uint64_t max_recv_ns = 0;     // max ns per single recv
+    uint64_t max_proc_ns = 0;     // max ns per single proc
+    uint64_t elapsed_wait_ns = 0; // cumulative wait time per block
+    uint64_t elapsed_recv_ns = 0; // cumulative recv time per block
+    uint64_t elapsed_proc_ns = 0; // cumulative proc time per block
+    uint64_t status_ns = 0; // User to fetch ns values from status buffer
+    float ns_per_wait = 0.0; // Average ns per wait over 1 block
+    float ns_per_recv = 0.0; // Average ns per recv over 1 block
+    float ns_per_proc = 0.0; // Average ns per proc over 1 block
     struct timespec start, stop;
     struct timespec recv_start, recv_stop;
 
@@ -522,16 +540,28 @@ static void *run(hashpipe_thread_args_t * args)
         const uint64_t mcnt = write_paper_packet_to_blocks((paper_input_databuf_t *)db, &p);
 
 	clock_gettime(CLOCK_MONOTONIC, &stop);
-	elapsed_wait_ns += ELAPSED_NS(recv_start, start);
-	elapsed_recv_ns += ELAPSED_NS(start, recv_stop);
-	elapsed_proc_ns += ELAPSED_NS(recv_stop, stop);
+	wait_ns = ELAPSED_NS(recv_start, start);
+	recv_ns = ELAPSED_NS(start, recv_stop);
+	proc_ns = ELAPSED_NS(recv_stop, stop);
+	elapsed_wait_ns += wait_ns;
+	elapsed_recv_ns += recv_ns;
+	elapsed_proc_ns += proc_ns;
+	// Update min max values
+	min_wait_ns = MIN(wait_ns, min_wait_ns);
+	min_recv_ns = MIN(recv_ns, min_recv_ns);
+	min_proc_ns = MIN(proc_ns, min_proc_ns);
+	max_wait_ns = MAX(wait_ns, max_wait_ns);
+	max_recv_ns = MAX(recv_ns, max_recv_ns);
+	max_proc_ns = MAX(proc_ns, max_proc_ns);
 
         if(mcnt != -1) {
             // Update status
             ns_per_wait = (float)elapsed_wait_ns / packet_count;
             ns_per_recv = (float)elapsed_recv_ns / packet_count;
             ns_per_proc = (float)elapsed_proc_ns / packet_count;
+
             hashpipe_status_lock_busywait_safe(&st);
+
             hputu8(st.buf, "NETMCNT", mcnt);
 	    // Gbps = bits_per_packet / ns_per_packet
 	    // (N_BYTES_PER_PACKET excludes header, so +8 for the header)
@@ -539,7 +569,31 @@ static void *run(hashpipe_thread_args_t * args)
             hputr4(st.buf, "NETWATNS", ns_per_wait);
             hputr4(st.buf, "NETRECNS", ns_per_recv);
             hputr4(st.buf, "NETPRCNS", ns_per_proc);
+
+	    // Get and put min and max values.  The "get-then-put" allows the
+	    // user to reset the min max values in the status buffer.
+	    hgeti8(st.buf, "NETWATMN", (long long *)&status_ns);
+	    min_wait_ns = MIN(min_wait_ns, status_ns);
+            hgeti8(st.buf, "NETRECMN", (long long *)&status_ns);
+	    min_wait_ns = MIN(min_recv_ns, status_ns);
+            hgeti8(st.buf, "NETPRCMN", (long long *)&status_ns);
+	    min_wait_ns = MIN(min_proc_ns, status_ns);
+            hgeti8(st.buf, "NETWATMX", (long long *)&status_ns);
+	    max_wait_ns = MAX(max_wait_ns, status_ns);
+            hgeti8(st.buf, "NETPRCMX", (long long *)&status_ns);
+	    max_wait_ns = MAX(max_recv_ns, status_ns);
+            hgeti8(st.buf, "NETRECMX", (long long *)&status_ns);
+	    max_wait_ns = MAX(max_proc_ns, status_ns);
+
+            hputi8(st.buf, "NETWATMN", min_wait_ns);
+            hputi8(st.buf, "NETRECMN", min_recv_ns);
+            hputi8(st.buf, "NETPRCMN", min_proc_ns);
+            hputi8(st.buf, "NETWATMX", max_wait_ns);
+            hputi8(st.buf, "NETRECMX", max_recv_ns);
+            hputi8(st.buf, "NETPRCMX", max_proc_ns);
+
             hashpipe_status_unlock_safe(&st);
+
 	    // Start new average
 	    elapsed_wait_ns = 0;
 	    elapsed_recv_ns = 0;
