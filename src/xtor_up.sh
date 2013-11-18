@@ -146,5 +146,11 @@ then
 
   # Turn off HOLD flag on all instances
   echo Enabling all X Engine network threads
-  redis-cli -h redishost publish hashpipe:///set NETHOLD=0
+  for i in 3 2 1 0
+  do
+    for x in $xhosts
+    do
+      redis-cli -h redishost publish hashpipe://$x/$i/set NETHOLD=0
+    done
+  done
 fi
