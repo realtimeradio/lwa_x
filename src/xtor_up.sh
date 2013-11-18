@@ -150,7 +150,7 @@ then
   do
     for x in $xhosts
     do
-      redis-cli -h redishost publish hashpipe://$x/$i/set NETHOLD=0
+      redis-cli -h redishost publish hashpipe://$x/$i/set NETHOLD=0 > /dev/null
     done
   done
 
@@ -164,8 +164,8 @@ then
     do
       for k in NET{WAT,REC,PRC}
       do
-        redis-cli -h redishost publish hashpipe://$x/$i/set ${k}MN=99999
-        redis-cli -h redishost publish hashpipe://$x/$i/set ${k}MX=0
+        redis-cli -h redishost publish hashpipe://$x/$i/set ${k}MN=99999 > /dev/null
+        redis-cli -h redishost publish hashpipe://$x/$i/set ${k}MX=0 > /dev/null
       done
     done
   done
