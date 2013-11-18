@@ -133,7 +133,12 @@ then
   echo Starting hashpipe-redis gateways on $xhosts
   for x in $xhosts
   do
-    ssh $x hashpipe_redis_gateway.rb -g $x
+    # Start two gateways on each host: one gateway per NUMA node, two instances
+    # per gateway.  The gateways run on the OS core (0 or 6)
+    ssh $x "
+      taskset 0x0001 hashpipe_redis_gateway.rb -g $x -i 0,1;
+      taskset 0x0040 hashpipe_redis_gateway.rb -g $x -i 2,3
+    "
   done
 
   # Let the gateways come up
