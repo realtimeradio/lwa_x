@@ -153,4 +153,20 @@ then
       redis-cli -h redishost publish hashpipe://$x/$i/set NETHOLD=0
     done
   done
+
+  sleep 1
+
+  # Reset all NET{WAT,REC,PRC}M{N,X} counters
+  echo Resetting all network stats counters
+  for i in 3 2 1 0
+  do
+    for x in $xhosts
+    do
+      for k in NET{WAT,REC,PRC}
+      do
+        redis-cli -h redishost publish hashpipe://$x/$i/set ${k}MN=99999
+        redis-cli -h redishost publish hashpipe://$x/$i/set ${k}MX=0
+      done
+    done
+  done
 fi
