@@ -45,8 +45,6 @@ typedef struct {
     int initialized;
     int32_t  self_xid;
     uint64_t mcnt_start;
-    uint64_t mcnt_offset;
-    uint64_t mcnt_prior;
     int out_of_seq_cnt;
     int block_i;
     // The m,x,f fields hold three of the five dimensional indices for
@@ -69,8 +67,8 @@ void print_pkt_header(packet_header_t * pkt_header) {
 }
 
 void print_block_info(block_info_t * binfo) {
-    printf("binfo : mcnt_start %012lx mcnt_offset %012lx block_i %d m=%02d f=%d\n",
-           binfo->mcnt_start, binfo->mcnt_offset, binfo->block_i, binfo->m, binfo->f);
+    printf("binfo : mcnt_start %012lx block_i %d m=%02d f=%d\n",
+           binfo->mcnt_start, binfo->block_i, binfo->m, binfo->f);
 }
 
 void print_block_active(block_info_t * binfo) {
@@ -92,6 +90,12 @@ void print_ring_mcnts(paper_input_databuf_t *paper_input_databuf_p) {
     for(i=0; i < N_INPUT_BLOCKS; i++) {
 	printf("block %d mcnt %012lx\n", i, paper_input_databuf_p->block[i].header.mcnt);
     }
+}
+
+// Returns physical block number for given mcnt
+static inline int block_for_mcnt(uint64_t mcnt)
+{
+    return (mcnt / Nm) % N_INPUT_BLOCKS;
 }
 
 // Returns (block_i - n) modulo N_INPUT_BLOCKS
@@ -152,78 +156,71 @@ static void die(paper_input_databuf_t *paper_input_databuf_p, block_info_t *binf
 }
 #endif
 
-int set_block_filled(paper_input_databuf_t *paper_input_databuf_p, block_info_t *binfo, int block_i)
+// This sets the "current" block to be marked as filled.  The current block is
+// the block corresponding to binfo->mcnt_start.  Returns mcnt of the block
+// being marked filled.
+static uint64_t set_block_filled(paper_input_databuf_t *paper_input_databuf_p, block_info_t *binfo)
 {
     static int last_filled = -1;
 
-    uint32_t block_missed_pkt_cnt=0, block_missed_mod_cnt, block_missed_feng, missed_pkt_cnt=0;
+    uint32_t block_missed_pkt_cnt=N_PACKETS_PER_BLOCK, block_missed_mod_cnt, block_missed_feng, missed_pkt_cnt=0;
 
-    if(binfo->block_active[block_i]) {
+    uint32_t block_i = block_for_mcnt(binfo->mcnt_start);
 
-	// if all packets are accounted for, mark this block as good
-	if(binfo->block_active[block_i] == N_PACKETS_PER_BLOCK) {
-	    paper_input_databuf_p->block[block_i].header.good_data = 1;
-	}
-
-	last_filled = (last_filled+1) % N_INPUT_BLOCKS;
-	if(last_filled != block_i) {
-	    printf("block %d being marked filled, but expected block %d!\n", block_i, last_filled);
-#ifdef DIE_ON_OUT_OF_SEQ_FILL
-	    die(paper_input_databuf_p, binfo);
-#else
-	    binfo->initialized = 0;
-	    return 0;
-#endif
-	}
-
-	if(paper_input_databuf_set_filled(paper_input_databuf_p, block_i) != HASHPIPE_OK) {
-	    hashpipe_error(__FUNCTION__, "error waiting for databuf filled call");
-	    pthread_exit(NULL);
-	    return 0;
-	}
-
-	block_missed_pkt_cnt = N_PACKETS_PER_BLOCK - binfo->block_active[block_i];
-	// If we missed more than N_PACKETS_PER_BLOCK_PER_F, then assume we
-	// are missing one or more F engines.  Any missed packets beyond an
-	// integer multiple of N_PACKETS_PER_BLOCK_PER_F will be considered
-	// as dropped packets.
-	block_missed_feng    = block_missed_pkt_cnt / N_PACKETS_PER_BLOCK_PER_F;
-	block_missed_mod_cnt = block_missed_pkt_cnt % N_PACKETS_PER_BLOCK_PER_F;
-
-	// Reinitialize our XID to -1 (unknown until read from status buffer)
-	binfo->self_xid = -1;
-
-	hashpipe_status_lock_busywait_safe(st_p);
-	hputu4(st_p->buf, "NETBKOUT", block_i);
-	hputu4(st_p->buf, "MISSEDFE", block_missed_feng);
-	if(block_missed_mod_cnt) {
-	    // Increment MISSEDPK by number of missed packets for this block
-	    hgetu4(st_p->buf, "MISSEDPK", &missed_pkt_cnt);
-	    missed_pkt_cnt += block_missed_mod_cnt;
-	    hputu4(st_p->buf, "MISSEDPK", missed_pkt_cnt);
-	//  fprintf(stderr, "got %d packets instead of %d\n",
-	//	    binfo->block_active[block_i], N_PACKETS_PER_BLOCK);
-	}
-	// Update our XID from status buffer
-	hgeti4(st_p->buf, "XID", &binfo->self_xid);
-	hashpipe_status_unlock_safe(st_p);
-
-    	binfo->block_active[block_i] = 0;
+    // If all packets are accounted for, mark this block as good
+    if(binfo->block_active[block_i] == N_PACKETS_PER_BLOCK) {
+	paper_input_databuf_p->block[block_i].header.good_data = 1;
     }
 
-    return block_missed_pkt_cnt;
+    // Validate that we're filling blocks in the proper sequence
+    last_filled = (last_filled+1) % N_INPUT_BLOCKS;
+    if(last_filled != block_i) {
+	printf("block %d being marked filled, but expected block %d!\n", block_i, last_filled);
+#ifdef DIE_ON_OUT_OF_SEQ_FILL
+	die(paper_input_databuf_p, binfo);
+#endif
+    }
+
+    // Set the block as filled
+    if(paper_input_databuf_set_filled(paper_input_databuf_p, block_i) != HASHPIPE_OK) {
+	hashpipe_error(__FUNCTION__, "error waiting for databuf filled call");
+	pthread_exit(NULL);
+    }
+
+    // Calculate missing packets.
+    block_missed_pkt_cnt = N_PACKETS_PER_BLOCK - binfo->block_active[block_i];
+    // If we missed more than N_PACKETS_PER_BLOCK_PER_F, then assume we
+    // are missing one or more F engines.  Any missed packets beyond an
+    // integer multiple of N_PACKETS_PER_BLOCK_PER_F will be considered
+    // as dropped packets.
+    block_missed_feng    = block_missed_pkt_cnt / N_PACKETS_PER_BLOCK_PER_F;
+    block_missed_mod_cnt = block_missed_pkt_cnt % N_PACKETS_PER_BLOCK_PER_F;
+
+    // Reinitialize our XID to -1 (unknown until read from status buffer)
+    binfo->self_xid = -1;
+
+    // Update status buffer
+    hashpipe_status_lock_busywait_safe(st_p);
+    hputu4(st_p->buf, "NETBKOUT", block_i);
+    hputu4(st_p->buf, "MISSEDFE", block_missed_feng);
+    if(block_missed_mod_cnt) {
+	// Increment MISSEDPK by number of missed packets for this block
+	hgetu4(st_p->buf, "MISSEDPK", &missed_pkt_cnt);
+	missed_pkt_cnt += block_missed_mod_cnt;
+	hputu4(st_p->buf, "MISSEDPK", missed_pkt_cnt);
+    //  fprintf(stderr, "got %d packets instead of %d\n",
+    //	    binfo->block_active[block_i], N_PACKETS_PER_BLOCK);
+    }
+    // Update our XID from status buffer
+    hgeti4(st_p->buf, "XID", &binfo->self_xid);
+    hashpipe_status_unlock_safe(st_p);
+
+    return binfo->mcnt_start;
 }
 
 static inline int calc_block_indexes(block_info_t *binfo, packet_header_t * pkt_header)
 {
-    if(pkt_header->mcnt < binfo->mcnt_start) {
-	char msg[120];
-	sprintf(msg, "current packet mcnt %012lx less than mcnt start %012lx", pkt_header->mcnt, binfo->mcnt_start);
-	    hashpipe_error(__FUNCTION__, msg);
-	    //hashpipe_error(__FUNCTION__, "current packet mcnt less than mcnt start");
-	    //pthread_exit(NULL);
-	    return -1;
-    } else if(pkt_header->fid >= Nf) {
+    if(pkt_header->fid >= Nf) {
 	hashpipe_error(__FUNCTION__,
 		"current packet FID %u out of range (0-%d)",
 		pkt_header->fid, Nf-1);
@@ -233,65 +230,48 @@ static inline int calc_block_indexes(block_info_t *binfo, packet_header_t * pkt_
 		"unexpected packet XID %d (expected %d)",
 		pkt_header->xid, binfo->self_xid);
 	return -1;
-    } else {
-	binfo->mcnt_offset = pkt_header->mcnt - binfo->mcnt_start;
     }
 
-    binfo->block_i     = (binfo->mcnt_offset) / N_SUB_BLOCKS_PER_INPUT_BLOCK % N_INPUT_BLOCKS;
-    binfo->m = (binfo->mcnt_offset) % Nm;
+    binfo->m = pkt_header->mcnt % Nm;
     binfo->f = pkt_header->fid;
 
     return 0;
 }
 
-#define MAX_MCNT_DIFF 64
-static inline int out_of_seq_mcnt(block_info_t * binfo, uint64_t pkt_mcnt) {
-// mcnt rollovers are seen and treated like any other out of sequence mcnt
+// This allows for 2 out of sequence packets from each F engine (in a row)
+#define MAX_OUT_OF_SEQ (2*Nf)
 
-    if(abs(pkt_mcnt - binfo->mcnt_prior) <= MAX_MCNT_DIFF) {
-        binfo->mcnt_prior = pkt_mcnt;
-    	binfo->out_of_seq_cnt = 0;
-	return 0;
-    } else {
-	printf("Out of seq : mcnt jumps from %012lx to %012lx\n", binfo->mcnt_prior, pkt_mcnt);
-    	binfo->out_of_seq_cnt++;
-	return 1;
-    }
-}
+// This allows packets to be two full databufs late without being considered
+// out of sequence.
+#define LATE_PKT_MCNT_THRESHOLD (2*Nm*N_INPUT_BLOCKS)
 
-#define MAX_OUT_OF_SEQ 5
-static inline int handle_out_of_seq_mcnt(block_info_t * binfo) {
+// Initialize a block by clearing its "good data" flag and saving the first
+// (i.e. earliest) mcnt of the block.  Note that mcnt does not have to be a
+// multiple of Nm (number of mcnts per block).  In theory, the block's data
+// could be cleared as well, but that takes time and is largely unnecessary in
+// a properly functionong system.
+static inline void initialize_block(paper_input_databuf_t * paper_input_databuf_p, uint64_t mcnt)
+{
+    int block_i = block_for_mcnt(mcnt);
 
-    if(binfo->out_of_seq_cnt > MAX_OUT_OF_SEQ) {
-	printf("exceeded max (%d) out of sequence mcnts - restarting\n", MAX_OUT_OF_SEQ);
-	binfo->initialized = 0;
-    }
-    return -1;
-}
-
-static inline void initialize_block(paper_input_databuf_t * paper_input_databuf_p, block_info_t * binfo, uint64_t pkt_mcnt) {
-
-    paper_input_databuf_p->block[binfo->block_i].header.good_data = 0;
+    paper_input_databuf_p->block[block_i].header.good_data = 0;
     // Round pkt_mcnt down to nearest multiple of Nm
-    paper_input_databuf_p->block[binfo->block_i].header.mcnt = pkt_mcnt - (pkt_mcnt%Nm);
+    paper_input_databuf_p->block[block_i].header.mcnt = mcnt - (mcnt%Nm);
 }
 
-static inline void initialize_block_info(paper_input_databuf_t *paper_input_databuf_p, block_info_t * binfo, uint64_t pkt_mcnt) {
+// This function must be called once and only once per block_info structure!
+// Subsequent calls are no-ops.
+static inline void initialize_block_info(block_info_t * binfo) {
 
     int i;
 
-    // We might be restarting so mark all currently active blocks, with the exception
-    // of block_i, as filled. We will restart at block_i.  On program startup, this loop
-    // as no functional effect as no blocks are active and all block_active elements are 0.
+    // If this block_info structure has already been initialized
+    if(binfo->initialized) {
+	return;
+    }
+
     for(i = 0; i < N_INPUT_BLOCKS; i++) {
-	if(i == binfo->block_i) {
-		binfo->block_active[i] = 0;	
-	} else {
-    		if(binfo->block_active[i]) {
-			paper_input_databuf_p->block[i].header.good_data = 0;   // all data are bad at this point
-			set_block_filled(paper_input_databuf_p, binfo, i);
-		}
-	}
+	binfo->block_active[i] = 0;
     }
 
     // Initialize our XID to -1 (unknown until read from status buffer)
@@ -301,11 +281,10 @@ static inline void initialize_block_info(paper_input_databuf_t *paper_input_data
     hgeti4(st_p->buf, "XID", &binfo->self_xid);
     hashpipe_status_unlock_safe(st_p);
 
-    // On program startup block_i will be zero.  If we are restarting,  this will set
-    // us up to restart at the beginning of block_i.
-    binfo->mcnt_start = pkt_mcnt - binfo->block_i * N_SUB_BLOCKS_PER_INPUT_BLOCK;
+    // On startup mcnt_start will be zero.
+    binfo->mcnt_start = 0;
+    binfo->block_i = 0;
 
-    binfo->mcnt_prior = pkt_mcnt;
     binfo->out_of_seq_cnt = 0;
     binfo->initialized = 1;
 }
@@ -315,23 +294,33 @@ static inline void initialize_block_info(paper_input_databuf_t *paper_input_data
 // Any return value other than -1 will be stored in the status memory as
 // NETMCNT, so it is important that values other than -1 are returned rarely
 // (i.e. when marking a block as filled)!!!
-static inline uint64_t write_paper_packet_to_blocks(paper_input_databuf_t *paper_input_databuf_p, struct hashpipe_udp_packet *p) {
+static inline uint64_t write_paper_packet_to_blocks(paper_input_databuf_t *paper_input_databuf_p, struct hashpipe_udp_packet *p)
+{
 
     static block_info_t binfo;
     packet_header_t pkt_header;
     const uint64_t *payload_p;
-    int rv;
-    int i;
+    int pkt_block_i;
     uint64_t *dest_p;
-    uint64_t netmcnt = -1; // Value to store in status memory
+    uint64_t pkt_mcnt;
+    uint64_t cur_mcnt;
+    uint64_t netmcnt = -1; // Value to return (!=-1 is stored in status memory)
 #if N_DEBUG_INPUT_BLOCKS == 1
     static uint64_t debug_remaining = -1ULL;
     static off_t debug_offset = 0;
     uint64_t * debug_ptr;
 #endif
 
-    // housekeeping for each packet
+    // Lazy init binfo
+    if(!binfo.initialized) {
+	initialize_block_info(&binfo);
+    }
+
+    // Parse packet header
     get_header(p, &pkt_header);
+    pkt_mcnt = pkt_header.mcnt;
+    pkt_block_i = block_for_mcnt(pkt_mcnt);
+    cur_mcnt = binfo.mcnt_start;
 
 #if N_DEBUG_INPUT_BLOCKS == 1
     debug_ptr = (uint64_t *)&paper_input_databuf_p->block[N_INPUT_BLOCKS];
@@ -344,56 +333,108 @@ static inline uint64_t write_paper_packet_to_blocks(paper_input_databuf_t *paper
     }
 #endif
 
-    if(! binfo.initialized) {
-	// insist that we start on a multiple of sub_blocks/block
-    	if(pkt_header.mcnt % N_SUB_BLOCKS_PER_INPUT_BLOCK != 0) {
-		return -1;
-    	}
-	initialize_block_info(paper_input_databuf_p, &binfo, pkt_header.mcnt);
-    }
-    if(out_of_seq_mcnt(&binfo, pkt_header.mcnt)) {
-    	return(handle_out_of_seq_mcnt(&binfo));
-    }
-    if((rv = calc_block_indexes(&binfo, &pkt_header))) {
-	return rv;
-    }
-    if(! binfo.block_active[binfo.block_i]) {
-	// new block, pass along the block for N_INPUT_BLOCKS/2 blocks ago
-	i = subtract_block_i(binfo.block_i, N_INPUT_BLOCKS/2);
-#if N_DEBUG_INPUT_BLOCKS == 1
-#define DEBUG_EXTRA (0x10000)
-	if(set_block_filled(paper_input_databuf_p, &binfo, i) && debug_remaining > DEBUG_EXTRA) {
-	    debug_remaining = DEBUG_EXTRA;
-	}
-#else
-	set_block_filled(paper_input_databuf_p, &binfo, i);
-#endif
-	netmcnt = paper_input_databuf_p->block[i].header.mcnt;
-	// Wait (hopefully not long!) for free block for this packet
-	if((rv = paper_input_databuf_busywait_free(paper_input_databuf_p, binfo.block_i)) != HASHPIPE_OK) {
-	    if (errno == EINTR) {
-		// Interrupted by signal, return -1
-	        return -1;
-	    } else {
-	        hashpipe_error(__FUNCTION__, "error waiting for free databuf");
-	        pthread_exit(NULL);
-	        return -1;
+    // We expect packets for the current block, the next block, and the block after.
+    if(cur_mcnt <= pkt_mcnt && pkt_mcnt < cur_mcnt + 3*Nm) {
+	// If the packet is for the block after the next block (i.e. current
+	// block + 2 blocks)
+	if(pkt_mcnt > cur_mcnt + 2*Nm) {
+	    // Mark the current block as filled
+	    netmcnt = set_block_filled(paper_input_databuf_p, &binfo);
+
+	    // Advance mcnt_start to next block
+	    cur_mcnt += Nm;
+	    binfo.mcnt_start += Nm;
+	    binfo.block_i++;
+
+	    // Wait (hopefully not long!) to acquire the block after next (i.e.
+	    // the block that gets the current packet).
+	    if(paper_input_databuf_busywait_free(paper_input_databuf_p, pkt_block_i) != HASHPIPE_OK) {
+		if (errno == EINTR) {
+		    // Interrupted by signal, return -1
+		    hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
+		    pthread_exit(NULL);
+		    return -1; // We're exiting so return value is kind of moot
+		} else {
+		    hashpipe_error(__FUNCTION__, "error waiting for free databuf");
+		    pthread_exit(NULL);
+		    return -1; // We're exiting so return value is kind of moot
+		}
 	    }
+
+	    // Initialize the newly acquired block
+	    initialize_block(paper_input_databuf_p, pkt_mcnt);
+	    // Reset binfo's packet counter for thei packet's block
+	    binfo.block_active[pkt_block_i] = 0;
 	}
 
-	initialize_block(paper_input_databuf_p, &binfo, pkt_header.mcnt);
+	// Reset out-of-seq counter
+	binfo.out_of_seq_cnt = 0;
+
+	// Increment packet count for block
+	binfo.block_active[pkt_block_i]++;
+
+	// Validate header FID and XID and calculate "m" and "f" indexes into
+	// block (stored in binfo).
+	if(calc_block_indexes(&binfo, &pkt_header)) {
+	    // Bad packet, error already reported
+	    return -1;
+	}
+
+	// Calculate starting points for unpacking this packet into block's data buffer.
+	dest_p = paper_input_databuf_p->block[pkt_block_i].data
+	    + paper_input_databuf_data_idx(binfo.m, binfo.f, 0, 0);
+	payload_p        = (uint64_t *)(p->data+8);
+
+	// Copy data into buffer
+	memcpy(dest_p, payload_p, N_BYTES_PER_PACKET);
+
+	return netmcnt;
     }
-    binfo.block_active[binfo.block_i]++;	// increment packet count for block
-    // end housekeeping
+    // Else, if packet is late, but not too late (so we can handle to handle F
+    // engine restarts and MCNT rollover), then ignore it
+    else if(pkt_mcnt < cur_mcnt && pkt_mcnt > cur_mcnt - LATE_PKT_MCNT_THRESHOLD) {
+	hashpipe_warn("paper_net_thread",
+		"Ignoring late packet (%d mcnts late)",
+		cur_mcnt - pkt_mcnt);
 
-    // Calculate starting points for unpacking this packet into block's data buffer.
-    dest_p = paper_input_databuf_p->block[binfo.block_i].data
-	+ paper_input_databuf_data_idx(binfo.m, binfo.f, 0, 0);
-    payload_p        = (uint64_t *)(p->data+8);
+	return -1;
+    }
+    // Else, it is an "out-of-order" packet.
+    else {
+	hashpipe_warn("paper_net_thread",
+		"out of seq mcnt %012lx (expected: %012lx <= mcnt < %012x)",
+		pkt_mcnt, cur_mcnt, cur_mcnt+3*Nm);
 
-    // Copy data into buffer
-    memcpy(dest_p, payload_p, N_BYTES_PER_PACKET);
+	// Increment out-of-seq packet counter
+	binfo.out_of_seq_cnt++;
 
+	// If too may out-of-seq packets
+	if(binfo.out_of_seq_cnt > MAX_OUT_OF_SEQ) {
+	    // Reset current mcnt.  The value to reset to must be the first
+	    // value greater than or equal to pkt_mcnt that corresponds to the
+	    // same databuf block as the old current mcnt.
+	    if(binfo.block_i > pkt_block_i) {
+		// Advance pkt_mcnt to correspond to binfo.block_i
+		pkt_mcnt += Nm*(binfo.block_i - pkt_block_i);
+	    } else if(pkt_block_i < binfo.block_i) {
+		// Advance pkt_mcnt to binfo.block_i + N_INPUT_BLOCKS blocks
+		pkt_mcnt += Nm*(binfo.block_i + N_INPUT_BLOCKS - pkt_block_i);
+	    }
+	    // Round pkt_mcnt down to nearest multiple of Nm
+	    binfo.mcnt_start = pkt_mcnt - (pkt_mcnt%Nm);
+	    binfo.block_i = block_for_mcnt(binfo.mcnt_start);
+	    hashpipe_warn("paper_net_thread",
+		    "resetting to mcnt %012lx", binfo.mcnt_start);
+	    // Reinitialize/recycle our two already acquired blocks with new
+	    // mcnt values.
+	    initialize_block(paper_input_databuf_p, pkt_mcnt);
+	    initialize_block(paper_input_databuf_p, pkt_mcnt+Nm);
+	    // Reset binfo's packet counters for these blocks.
+	    binfo.block_active[binfo.block_i] = 0;
+	    binfo.block_active[(binfo.block_i+1)%N_INPUT_BLOCKS] = 0;
+	}
+	return -1;
+    }
 
     return netmcnt;
 }
@@ -478,6 +519,32 @@ static void *run(hashpipe_thread_args_t * args)
     }
     pthread_cleanup_push((void *)hashpipe_udp_close, &up);
 #endif
+
+    // Acquire first two blocks to start
+    if(paper_input_databuf_busywait_free(db, 0) != HASHPIPE_OK) {
+	if (errno == EINTR) {
+	    // Interrupted by signal, return -1
+	    hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
+	    pthread_exit(NULL);
+	} else {
+	    hashpipe_error(__FUNCTION__, "error waiting for free databuf");
+	    pthread_exit(NULL);
+	}
+    }
+    if(paper_input_databuf_busywait_free(db, 1) != HASHPIPE_OK) {
+	if (errno == EINTR) {
+	    // Interrupted by signal, return -1
+	    hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
+	    pthread_exit(NULL);
+	} else {
+	    hashpipe_error(__FUNCTION__, "error waiting for free databuf");
+	    pthread_exit(NULL);
+	}
+    }
+
+    // Initialize the newly acquired block
+    initialize_block(db, 0);
+    initialize_block(db, Nm);
 
     /* Main loop */
     uint64_t packet_count = 0;
