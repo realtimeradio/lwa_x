@@ -302,6 +302,7 @@ static inline uint64_t write_paper_packet_to_blocks(paper_input_databuf_t *paper
     const uint64_t *payload_p;
     int pkt_block_i;
     uint64_t *dest_p;
+    int64_t pkt_mcnt_dist;
     uint64_t pkt_mcnt;
     uint64_t cur_mcnt;
     uint64_t netmcnt = -1; // Value to return (!=-1 is stored in status memory)
@@ -322,6 +323,10 @@ static inline uint64_t write_paper_packet_to_blocks(paper_input_databuf_t *paper
     pkt_block_i = block_for_mcnt(pkt_mcnt);
     cur_mcnt = binfo.mcnt_start;
 
+    // Packet mcnt distance (how far away is this packet's mcnt from the
+    // current mcnt).  Positive distance for pcnt mcnts > current mcnt.
+    pkt_mcnt_dist = pkt_mcnt - cur_mcnt;
+
 #if N_DEBUG_INPUT_BLOCKS == 1
     debug_ptr = (uint64_t *)&paper_input_databuf_p->block[N_INPUT_BLOCKS];
     debug_ptr[debug_offset++] = be64toh(*(uint64_t *)(p->data));
@@ -334,10 +339,10 @@ static inline uint64_t write_paper_packet_to_blocks(paper_input_databuf_t *paper
 #endif
 
     // We expect packets for the current block, the next block, and the block after.
-    if(cur_mcnt <= pkt_mcnt && pkt_mcnt < cur_mcnt + 3*Nm) {
+    if(0 <= pkt_mcnt_dist && pkt_mcnt_dist < 3*Nm) {
 	// If the packet is for the block after the next block (i.e. current
 	// block + 2 blocks)
-	if(pkt_mcnt > cur_mcnt + 2*Nm) {
+	if(pkt_mcnt_dist > 2*Nm) {
 	    // Mark the current block as filled
 	    netmcnt = set_block_filled(paper_input_databuf_p, &binfo);
 
@@ -363,7 +368,7 @@ static inline uint64_t write_paper_packet_to_blocks(paper_input_databuf_t *paper
 
 	    // Initialize the newly acquired block
 	    initialize_block(paper_input_databuf_p, pkt_mcnt);
-	    // Reset binfo's packet counter for thei packet's block
+	    // Reset binfo's packet counter for this packet's block
 	    binfo.block_active[pkt_block_i] = 0;
 	}
 
@@ -392,18 +397,21 @@ static inline uint64_t write_paper_packet_to_blocks(paper_input_databuf_t *paper
     }
     // Else, if packet is late, but not too late (so we can handle to handle F
     // engine restarts and MCNT rollover), then ignore it
-    else if(pkt_mcnt < cur_mcnt && pkt_mcnt > cur_mcnt - LATE_PKT_MCNT_THRESHOLD) {
-	hashpipe_warn("paper_net_thread",
-		"Ignoring late packet (%d mcnts late)",
-		cur_mcnt - pkt_mcnt);
+    else if(pkt_mcnt_dist < 0 && pkt_mcnt_dist > -LATE_PKT_MCNT_THRESHOLD) {
+	//hashpipe_warn("paper_net_thread",
+	//	"Ignoring late packet (%d mcnts late)",
+	//	cur_mcnt - pkt_mcnt);
 
 	return -1;
     }
     // Else, it is an "out-of-order" packet.
     else {
-	hashpipe_warn("paper_net_thread",
-		"out of seq mcnt %012lx (expected: %012lx <= mcnt < %012x)",
-		pkt_mcnt, cur_mcnt, cur_mcnt+3*Nm);
+	// If not at start-up, issue warning.
+	if(cur_mcnt != 0) {
+	    hashpipe_warn("paper_net_thread",
+		    "out of seq mcnt %012lx (expected: %012lx <= mcnt < %012x)",
+		    pkt_mcnt, cur_mcnt, cur_mcnt+3*Nm);
+	}
 
 	// Increment out-of-seq packet counter
 	binfo.out_of_seq_cnt++;
@@ -416,7 +424,7 @@ static inline uint64_t write_paper_packet_to_blocks(paper_input_databuf_t *paper
 	    if(binfo.block_i > pkt_block_i) {
 		// Advance pkt_mcnt to correspond to binfo.block_i
 		pkt_mcnt += Nm*(binfo.block_i - pkt_block_i);
-	    } else if(pkt_block_i < binfo.block_i) {
+	    } else if(binfo.block_i < pkt_block_i) {
 		// Advance pkt_mcnt to binfo.block_i + N_INPUT_BLOCKS blocks
 		pkt_mcnt += Nm*(binfo.block_i + N_INPUT_BLOCKS - pkt_block_i);
 	    }
@@ -424,11 +432,12 @@ static inline uint64_t write_paper_packet_to_blocks(paper_input_databuf_t *paper
 	    binfo.mcnt_start = pkt_mcnt - (pkt_mcnt%Nm);
 	    binfo.block_i = block_for_mcnt(binfo.mcnt_start);
 	    hashpipe_warn("paper_net_thread",
-		    "resetting to mcnt %012lx", binfo.mcnt_start);
+		    "resetting to mcnt %012lx block %d based on packet mcnt %012lx",
+		    binfo.mcnt_start, block_for_mcnt(binfo.mcnt_start), pkt_mcnt);
 	    // Reinitialize/recycle our two already acquired blocks with new
 	    // mcnt values.
-	    initialize_block(paper_input_databuf_p, pkt_mcnt);
-	    initialize_block(paper_input_databuf_p, pkt_mcnt+Nm);
+	    initialize_block(paper_input_databuf_p, binfo.mcnt_start);
+	    initialize_block(paper_input_databuf_p, binfo.mcnt_start+Nm);
 	    // Reset binfo's packet counters for these blocks.
 	    binfo.block_active[binfo.block_i] = 0;
 	    binfo.block_active[(binfo.block_i+1)%N_INPUT_BLOCKS] = 0;
