@@ -688,24 +688,29 @@ static void *run(hashpipe_thread_args_t * args)
 	    // Get and put min and max values.  The "get-then-put" allows the
 	    // user to reset the min max values in the status buffer.
 	    hgeti8(st.buf, "NETWATMN", (long long *)&status_ns);
-	    min_wait_ns = MIN(min_wait_ns, status_ns);
-            hgeti8(st.buf, "NETRECMN", (long long *)&status_ns);
-	    min_wait_ns = MIN(min_recv_ns, status_ns);
-            hgeti8(st.buf, "NETPRCMN", (long long *)&status_ns);
-	    min_wait_ns = MIN(min_proc_ns, status_ns);
-            hgeti8(st.buf, "NETWATMX", (long long *)&status_ns);
-	    max_wait_ns = MAX(max_wait_ns, status_ns);
-            hgeti8(st.buf, "NETPRCMX", (long long *)&status_ns);
-	    max_wait_ns = MAX(max_recv_ns, status_ns);
-            hgeti8(st.buf, "NETRECMX", (long long *)&status_ns);
-	    max_wait_ns = MAX(max_proc_ns, status_ns);
+	    status_ns = MIN(min_wait_ns, status_ns);
+            hputi8(st.buf, "NETWATMN", status_ns);
 
-            hputi8(st.buf, "NETWATMN", min_wait_ns);
-            hputi8(st.buf, "NETRECMN", min_recv_ns);
-            hputi8(st.buf, "NETPRCMN", min_proc_ns);
-            hputi8(st.buf, "NETWATMX", max_wait_ns);
-            hputi8(st.buf, "NETRECMX", max_recv_ns);
-            hputi8(st.buf, "NETPRCMX", max_proc_ns);
+            hgeti8(st.buf, "NETRECMN", (long long *)&status_ns);
+	    status_ns = MIN(min_recv_ns, status_ns);
+            hputi8(st.buf, "NETRECMN", status_ns);
+
+            hgeti8(st.buf, "NETPRCMN", (long long *)&status_ns);
+	    status_ns = MIN(min_proc_ns, status_ns);
+            hputi8(st.buf, "NETPRCMN", status_ns);
+
+            hgeti8(st.buf, "NETWATMX", (long long *)&status_ns);
+	    status_ns = MAX(max_wait_ns, status_ns);
+            hputi8(st.buf, "NETWATMX", status_ns);
+
+            hgeti8(st.buf, "NETRECMX", (long long *)&status_ns);
+	    status_ns = MAX(max_recv_ns, status_ns);
+            hputi8(st.buf, "NETRECMX", status_ns);
+
+            hgeti8(st.buf, "NETPRCMX", (long long *)&status_ns);
+	    status_ns = MAX(max_proc_ns, status_ns);
+            hputi8(st.buf, "NETPRCMX", status_ns);
+
 
             hashpipe_status_unlock_safe(&st);
 
