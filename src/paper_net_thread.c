@@ -45,6 +45,7 @@ typedef struct {
     int initialized;
     int32_t  self_xid;
     uint64_t mcnt_start;
+    uint64_t mcnt_log_late;
     int out_of_seq_cnt;
     int block_i;
     // The m,x,f fields hold three of the five dimensional indices for
@@ -306,8 +307,9 @@ static inline void initialize_block_info(block_info_t * binfo)
     hgeti4(st_p->buf, "XID", &binfo->self_xid);
     hashpipe_status_unlock_safe(st_p);
 
-    // On startup mcnt_start will be zero.
+    // On startup mcnt_start will be zero and mcnt_log_late will be Nm.
     binfo->mcnt_start = 0;
+    binfo->mcnt_log_late = Nm;
     binfo->block_i = 0;
 
     binfo->out_of_seq_cnt = 0;
@@ -426,10 +428,12 @@ static inline uint64_t process_packet(paper_input_databuf_t *paper_input_databuf
     // Else, if packet is late, but not too late (so we can handle F engine
     // restarts and MCNT rollover), then ignore it
     else if(pkt_mcnt_dist < 0 && pkt_mcnt_dist > -LATE_PKT_MCNT_THRESHOLD) {
-	hashpipe_warn("paper_net_thread",
-		"Ignoring late packet (%d mcnts late)",
-		cur_mcnt - pkt_mcnt);
-
+	// If not just after an mcnt reset, issue warning.
+	if(cur_mcnt >= binfo.mcnt_log_late) {
+	    hashpipe_warn("paper_net_thread",
+		    "Ignoring late packet (%d mcnts late)",
+		    cur_mcnt - pkt_mcnt);
+	}
 #ifdef LOG_MCNTS
 	late_packets_counted++;
 #endif
@@ -438,11 +442,11 @@ static inline uint64_t process_packet(paper_input_databuf_t *paper_input_databuf
     // Else, it is an "out-of-order" packet.
     else {
 	// If not at start-up, issue warning.
-	//if(cur_mcnt != 0) {
+	if(cur_mcnt != 0) {
 	    hashpipe_warn("paper_net_thread",
 		    "out of seq mcnt %012lx (expected: %012lx <= mcnt < %012x)",
 		    pkt_mcnt, cur_mcnt, cur_mcnt+3*Nm);
-	//}
+	}
 
 	// Increment out-of-seq packet counter
 	binfo.out_of_seq_cnt++;
@@ -464,6 +468,7 @@ static inline uint64_t process_packet(paper_input_databuf_t *paper_input_databuf
 	    }
 	    // Round pkt_mcnt down to nearest multiple of Nm
 	    binfo.mcnt_start = pkt_mcnt - (pkt_mcnt%Nm);
+	    binfo.mcnt_log_late = binfo.mcnt_start + Nm;
 	    binfo.block_i = block_for_mcnt(binfo.mcnt_start);
 	    hashpipe_warn("paper_net_thread",
 		    "resetting to mcnt %012lx block %d based on packet mcnt %012lx",
