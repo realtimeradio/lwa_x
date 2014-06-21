@@ -14,9 +14,9 @@ Passing both -x and -c is not allowed.
 
 Passing -m MODE allows setting the corner turner mode of the F engines.
 
-MODE=0 == 8-way correlator (8 ROACH2s + 8 X Boxes)
+MODE=0 == 8-way correlator (8 ROACH2s + 8 X Boxes) [default]
 MODE=1 == 4-way correlator (4 ROACH2s + 4 X Boxes)
-MODE=2 == 2-way correlator (2 ROACH2s + 4 X Boxes)
+MODE=2 == 2-way correlator (2 ROACH2s + 2 X Boxes)
 MODE=3 == 1-way correlator (1 ROACH2  + 1 X Boxes)
 
 Examples:
