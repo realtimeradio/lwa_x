@@ -21,8 +21,8 @@ MODE=3 == 1-way correlator (1 ROACH2  + 1 X Boxes)
 
 Examples:
 
-  # Bring up the PAPER correlator
-  $ xtor_up.sh
+  # Bring up all F and X engines of the PAPER correlator
+  $ xtor_up.sh -f -x
 
   # Bring up slice 1 F engine only (pf1) with corner tuner mode 3
   $ xtor_up.sh -f -m 3 1
@@ -76,6 +76,12 @@ do
   esac
 done
 shift $((OPTIND-1))
+
+# If none of -f, -x, or -c were given, show help
+if [ -z "${do_f}${do_x}${do_c}" ]
+then
+  show_help_and_exit
+fi
 
 # If both x and c were given, error out
 if [ -n "${do_x}" -a -n "${do_c}" ]
