@@ -441,8 +441,9 @@ static inline uint64_t process_packet(paper_input_databuf_t *paper_input_databuf
     }
     // Else, it is an "out-of-order" packet.
     else {
-	// If not at start-up, issue warning.
-	if(cur_mcnt != 0) {
+	// If not at start-up and this is the first out of order packet,
+	// issue warning.
+	if(cur_mcnt != 0 && binfo.out_of_seq_cnt == 0) {
 	    hashpipe_warn("paper_net_thread",
 		    "out of seq mcnt %012lx (expected: %012lx <= mcnt < %012x)",
 		    pkt_mcnt, cur_mcnt, cur_mcnt+3*Nm);
