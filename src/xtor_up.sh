@@ -121,7 +121,8 @@ then
 
   # Initialize F engines
   echo Initializing F Engines $fhosts
-  paper_feng_init.rb -m $ctmode $fhosts
+  #paper_feng_init.rb -m $ctmode $fhosts
+  hera_roach_feng_init.py $fhosts
 fi
 
 if [ -n "$do_x" -o "$do_c" ]
