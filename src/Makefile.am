@@ -17,6 +17,7 @@ paper_threads = paper_fake_net_thread.c       \
 		paper_gpu_thread.c            \
 		paper_fluff_thread.c          \
 		paper_net_thread.c            \
+		paper_pktsock_thread.c        \
 		paper_crc_thread.c
 
 paper_fluff = paper_fluff.h \
