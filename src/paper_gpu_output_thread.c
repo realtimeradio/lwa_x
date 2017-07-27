@@ -543,6 +543,7 @@ static void *run(hashpipe_thread_args_t * args)
                   perror("send");
                   // Update stats
                   hashpipe_status_lock_safe(&st);
+                  hgetu4(st.buf, "OUTDUMPS", &dumps);
                   hputu4(st.buf, "OUTDUMPS", ++dumps);
                   hputr4(st.buf, "OUTSECS", 0.0);
                   hputr4(st.buf, "OUTMBPS", 0.0);
@@ -573,6 +574,7 @@ static void *run(hashpipe_thread_args_t * args)
         clock_gettime(CLOCK_MONOTONIC, &stop);
 
         hashpipe_status_lock_safe(&st);
+        hgetu4(st.buf, "OUTDUMPS", &dumps);
         hputu4(st.buf, "OUTDUMPS", ++dumps);
         hputr4(st.buf, "OUTSECS", (float)ELAPSED_NS(start,stop)/1e9);
         hputr4(st.buf, "OUTMBPS", (1e3*8*bytes_per_dump)/ELAPSED_NS(start,stop));
