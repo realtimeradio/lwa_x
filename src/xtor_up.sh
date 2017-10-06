@@ -36,7 +36,7 @@ exit $1
 do_f=
 do_x=
 do_c=
-paper_init=paper_init.sh
+paper_init=paper_pktsock_init.sh
 xc=X
 ctmode=0
 
@@ -117,7 +117,7 @@ if [ -n "$do_f" ]
 then
   # Program ROACH2 FPGAs with roach2_fengine design
   echo Programming F Engines $fhosts
-  for f in $fhosts; do adc16_init.rb -r 0x2a=0x4444 $f roach2_fengine; done
+  for f in $fhosts; do adc16_init.rb -r 0x2a=0x8888 $f roach2_fengine; done
 
   # Initialize F engines
   echo Initializing F Engines $fhosts
