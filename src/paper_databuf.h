@@ -18,6 +18,7 @@
 #define N_BYTES_PER_PACKET  (8192)
 
 // X engine sizing (from xGPU)
+#define N_ANTS               XGPU_NSTATION
 #define N_INPUTS          (2*XGPU_NSTATION)
 #define N_TIME_PER_BLOCK     XGPU_NTIME
 #define N_CHAN_PER_X         XGPU_NFREQUENCY
@@ -46,6 +47,35 @@
 #define PAGE_SIZE (4096)
 #define CACHE_ALIGNMENT (128)
 
+// The HERA correlator is based largely on the PAPER correlator.  The first
+// generation HERA array will match the sizing of the PSA128 (or PSA256 if you
+// count by inputs rather than antennas) correlator.  In fact, it will use the
+// same XGPU build as the last generation PAPER correlator.  The main
+// difference will be in the F engines.  The ROACH2 based F engines are being
+// replaced by SNAP based F engines.  Because SNAPs have a different number of
+// inputs, the F engine packet format must change.  Because SNAPs handle a
+// non-power-of-2 number of inputs (6), the most generic solution is to put
+// each antenna (pair of inputs) into a packet.  Fears of small packets have
+// eased somewhat (thanks to interrupt coalescing), so the HERA F engine
+// packets are now also smaller (1 KB instead of 8 KB).  The main message is
+// that HERA F engine packets are quite different from the PAPER F engine
+// packets.  Even though the X engines are the same, the network thread and the
+// fluffing threads for HERA are somewhat different.  The data buffer format
+// for the GPU thread's input buffer is exactly the same.  The fluffing
+// thread's input buffer is therefore sized the same (i.e. half the size of the
+// GPU input buffer), but the format is different since the packet's stored by
+// the network thread will be different size/format.  Also changed is the
+// number of time samples per packet i(and therefore per mcount).  The HERA
+// specific sizing parameters are given here, but they are all prefixed with
+// "HERA_" to disambiguate them from the non-prefixed PAPER versions.
+
+// HERA_N_BYTES_PER_PACKET excludes header (and footer)!
+#define HERA_N_BYTES_PER_PACKET  (1024)
+#define HERA_N_INPUTS_PER_PACKET (2)
+#define HERA_N_CHAN_PER_PACKET (16)
+
+// Derived from above quantities
+#define HERA_N_TIME_PER_PACKET       (HERA_N_BYTES_PER_PACKET/HERA_N_INPUTS_PER_PACKET/HERA_N_CHAN_PER_PACKET)
 /*
  * INPUT BUFFER STRUCTURES
  */
@@ -65,6 +95,8 @@ typedef uint8_t paper_input_header_cache_alignment[
 ];
 
 // == paper_databuf_input_t ==
+//
+// For PAPER:
 //
 // * Net thread output
 // * Fluffer thread input
@@ -102,6 +134,56 @@ typedef uint8_t paper_input_header_cache_alignment[
 // NB: N_INPUTS_PER_FENGINE must be multiple of sizeof(uint64_t)
 #define paper_input_databuf_data_idx(m,f,t,c) \
   ((N_INPUTS_PER_FENGINE/sizeof(uint64_t))*(c+Nc*(t+Nt*(f+Nf*m))))
+
+// For HERA:
+//
+// * HERA net thread output
+// * HERA fluffer thread input
+// * Ordered sequence of packets in "data" field:
+//
+//   +-- mcount
+//   |       +-- Antenna
+//   |       |       |<-packets->|
+//   V       V       |           |
+//   m       a       |c        t |
+//   ==      ==      |==       ==|
+//   m0 }--> a0 }--> |c0 }---> t0|\
+//   m1      a1      |c1       t1| \
+//   m2      a2      |c2       t2|  \ chan 0
+//   :       :       |:        : |  / packet
+//   :       :       |:        : | /
+//   :       :       |:        : |/
+//   :       :       +---- ------+
+//   :       :       |Nc/2 }-> t0|\
+//   :       :       |:        t1| \
+//   :       :       |:        t2|  \ chan Nc/2
+//   :       :       |:        : |  / packet
+//   :       :       |:        : | /
+//   :       :       |:        : |/
+//   ==      ==       ===      ==
+//   Nm      Na       Nc       Nt
+//
+//   Each time sample is 2 bytes comprising two 4b+4b complex values.
+//   Note that the bits may not all be contiguous to facilitate fluffing.
+//
+// m = packet's mcount - block's first mcount
+// a = packet's antenna number
+// c = channel within within X engine
+// t = time sample within channel (0 to Nt-1)
+
+#define HERA_Nm (N_TIME_PER_BLOCK/HERA_N_TIME_PER_PACKET)
+#define HERA_Na N_ANTS
+#define HERA_Nc N_CHAN_PER_X
+#define HERA_Nt HERA_N_TIME_PER_PACKET
+
+// HERA mcount index = m * Na * Nc * Nt * HERA_N_INPUTS_PER_PACKET / sizeof(uint64_t)
+// HERA ant index = a * Nc * Nt * HERA_N_INPUTS_PER_PACKET / sizeof(uint64_t)
+// HERA chan index = c * Nt * HERA_N_INPUTS_PER_PACKET / sizeof(uint64_t)
+//
+// Computes paper_input_databuf_t data word (uint64_t) offset for complex data
+// word corresponding to the given parameters for HERA F engine packets.
+#define hera_input_databuf_data_idx(m,a,c) \
+  (((m * HERA_Na + a) * HERA_Nc + c) * HERA_Nt * HERA_N_INPUTS_PER_PACKET / sizeof(uint64_t))
 
 typedef struct paper_input_block {
   paper_input_header_t header;
