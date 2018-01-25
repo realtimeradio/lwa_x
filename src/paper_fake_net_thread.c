@@ -30,9 +30,9 @@ static void *run(hashpipe_thread_args_t * args)
     int i, rv;
     uint64_t mcnt = 0;
     uint64_t *data;
-    int m,f,t,c;
+    int m,a,t,c;
 #ifdef FAKE_TEST_INPUT1
-    int f1;
+    int a1;
 #endif
     int block_idx = 0;
     while (run_threads()) {
@@ -70,6 +70,7 @@ static void *run(hashpipe_thread_args_t * args)
         hashpipe_status_lock_safe(&st);
         hputs(st.buf, status_key, "receiving");
         hputi4(st.buf, "NETBKOUT", block_idx);
+        hputi4(st.buf, "NETMCNT", mcnt);
         hashpipe_status_unlock_safe(&st);
  
         // Fill in sub-block headers
@@ -95,17 +96,17 @@ static void *run(hashpipe_thread_args_t * args)
         memset(data, 0, N_BYTES_PER_BLOCK);
 
         c = FAKE_TEST_CHAN;
-        f = FAKE_TEST_FID;
+        a = FAKE_TEST_FID;
 #ifdef FAKE_TEST_INPUT1
 #define FAKE_TEST_FID1 (FAKE_TEST_INPUT1/N_INPUTS_PER_PACKET)
-        f1 = FAKE_TEST_FID1;
+        a1 = FAKE_TEST_FID1;
 #endif
         for(m=0; m<Nm; m++) {
           for(t=0; t<Nt; t++) {
-            data[paper_input_databuf_data_idx(m,f,t,c)] =
+            data[paper_input_databuf_data_idx(m,a,c,t)] =
               ((uint64_t)0xf0) << (8*(7-(FAKE_TEST_INPUT%N_INPUTS_PER_PACKET)));
 #ifdef FAKE_TEST_INPUT1
-            data[paper_input_databuf_data_idx(m,f1,t,c)] =
+            data[paper_input_databuf_data_idx(m,a1,c,t)] =
               ((uint64_t)0xf0) << (8*(7-(FAKE_TEST_INPUT1%N_INPUTS_PER_PACKET)));
 #endif
           }

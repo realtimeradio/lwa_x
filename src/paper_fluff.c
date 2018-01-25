@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <pthread.h>
 //#include <stdlib.h>
 //#include <unistd.h>
 //#include <stdint.h>
@@ -11,7 +12,8 @@
 
 #define N_WORD128_PER_PACKET  (N_BYTES_PER_PACKET/sizeof(__m128i))
 // OUTPUT_STRIDE in is units of __m256i
-#define OUTPUT_STRIDE ((2*Nf*N_INPUTS_PER_FENGINE)/sizeof(__m256i))
+//#define OUTPUT_STRIDE ((2*Nf*N_INPUTS_PER_PACKET)/sizeof(__m256i))
+#define OUTPUT_STRIDE ((2*Na)/sizeof(__m256i))
 
 #if 0
 typedef union {
@@ -61,7 +63,7 @@ int paper_fluff(const uint64_t const * const in, uint64_t * out)
   //uint64_t v0, v1, v2, v3;
   //vec_t in0, in1, in2, in3;
   //vec_t v0, v1, v2, v3;
-  int m, f, w;
+  int m, a, w;
 
   __m128i lo128, hi128;
   __m256i out256 = _mm256_setzero_si256();
@@ -71,11 +73,12 @@ int paper_fluff(const uint64_t const * const in, uint64_t * out)
   const __m128i mask = _mm_set_epi64((__m64)0xf0f0f0f0f0f0f0f0ULL, (__m64)0xf0f0f0f0f0f0f0f0ULL);
 
   for(m=0; m<Nm; m++) {
-    for(f=0; f<Nf; f++) {
+    //for(f=0; f<Nf; f++) {
+    for(a=0; a<Na; a++) {
         // Each F engine provides 32 samples per channel per time, which fluffs
         // to 64 bytes, which equals two 256 bit words.
         // p_out = out + mcnt offset + feng offset
-        p_out = (__m256i *)out + m*Nt*Nc*Nf*2 + f*2;
+        p_out = (__m256i *)out + m*Nt*Nc*Na*2 + a*2;
         for(w=0; w<N_WORD128_PER_PACKET/2; w++) {
 
           // Load 128 bits (16 bytes) with _mm_stream_load_si128
@@ -117,5 +120,29 @@ int paper_fluff(const uint64_t const * const in, uint64_t * out)
   }
 
   // Return number of 64 bit words fluffed
-  return Nm*Nf*2*N_WORD128_PER_PACKET;
+  return Nm*Na*2*N_WORD128_PER_PACKET;
+}
+
+
+int paper_fluff_lut(const uint64_t const * const in, uint64_t * out)
+{
+  uint16_t * in16  = (uint16_t *) in;
+  uint32_t * out32 = (uint32_t *) out;
+  int i;
+
+  for(i=0; i<N_BYTES_PER_BLOCK>>1; i++) {
+    out32[i] = lut[in16[i]];
+  }
+
+  //uint64_t * in64  = (uint64_t *) in;
+  //uint64_t * out64 = (uint64_t *) out;
+  //int i;
+
+  //for(i=0; i<N_BYTES_PER_BLOCK>>3; i++) {
+  //  out64[2*i]     = (lut[(in64[i]>>48)] << 32) +        (lut[(in64[i]>>32) & 0xff]);
+  //  out64[2*i + 1] = (lut[(in64[i]>>16) & 0xff] << 32) + (lut[(in64[i] & 0xff)]);
+  //}
+
+  // Return number of 64 bit words fluffed
+  return N_BYTES_PER_BLOCK >> 3;
 }
