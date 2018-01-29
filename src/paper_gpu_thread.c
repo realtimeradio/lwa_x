@@ -237,7 +237,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
           gpu_dumps++;
           hashpipe_status_lock_safe(&st);
           hputi8(st.buf, "GPUDUMPS", gpu_dumps);
-          hputr4(st.buf, "GPUGBPS", (float)(8*N_FLUFFED_BYTES_PER_BLOCK*gpu_block_count)/elapsed_gpu_ns);
+          hputr4(st.buf, "GPUGBPS", (float)(8L*N_FLUFFED_BYTES_PER_BLOCK*gpu_block_count)/elapsed_gpu_ns);
           hashpipe_status_unlock_safe(&st);
 
           // Start new average
@@ -274,7 +274,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
             /*
              * Call CPU X engine function
              */
-            xgpuOmpXengine((Complex *)db_out->block[curblock_out].data, context.array_h);
+            xgpuOmpXengine((ComplexInt *)db_out->block[curblock_out].data, context.array_h);
 
             // Mark output block as full and advance
             paper_output_databuf_set_filled(db_out, curblock_out);
