@@ -17,7 +17,7 @@ myip=$(getip $(hostname))
 mypx=
 for p in {1..8}
 do
-  ip=$(getip px${p}.paper.pvt)
+  ip=$(getip px${p})
   [ "${myip}" == "${ip}" ] || continue
   mypx=$p
 done
@@ -113,6 +113,28 @@ case ${hostname} in
       "0x0606 ${hostname}-2.tenge.pvt  0  $xid0  2   4   3   4" # Instance 0, eth2
     );;
 
+  hera-gpu*)
+    # Setup parameters for two instances.
+    # 2 x E5-2620 v4 (disabled-HyperThreading,  8-cores @ 2.1 GHz, 20 MB L3, 8 GT/s QPI, 2667 MHz DRAM)
+    # Fluff thread and output thread share a core.
+    # Save core  0 for OS.
+    # Save core  1 for eth2
+    # Save core 8 for symmetry with core 0
+    # Save core 9 for eth4 and eth5
+    #
+    # Setup for two GPU devices (two TITANs).
+    #
+    #                               GPU       NET FLF GPU OUT
+    # mask  bind_host               DEV  XID  CPU CPU CPU CPU
+    # Calculate XIDs based on mypx
+    xid0=$(( 1*(mypx-1)    ))
+
+    instances=( 
+      #                               GPU       NET FLF GPU OUT
+      # mask  bind_host               DEV  XID  CPU CPU CPU CPU
+      "0x00ff ${hostname}-2.tenge.pvt  0  $xid0  1   2   4   6" # Instance 0, eth2
+    );;
+
   *)
     echo "This host (${hostname}) is not supported by $(basename $0)"
     exit 1
@@ -147,7 +169,7 @@ function init() {
     -o BINDHOST=$bindhost \
     -o GPUDEV=$gpudev \
     -o XID=$xid \
-    -c $netcpu paper_net_thread \
+    -c $netcpu paper_fake_net_thread \
     -c $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
     -c $outcpu paper_gpu_output_thread
@@ -157,7 +179,7 @@ function init() {
     -o BINDHOST=$bindhost \
     -o GPUDEV=$gpudev \
     -o XID=$xid \
-    -c $netcpu paper_net_thread \
+    -c $netcpu paper_fake_net_thread \
     -c $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
     -c $outcpu paper_gpu_output_thread \
