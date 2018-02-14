@@ -74,7 +74,7 @@ static void *run(hashpipe_thread_args_t * args)
         hashpipe_status_unlock_safe(&st);
  
         // Fill in sub-block headers
-        for(i=0; i<N_SUB_BLOCKS_PER_INPUT_BLOCK; i++) {
+        for(i=0; i<N_PACKETS_PER_BLOCK; i++) {
           db->block[block_idx].header.good_data = 1;
           db->block[block_idx].header.mcnt = mcnt;
           mcnt+=Nm;

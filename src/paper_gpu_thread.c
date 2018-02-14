@@ -47,7 +47,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
     hashpipe_status_lock_safe(&st);
     hputs(st.buf,  "INTSTAT", "off");
     hputi8(st.buf, "INTSYNC", 0);
-    hputi4(st.buf, "INTCOUNT", N_SUB_BLOCKS_PER_INPUT_BLOCK);
+    hputi4(st.buf, "INTCOUNT", 1);
     hputi8(st.buf, "GPUDUMPS", 0);
     hgeti4(st.buf, "GPUDEV", &gpu_dev); // No change if not found
     hputi4(st.buf, "GPUDEV", gpu_dev);
@@ -144,7 +144,8 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
               hgeti4(st.buf, "INTCOUNT", &int_count);
               hashpipe_status_unlock_safe(&st);
               // Compute last mcount
-              last_mcount = start_mcount + (int_count-1) * N_SUB_BLOCKS_PER_INPUT_BLOCK;
+              last_mcount = start_mcount + (int_count-N_TIME_PER_BLOCK);// * N_SUB_BLOCKS_PER_INPUT_BLOCK;
+              fprintf(stderr, "Accumulating to mcount: %lu\n", last_mcount);
             // Else (missed starting mcount)
             } else {
               // Handle missed start of integration
@@ -225,7 +226,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
             hashpipe_status_unlock_safe(&st);
           } else {
             // Advance last_mcount for end of next integration
-            last_mcount += int_count * N_SUB_BLOCKS_PER_INPUT_BLOCK;
+            last_mcount += int_count;// * N_SUB_BLOCKS_PER_INPUT_BLOCK;
           }
 
           // Mark output block as full and advance

@@ -6,13 +6,16 @@ PATH="$(dirname $0):${PATH}"
 instance_id=0
 
 # Set default intcount
-intcount=2048
+intcount=1048576
+
+# Set wait period for start trigger
+start_delay=1048576
 
 # Set intsync to empty value
 intsync=
 
 function get_sync_mcnt() {
-  echo $(( $(hashpipe_check_status -I $instance_id -Q GPUMCNT 2>/dev/null) + 8192 ))
+  echo $(( $(hashpipe_check_status -I $instance_id -Q GPUMCNT 2>/dev/null) + $start_delay ))
 }
 
 function start() {

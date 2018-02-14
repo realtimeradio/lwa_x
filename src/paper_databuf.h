@@ -5,17 +5,16 @@
 #include "hashpipe_databuf.h"
 #include "config.h"
 
-// Determined by F engine ADCs
-#define N_INPUTS_PER_FENGINE 32
-
 // Determined by F engine
-#define N_CHAN_TOTAL 1024
+#define N_CHAN_TOTAL 1536
 
 // Determined by F engine packetizer
-#define N_INPUTS_PER_PACKET  N_INPUTS_PER_FENGINE
-#define N_OUTPUTS_PER_FENGINE (4)
+//TODO#define N_INPUTS_PER_PACKET  2
+#define N_INPUTS_PER_PACKET  6
 // N_BYTES_PER_PACKET excludes header!
-#define N_BYTES_PER_PACKET  (8192)
+//TODO#define N_BYTES_PER_PACKET  (1024)
+#define N_BYTES_PER_PACKET  (3072)
+//TODO#define N_BYTES_PER_PACKET  (3072)
 
 // X engine sizing (from xGPU)
 #define N_ANTS               XGPU_NSTATION
@@ -24,11 +23,14 @@
 #define N_CHAN_PER_X         XGPU_NFREQUENCY
 
 // Derived from above quantities
-#define N_FENGINES                   (N_INPUTS/N_INPUTS_PER_FENGINE)
-#define N_CHAN_PER_F                 (N_CHAN_TOTAL/N_FENGINES/N_OUTPUTS_PER_FENGINE)
-#define N_CHAN_PER_PACKET            (N_CHAN_PER_F)
-#define N_TIME_PER_PACKET            (N_BYTES_PER_PACKET/N_INPUTS_PER_PACKET/N_CHAN_PER_PACKET)
-#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / N_TIME_PER_PACKET)
+#define N_FENGINES                   208
+#define N_CHAN_PER_F                 1536
+#define N_CHAN_PER_PACKET            16
+//TODO#define N_CHAN_PER_PACKET            48
+#define N_TIME_PER_PACKET            32
+//#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / N_TIME_PER_PACKET)
+//#define N_SUB_BLOCKS_PER_INPUT_BLOCK N_TIME_PER_BLOCK
+//#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / 2048)
 #define N_BYTES_PER_BLOCK            (N_TIME_PER_BLOCK * N_CHAN_PER_X * N_INPUTS)
 #define N_PACKETS_PER_BLOCK          (N_BYTES_PER_BLOCK / N_BYTES_PER_PACKET)
 #define N_PACKETS_PER_BLOCK_PER_F    (N_PACKETS_PER_BLOCK / N_FENGINES)
@@ -38,7 +40,7 @@
 #error N_BYTES_PER_PACKET != (N_TIME_PER_PACKET*N_CHAN_PER_PACKET*N_INPUTS_PER_PACKET)
 #endif
 
-#define N_FLUFFED_BYTES_PER_BLOCK  ((N_PACKETS_PER_BLOCK * 8192) * 2)
+#define N_FLUFFED_BYTES_PER_BLOCK  ((N_PACKETS_PER_BLOCK * N_BYTES_PER_PACKET) * 2)
 #define N_FLUFFED_WORDS_PER_BLOCK (N_FLUFFED_BYTES_PER_BLOCK / 8) 
 
 // Number of floats in xGPU's "register tile order" output matrix.
@@ -67,15 +69,7 @@
 // the network thread will be different size/format.  Also changed is the
 // number of time samples per packet i(and therefore per mcount).  The HERA
 // specific sizing parameters are given here, but they are all prefixed with
-// "HERA_" to disambiguate them from the non-prefixed PAPER versions.
 
-// HERA_N_BYTES_PER_PACKET excludes header (and footer)!
-#define HERA_N_BYTES_PER_PACKET  (1024)
-#define HERA_N_INPUTS_PER_PACKET (2)
-#define HERA_N_CHAN_PER_PACKET (16)
-
-// Derived from above quantities
-#define HERA_N_TIME_PER_PACKET       (HERA_N_BYTES_PER_PACKET/HERA_N_INPUTS_PER_PACKET/HERA_N_CHAN_PER_PACKET)
 /*
  * INPUT BUFFER STRUCTURES
  */
@@ -93,47 +87,6 @@ typedef struct paper_input_header {
 typedef uint8_t paper_input_header_cache_alignment[
   CACHE_ALIGNMENT - (sizeof(paper_input_header_t)%CACHE_ALIGNMENT)
 ];
-
-// == paper_databuf_input_t ==
-//
-// For PAPER:
-//
-// * Net thread output
-// * Fluffer thread input
-// * Ordered sequence of packets in "data" field:
-//
-//   +-- mcount
-//   |       +-- fid
-//   |       |       |<-packet->|
-//   V       V       |          |
-//   m       f       |t       c |
-//   ==      ==      |==      ==|
-//   m0 }--> f0 }--> |t0 }--> c0|
-//   m1      f1      |t1      c1|
-//   m2      f2      |t2      c2|
-//   :       :       |:       : |
-//   ==      ==       ==      ==
-//   Nm      Nf       Nt      Nc
-//
-//   Each 8 byte word represents eight complex inputs.
-//   Each byte is a 4bit+4bit complex value.
-//
-// m = packet's mcount - block's first mcount
-// f = packet's FID
-// t = time sample within packet
-// c = channel within time sample within packet
-// Nt * Nc == packet's payload
-
-#define Nm (N_TIME_PER_BLOCK/N_TIME_PER_PACKET)
-#define Nf N_FENGINES
-#define Nt N_TIME_PER_PACKET
-#define Nc N_CHAN_PER_PACKET
-
-// Computes paper_input_databuf_t data word (uint64_t) offset for complex data
-// word corresponding to the given parameters.
-// NB: N_INPUTS_PER_FENGINE must be multiple of sizeof(uint64_t)
-#define paper_input_databuf_data_idx(m,f,t,c) \
-  ((N_INPUTS_PER_FENGINE/sizeof(uint64_t))*(c+Nc*(t+Nt*(f+Nf*m))))
 
 // For HERA:
 //
@@ -171,10 +124,10 @@ typedef uint8_t paper_input_header_cache_alignment[
 // c = channel within within X engine
 // t = time sample within channel (0 to Nt-1)
 
-#define HERA_Nm (N_TIME_PER_BLOCK/HERA_N_TIME_PER_PACKET)
-#define HERA_Na N_ANTS
-#define HERA_Nc N_CHAN_PER_X
-#define HERA_Nt HERA_N_TIME_PER_PACKET
+#define Nm (N_TIME_PER_BLOCK/N_TIME_PER_PACKET)
+#define Na N_ANTS
+#define Nc N_CHAN_PER_X
+#define Nt N_TIME_PER_PACKET
 
 // HERA mcount index = m * Na * Nc * Nt * HERA_N_INPUTS_PER_PACKET / sizeof(uint64_t)
 // HERA ant index = a * Nc * Nt * HERA_N_INPUTS_PER_PACKET / sizeof(uint64_t)
@@ -182,8 +135,10 @@ typedef uint8_t paper_input_header_cache_alignment[
 //
 // Computes paper_input_databuf_t data word (uint64_t) offset for complex data
 // word corresponding to the given parameters for HERA F engine packets.
-#define hera_input_databuf_data_idx(m,a,c) \
-  (((m * HERA_Na + a) * HERA_Nc + c) * HERA_Nt * HERA_N_INPUTS_PER_PACKET / sizeof(uint64_t))
+
+#define paper_input_databuf_data_idx(m,a,c,t) \
+  (((((m * Na + a) * (Nc) + c)*Nt + t) * 2) / sizeof(uint64_t))
+//TODO  (((((m * Na + a) * (Nc) + c)*Nt + t) * N_INPUTS_PER_PACKET) / sizeof(uint64_t))
 
 typedef struct paper_input_block {
   paper_input_header_t header;
@@ -206,7 +161,7 @@ typedef struct paper_input_databuf {
  * GPU INPUT BUFFER STRUCTURES
  */
 
-#define N_GPU_INPUT_BLOCKS 2
+#define N_GPU_INPUT_BLOCKS 4
 
 // == paper_gpu_input_databuf_t ==
 //
@@ -224,7 +179,7 @@ typedef struct paper_input_databuf {
 //   m2      t2      c2      f2
 //   :       :       :       :
 //   ==      ==      ==      ==
-//   Nm      Nt      Nc      Nf
+//   Nm      Nt      Nc      Na
 //
 //   Each group of eight 8 byte words (i.e. every 64 bytes) contains thirty-two
 //   8bit+8bit complex inputs (8 inputs * four F engines) using complex block
@@ -233,8 +188,8 @@ typedef struct paper_input_databuf {
 // Returns word (uint64_t) offset for real input data word (8 inputs)
 // corresponding to the given parameters.  Corresponding imaginary data word is
 // 1 word later (complex block size 1).
-#define paper_gpu_input_databuf_data_idx(m,f,t,c) \
-  (f+2*Nf*(c+Nc*(t+Nt*m)))
+#define paper_gpu_input_databuf_data_idx(m,a,t,c) \
+  (m*Nt*Nc*Na) + (t*Nc*Na) + (c*Na) + a 
 
 typedef struct paper_gpu_input_block {
   paper_input_header_t header;
