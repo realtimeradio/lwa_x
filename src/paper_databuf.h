@@ -6,15 +6,16 @@
 #include "config.h"
 
 // Determined by F engine
-#define N_CHAN_TOTAL 1536
+#define N_CHAN_TOTAL 6144
+#define N_FENGINES   208
+#define N_CHAN_PER_F N_CHAN_TOTAL
 
 // Determined by F engine packetizer
-//TODO#define N_INPUTS_PER_PACKET  2
 #define N_INPUTS_PER_PACKET  6
+#define N_CHAN_PER_PACKET    384
+#define N_TIME_PER_PACKET    2
 // N_BYTES_PER_PACKET excludes header!
-//TODO#define N_BYTES_PER_PACKET  (1024)
-#define N_BYTES_PER_PACKET  (3072)
-//TODO#define N_BYTES_PER_PACKET  (3072)
+#define N_BYTES_PER_PACKET  (N_INPUTS_PER_PACKET*N_CHAN_PER_PACKET*N_TIME_PER_PACKET)
 
 // X engine sizing (from xGPU)
 #define N_ANTS               XGPU_NSTATION
@@ -23,11 +24,6 @@
 #define N_CHAN_PER_X         XGPU_NFREQUENCY
 
 // Derived from above quantities
-#define N_FENGINES                   208
-#define N_CHAN_PER_F                 1536
-#define N_CHAN_PER_PACKET            16
-//TODO#define N_CHAN_PER_PACKET            48
-#define N_TIME_PER_PACKET            32
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / N_TIME_PER_PACKET)
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK N_TIME_PER_BLOCK
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / 2048)
@@ -49,26 +45,17 @@
 #define PAGE_SIZE (4096)
 #define CACHE_ALIGNMENT (128)
 
-// The HERA correlator is based largely on the PAPER correlator.  The first
-// generation HERA array will match the sizing of the PSA128 (or PSA256 if you
-// count by inputs rather than antennas) correlator.  In fact, it will use the
-// same XGPU build as the last generation PAPER correlator.  The main
+// The HERA correlator is based largely on the PAPER correlator.  The main 
 // difference will be in the F engines.  The ROACH2 based F engines are being
 // replaced by SNAP based F engines.  Because SNAPs have a different number of
-// inputs, the F engine packet format must change.  Because SNAPs handle a
-// non-power-of-2 number of inputs (6), the most generic solution is to put
-// each antenna (pair of inputs) into a packet.  Fears of small packets have
-// eased somewhat (thanks to interrupt coalescing), so the HERA F engine
-// packets are now also smaller (1 KB instead of 8 KB).  The main message is
-// that HERA F engine packets are quite different from the PAPER F engine
-// packets.  Even though the X engines are the same, the network thread and the
+// inputs, the F engine packet format must change. 
+// Even though the X engines are the same, the network thread and the
 // fluffing threads for HERA are somewhat different.  The data buffer format
 // for the GPU thread's input buffer is exactly the same.  The fluffing
 // thread's input buffer is therefore sized the same (i.e. half the size of the
-// GPU input buffer), but the format is different since the packet's stored by
+// GPU input buffer), but the format is different since the packets stored by
 // the network thread will be different size/format.  Also changed is the
-// number of time samples per packet i(and therefore per mcount).  The HERA
-// specific sizing parameters are given here, but they are all prefixed with
+// number of time samples per packet i(and therefore per mcount).
 
 /*
  * INPUT BUFFER STRUCTURES
@@ -138,6 +125,8 @@ typedef uint8_t paper_input_header_cache_alignment[
 
 #define paper_input_databuf_data_idx(m,a,c,t) \
   (((((m * Na + a) * (Nc) + c)*Nt + t) * 2) / sizeof(uint64_t))
+#define paper_input_databuf_data_idx256(m,a,c,t) \
+  (((((m * Na + a) * (Nc) + c)*Nt + t) * 2) / sizeof(__m256i))
 //TODO  (((((m * Na + a) * (Nc) + c)*Nt + t) * N_INPUTS_PER_PACKET) / sizeof(uint64_t))
 
 typedef struct paper_input_block {
@@ -188,8 +177,11 @@ typedef struct paper_input_databuf {
 // Returns word (uint64_t) offset for real input data word (8 inputs)
 // corresponding to the given parameters.  Corresponding imaginary data word is
 // 1 word later (complex block size 1).
+//TODO should there me a /sizeof(uint64_t) here? and/or a factor of 4?
 #define paper_gpu_input_databuf_data_idx(m,a,t,c) \
-  (m*Nt*Nc*Na) + (t*Nc*Na) + (c*Na) + a 
+  ((m*Nt*Nc*Na) + (t*Nc*Na) + (c*Na) + a)
+#define paper_gpu_input_databuf_data_idx256(m,a,t,c) \
+  (4*((m*Nt*Nc*Na) + (t*Nc*Na) + (c*Na) + a) / sizeof(__m256i))
 
 typedef struct paper_gpu_input_block {
   paper_input_header_t header;

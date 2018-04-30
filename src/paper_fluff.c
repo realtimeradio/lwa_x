@@ -11,15 +11,6 @@
 #include "paper_fluff.h"
 
 #define N_WORD128_PER_PACKET  (N_BYTES_PER_PACKET/sizeof(__m128i))
-// OUTPUT_STRIDE in is units of __m256i
-//#define OUTPUT_STRIDE ((2*Nf*N_INPUTS_PER_PACKET)/sizeof(__m256i))
-//#define OUTPUT_STRIDE ((2*Na)/sizeof(__m256i))
-#define OUTPUT_STRIDE 1
-
-#define paper_input_databuf_data_idx256(m,a,c,t) \
-  ((((m * Na + a) * Nc + c) * t) * N_INPUTS_PER_PACKET / sizeof(__m256i))
-#define paper_gpu_input_databuf_data_idx256(m,a,t,c) \
-  (4*((m*Nt*Nc*Na) + (t*Nc*Na) + (c*Na) + a) / sizeof(__m256i))
 
 #if 0
 typedef union {
@@ -63,13 +54,24 @@ int paper_fluff_diag(const uint64_t const * const in, uint64_t * out)
   return 0;
 }
 
-
+/*
+ * The xGPU input buffer is time x channel x antenna x pol. Each pol input
+ * is a 1Byte + 1Byte complex value.
+ * So a 256 bit (32 Byte) chunk of memory should contain a single time/channel,
+ * and 16 inputs (8 antennas x dual-pol).
+ *
+ * The netthread output buffer has a shape dictated by the structure of a single
+ * packet. It has dimensions time x antenna x channel x times-per-packet x pol.
+ * Each pol is a 4bit + 4bit complex value.
+ * Thus, the fluffing thread has to do some gymnastics to write the GPU input buffer
+ * more than one antenna at a time.
+*/
 int paper_fluff(const uint64_t const * const in, uint64_t * out)
 {
   //uint64_t v0, v1, v2, v3;
   //vec_t in0, in1, in2, in3;
   //vec_t v0, v1, v2, v3;
-  int m, c, t, a, i, j, k, l, n, p;
+  int m, ct, c, t, a, i, j, k, l, n, p, wc, wa, wt;
 
   __m256i int0, int1, outlo, int2, int3, outhi;
 
@@ -83,92 +85,119 @@ int paper_fluff(const uint64_t const * const in, uint64_t * out)
   __m256i row[16], temp[16];
 
   p_out = (__m256i *)out;
-  // Loop over different packets
+  // Loop over different time chunks
   for(m=0; m<Nm; m++) {
-    // Loop over X-engine channels
-    for(c=0; c<Nc; c++) {
-      // Loop over 16-sample time chunks
-      for(t=0; t<Nt/16; t++) {
-        // Loop over 16-antenna chunks
-        for(a=0; a<Na/16; a++) {
-          // Load a 16-sample by 16-antenna matrix into 16 x 128 bit registers
-          for(i=0; i<16; i++) {
-            //row[i]  = _mm256_stream_load_si256(p_in + paper_input_databuf_data_idx256(m,16*a+i,c,t));
-            row[i]  = _mm256_load_si256(p_in + paper_input_databuf_data_idx256(m,16*a+i,c,t));
-            //row[i]  = _mm256_stream_load_si256(p_in + paper_input_databuf_data_idx256(m,16*a+i,c,t));
-          }
-          /* TRANSPOSE */
-          for(j=0; j<8; j++) {
-            temp[j]   = _mm256_unpacklo_epi16(row[2*j], row[2*j+1]);
-            temp[j+8] = _mm256_unpackhi_epi16(row[2*j], row[2*j+1]);
-          }
-          for(k=0; k<8; k++) {
-            row[k]   = _mm256_unpacklo_epi32(temp[2*k], temp[2*k+1]);
-            row[k+8] = _mm256_unpackhi_epi32(temp[2*k], temp[2*k+1]);
-          }
-          for(l=0; l<8; l++) {
-            temp[l]   = _mm256_unpacklo_epi64(row[2*l], row[2*l+1]);
-            temp[l+8] = _mm256_unpackhi_epi64(row[2*l], row[2*l+1]);
-          }
-          /* END TRANSPOSE -- actually we have transposed 4 8x8 blocks of the matrix.
-             For the full transpose we'd need a unpackX_epi128, which doesn't exist.*/
-          /* Fluff each 256 bit row of the transposed matrix into
-             two 256-bit fluffed words. The loop here is over rows, which are times.
-             The matrix here should be:
-             ANT[ 0: 7]T0, ANT[ 0: 7]T8
-             ANT[ 0: 7]T1, ANT[ 0: 7]T9
-             ANT[ 0: 7]T2, ANT[ 0: 7]T10
-             ANT[ 0: 7]T3, ANT[ 0: 7]T11
-             ANT[ 0: 7]T4, ANT[ 0: 7]T12
-             ANT[ 0: 7]T5, ANT[ 0: 7]T13
-             ANT[ 0: 7]T6, ANT[ 0: 7]T14
-             ANT[ 0: 7]T7, ANT[ 0: 7]T15
-             ANT[ 8:15]T0, ANT[ 8:15]T8
-             ANT[ 8:15]T1, ANT[ 8:15]T9
-             ANT[ 8:15]T2, ANT[ 8:15]T10
-             ANT[ 8:15]T3, ANT[ 8:15]T11
-             ANT[ 8:15]T4, ANT[ 8:15]T12
-             ANT[ 8:15]T5, ANT[ 8:15]T13
-             ANT[ 8:15]T6, ANT[ 8:15]T14
-             ANT[ 8:15]T7, ANT[ 8:15]T15 */
-          for(p=0; p<2; p++) {
-            for(n=0; n<8; n++) {
-              // fluff and load
-              // shift so that we have four bitvectors, where the top 4 bits
-              // of each 16-bit word are consecutive values
-              int0 = temp[8*p + n];
-              int1 = _mm256_slli_epi16(temp[8*p + n], 4);
-              int2 = _mm256_slli_epi16(temp[8*p + n], 8);
-              int3 = _mm256_slli_epi16(temp[8*p + n], 12);
+    // Loop over X-engine channel-times
+    for(ct=0; ct<(Nc*Nt); ct=ct+16) {
+      c = ct / Nt;
+      t = 0; //Only valid if Nt < 16
+      for(a=0; a<Na; a=a+16) {
+        // Load a 16-chan-sample by 16-antenna matrix into 16 x 256 bit registers
+        for(i=0; i<16; i++) {
+          //row[i]  = _mm256_stream_load_si256(p_in + paper_input_databuf_data_idx256(m,16*a+i,c,t));
+          row[i]  = _mm256_load_si256(p_in + paper_input_databuf_data_idx256(m,a+i,c,t));
+          //row[i]  = _mm256_stream_load_si256(p_in + paper_input_databuf_data_idx256(m,16*a+i,c,t));
+        }
+        /* TRANSPOSE */
+        for(j=0; j<8; j++) {
+          temp[j]   = _mm256_unpacklo_epi16(row[2*j], row[2*j+1]);
+          temp[j+8] = _mm256_unpackhi_epi16(row[2*j], row[2*j+1]);
+        }
+        for(k=0; k<8; k++) {
+          row[k]   = _mm256_unpacklo_epi32(temp[2*k], temp[2*k+1]);
+          row[k+8] = _mm256_unpackhi_epi32(temp[2*k], temp[2*k+1]);
+        }
+        for(l=0; l<8; l++) {
+          temp[l]   = _mm256_unpacklo_epi64(row[2*l], row[2*l+1]);
+          temp[l+8] = _mm256_unpackhi_epi64(row[2*l], row[2*l+1]);
+        }
+        /* END TRANSPOSE -- actually we have transposed 4 8x8 blocks of the matrix.
+           For the full transpose we'd need a unpackX_epi128, which isn't available.*/
+        /* Fluff each 256 bit row of the transposed matrix into
+           two 256-bit fluffed words. The loop here is over rows, which are times.
+           The matrix here should be:
+           ANT[ 0: 7]C0T0, ANT[ 0: 7]C4T0
+           ANT[ 0: 7]C0T1, ANT[ 0: 7]C4T1
+           ANT[ 0: 7]C1T0, ANT[ 0: 7]C5T0
+           ANT[ 0: 7]C1T1, ANT[ 0: 7]C5T1
+           ANT[ 0: 7]C2T0, ANT[ 0: 7]C6T0
+           ANT[ 0: 7]C2T1, ANT[ 0: 7]C6T1
+           ANT[ 0: 7]C3T0, ANT[ 0: 7]C7T0
+           ANT[ 0: 7]C3T1, ANT[ 0: 7]C7T1
+           ANT[ 8:15]C0T0, ANT[ 8:15]C4T0
+           ANT[ 8:15]C0T1, ANT[ 8:15]C4T1
+           ANT[ 8:15]C1T0, ANT[ 8:15]C5T0
+           ANT[ 8:15]C1T1, ANT[ 8:15]C5T1
+           ANT[ 8:15]C2T0, ANT[ 8:15]C6T0
+           ANT[ 8:15]C2T1, ANT[ 8:15]C6T1
+           ANT[ 8:15]C3T0, ANT[ 8:15]C7T0
+           ANT[ 8:15]C3T1, ANT[ 8:15]C7T1 */
 
-              // shift down with sign extension. AKA, "fluff"
-              // This makes the top 8 bits of the int0 and int2 values valid 8-bit signed numbers
-              // The shift by 12 makes the lower 8-bits of the int1 and in3 values 8-bit signed numbers
-              int0 = _mm256_srai_epi16(int0, 4);
-              int1 = _mm256_srai_epi16(int1, 12);
-              int2 = _mm256_srai_epi16(int2, 4);
-              int3 = _mm256_srai_epi16(int3, 12);
+        // Convenience loops: Separate into the top and bottom
+        // part of this matrix
+        for(p=0; p<2; p++) {
+          wa = p * 8; // antenna to write
+          for(n=0; n<8; n++) {
+            wc = n / Nt; // channel to write (the first one appearing in the row)
+            wt = n % Nt; // time sample to write
+            // fluff and load
+            // shift so that we have four bitvectors, where the top 4 bits
+            // of each 16-bit word are consecutive values
+            // eg, for n=0, p=0; int0 is: A0C0T0xr, A0C0T0xi, A0C0T0yr, A0C0T0yi 
+            int0 = temp[8*p + n];
+            // eg, for n=0, p=0; int1 is: A0C0T0xi, A0C0T0yr, A0C0T0yi, 00000000
+            int1 = _mm256_slli_epi16(temp[8*p + n], 4);
+            // eg, for n=0, p=0; int2 is: A0C0T0yr, A0C0T0yi, 00000000, 00000000
+            int2 = _mm256_slli_epi16(temp[8*p + n], 8);
+            // eg, for n=0, p=0; int3 is: A0C0T0yi, 00000000, 00000000, 00000000
+            int3 = _mm256_slli_epi16(temp[8*p + n], 12);
 
-              // Mask bits, ready to AND together
-              int0 = _mm256_and_si256(int0, maskhi);
-              int1 = _mm256_and_si256(int1, masklo);
-              int2 = _mm256_and_si256(int2, maskhi);
-              int3 = _mm256_and_si256(int3, masklo);
+            // shift down with sign extension. AKA, "fluff"
+            // This makes the top 8 bits of the int0 and int2 values valid 8-bit signed numbers
+            // The shift by 12 makes the lower 8-bits of the int1 and in3 values 8-bit signed numbers
+            // eg, for n=0, p=0; int0 is: A0C0T0xr-8b, A0C0T0xi, A0C0T0yr
+            int0 = _mm256_srai_epi16(int0, 4);
+            // eg, for n=0, p=0; int1 is: A0C0T0xi-16b
+            int1 = _mm256_srai_epi16(int1, 12);
+            // eg, for n=0, p=0; int2 is: A0C0T0yr-8b, A0C0T0yi, 00000000
+            int2 = _mm256_srai_epi16(int2, 4);
+            // eg, for n=0, p=0; int3 is: A0C0T0yi-16b
+            int3 = _mm256_srai_epi16(int3, 12);
 
-              // AND together pairs of vectors
-              outlo = _mm256_and_si256(int0, int1);
-              outhi = _mm256_and_si256(int2, int3);
+            // Mask bits, ready to AND together
+            // eg, for n=0, p=0; int0 is: A0C0T0xr-8b, 8'b0
+            int0 = _mm256_and_si256(int0, maskhi);
+            // eg, for n=0, p=0; int1 is: 8'b0, A0C0T0xi-8b
+            int1 = _mm256_and_si256(int1, masklo);
+            // eg, for n=0, p=0; int2 is: A0C0T0yr-8b, 8'b0
+            int2 = _mm256_and_si256(int2, maskhi);
+            // eg, for n=0, p=0; int3 is: 8'b0, A0C0T0yi-8b
+            int3 = _mm256_and_si256(int3, masklo);
 
-              // Store two 256-bit words with _mm256_stream_si256
-              //fprintf(stdout, "m:%d, a:%d, c:%d, t:%d, word1: %d, word2: %d\n", m,a,c,t,paper_gpu_input_databuf_data_idx(m,16*a+8*p,t+n,c), paper_gpu_input_databuf_data_idx(m,16*a+8*p,t+n+8,c));
-              _mm256_store_si256(p_out + paper_gpu_input_databuf_data_idx256(m,16*a+8*p,t+n,c), outlo);
-              _mm256_store_si256(p_out + paper_gpu_input_databuf_data_idx256(m,16*a+8*p,t+n+8,c), outhi);
-              //_mm256_stream_si256(p_out + paper_gpu_input_databuf_data_idx256(m,16*a+8*p,t+n,c), outlo);
-              //_mm256_stream_si256(p_out + paper_gpu_input_databuf_data_idx256(m,16*a+8*p,t+n+8,c), outhi);
-              //_mm256_stream_si256(foo256, outlo);
-              //_mm256_stream_si256(bar256, outhi);
-            
-            }
+            // AND together pairs of vectors
+            // eg, for n=0, p=0; outlo is: A0C0T0xr-8b, A0C0T0xi-8b
+            outlo = _mm256_and_si256(int0, int1);
+            // eg, for n=0, p=0; outlo is: A0C0T0yr-8b, A0C0T0yi-8b
+            outhi = _mm256_and_si256(int2, int3);
+
+            // For a full 256-bit word (for n=0, p=0):
+            // outlo: A0C0T0x(r/i), A1C0T0x(r/i), ..., A7C0T0x(r/i), A0C4T0x(r/i), A7C4T0x(r/i)
+            // outhi: A0C0T0y(r/i), A1C0T0y(r/i), ..., A7C0T0y(r/i), A0C4T0y(r/i), A7C4T0y(r/i)
+
+            // Interleave these to gather X and Y pols
+            // eg, for n=0, p=0; int0 = A0C0T0x(r/i), A0C0T0y(r/i), ..., A7C0T0x(r/i),  A7C0T0y(r/i)
+            int0 = _mm256_unpacklo_epi16(outlo, outhi);
+            // eg, for n=0, p=0; int1 = A0C4T0x(r/i), A0C4T0y(r/i), ..., A7C4T0x(r/i),  A7C4T0y(r/i)
+            int1 = _mm256_unpackhi_epi16(outlo, outhi);
+
+            // Store these two 256-bit words with _mm256_stream_si256
+            //fprintf(stdout, "m:%d, a:%d, c:%d, t:%d, word1: %d, word2: %d\n", m,a,c,t,paper_gpu_input_databuf_data_idx(m,16*a+8*p,t+n,c), paper_gpu_input_databuf_data_idx(m,16*a+8*p,t+n+8,c));
+            _mm256_store_si256(p_out + paper_gpu_input_databuf_data_idx256(m, a+wa, wt, wc), int0);
+            _mm256_store_si256(p_out + paper_gpu_input_databuf_data_idx256(m, a+wa, wt, wc + (8/Nt)), int1);
+            //_mm256_stream_si256(p_out + paper_gpu_input_databuf_data_idx256(m,16*a+8*p,t+n,c), outlo);
+            //_mm256_stream_si256(p_out + paper_gpu_input_databuf_data_idx256(m,16*a+8*p,t+n+8,c), outhi);
+            //_mm256_stream_si256(foo256, outlo);
+            //_mm256_stream_si256(bar256, outhi);
           }
         }
       }

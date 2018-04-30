@@ -355,6 +355,7 @@ static inline uint64_t process_packet(
     packet_header_t pkt_header;
     const uint64_t *payload_p;
     int pkt_block_i;
+    int i;
     uint64_t *dest_p;
     int64_t pkt_mcnt_dist;
     uint64_t pkt_mcnt;
@@ -460,14 +461,16 @@ static inline uint64_t process_packet(
 	    return -1;
 	}
 
-	// Calculate starting points for unpacking this packet into block's data buffer.
-	dest_p = paper_input_databuf_p->block[pkt_block_i].data
-	    + paper_input_databuf_data_idx(binfo.m, binfo.a, binfo.c, 0); //time index is always zero
-        //fprintf(stdout, "m:%d, a:%d, c:%d, %lu\n", binfo.m, binfo.a, binfo.c, paper_input_databuf_data_idx(binfo.m, binfo.a, binfo.c, 0));
-	payload_p        = (uint64_t *)(PKT_UDP_DATA(p_frame)+8);
 
 	// Copy data into buffer
-	memcpy(dest_p, payload_p, N_BYTES_PER_PACKET);
+        for(i=0; i<N_INPUTS_PER_PACKET/2; i++) {
+	    // Calculate starting points for unpacking this packet into block's data buffer.
+	    dest_p = paper_input_databuf_p->block[pkt_block_i].data
+	        + paper_input_databuf_data_idx(binfo.m, binfo.a + i, binfo.c, 0); //time index is always zero
+            //fprintf(stdout, "m:%d, a:%d, c:%d, %lu\n", binfo.m, binfo.a, binfo.c, paper_input_databuf_data_idx(binfo.m, binfo.a, binfo.c, 0));
+	    payload_p        = (uint64_t *)(PKT_UDP_DATA(p_frame)+8+(i*2*N_CHAN_PER_PACKET*N_TIME_PER_PACKET));
+	    memcpy(dest_p, payload_p, 2*N_CHAN_PER_PACKET*N_TIME_PER_PACKET);
+        }
 
 	return netmcnt;
     }
