@@ -275,7 +275,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
             /*
              * Call CPU X engine function
              */
-            xgpuOmpXengine((ComplexInt *)db_out->block[curblock_out].data, context.array_h);
+            xgpuOmpXengine((Complex *)db_out->block[curblock_out].data, context.array_h);
 
             // Mark output block as full and advance
             paper_output_databuf_set_filled(db_out, curblock_out);
