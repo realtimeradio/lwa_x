@@ -156,30 +156,30 @@ typedef struct paper_input_databuf {
 //
 // * Fluffer thread output
 // * GPU thread input
+// GPU input buffer is input[time/4][channel][station][pol][complexity][time%4]
 // * Multidimensional array in "data" field:
 //
-//   +--time--+      +--chan +--fid
-//   |        |      |       |
-//   V        V      V       V
-//   m        t      c       f
-//   ==      ==      ==      ==
-//   m0 }--> t0 }--> c0 }--> f0
-//   m1      t1      c1      f1
-//   m2      t2      c2      f2
-//   :       :       :       :
-//   ==      ==      ==      ==
-//   Nm      Nt      Nc      Na
+//   +--time   +--chan +--fid  +--complexity +--time%4
+//   |         |       |       |             |
+//   V         V       V       V             V
+//   m         c       f       r             i
+//   ==        ==      ==
+//   m0 }----> c0 }--> f0 }--> real }------> i0
+//   m1        c1      f1      imag          i1
+//   m2        c2      f2                    i2
+//   :         :       :                     i3
+//   ==        ==      ==      ==            ==
+//   Nm*Nt/4   Nc      Na      2             t%4
 //
-//   Each group of eight 8 byte words (i.e. every 64 bytes) contains thirty-two
-//   8bit+8bit complex inputs (8 inputs * four F engines) using complex block
-//   size 1.
+//   Each group of eight bytes contains four timesamples for
+//   the real and imaginary part of a single ant-pol-chan
 
-// Returns word (uint64_t) offset for real input data word (8 inputs)
-// corresponding to the given parameters.  Corresponding imaginary data word is
-// 1 word later (complex block size 1).
-//TODO should there me a /sizeof(uint64_t) here? and/or a factor of 4?
+// Returns word (uint64_t) offset for real input data word
+// corresponding to the given parameters.  Corresponding imaginary data
+// word is 4 bytes later. Only valid for t a multiple of 4
+
 #define paper_gpu_input_databuf_data_idx(m,a,t,c) \
-  ((m*Nt*Nc*Na) + (t*Nc*Na) + (c*Na) + a)
+  ((m*Nt*Nc*Na) + ((t/4)*Nc*Na*4) + (c*Na*4) + a*4)
 #define paper_gpu_input_databuf_data_idx256(m,a,t,c) \
   (4*((m*Nt*Nc*Na) + (t*Nc*Na) + (c*Na) + a) / sizeof(__m256i))
 
