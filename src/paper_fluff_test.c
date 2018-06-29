@@ -4,7 +4,7 @@
 
 #include "paper_fluff.h"
 
-#define TEST_ITERATIONS (500)
+#define TEST_ITERATIONS (100)
 
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
 #ifdef DEBUG_FLUFF
   fluffed = paper_fluff(in, out);
 #else
-  for(j=0; j<4; j++) {
+  for(j=0; j<20; j++) {
     clock_gettime(CLOCK_MONOTONIC, &start);
     for(i=0; i<TEST_ITERATIONS; i++) {
       fluffed = paper_fluff(in, out);
@@ -76,7 +76,7 @@ int main(int argc, char *argv[])
     printf("fluffed %d words in %.6f ms (%.3f us per packet, %.3f Gbps)\n",
         fluffed, ELAPSED_NS(start, stop)/1e6/TEST_ITERATIONS,
         ELAPSED_NS(start, stop)/1e3/TEST_ITERATIONS/N_PACKETS_PER_BLOCK,
-        (float)(fluffed*TEST_ITERATIONS*8*sizeof(uint64_t))/ELAPSED_NS(start, stop));
+        ((float)fluffed*TEST_ITERATIONS*8*sizeof(uint64_t))/ELAPSED_NS(start, stop));
   }
 #endif // DEBUG_FLUFF_GEN
 
