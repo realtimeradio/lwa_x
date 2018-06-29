@@ -21,39 +21,6 @@ typedef union {
 #define m64(v,i) (v.m64[i])
 #endif // 0
 
-int paper_fluff_diag(const uint64_t const * const in, uint64_t * out)
-{
-  const __m128i mask = _mm_set_epi64((__m64)0xf0f0f0f0f0f0f0f0ULL, (__m64)0xf0f0f0f0f0f0f0f0ULL);
-
-  __m128i * p128_in  = (__m128i *)in;
-  __m256i * p256_out = (__m256i *)out;
-
-  // Load 128 bits (16 bytes) with _mm_stream_load_si128
-  __m128i lo = _mm_stream_load_si128(p128_in);
-
-  // Shift lo left by 4 bits to make hi
-  __m128i hi = _mm_slli_epi64(lo, 4);
-
-  // Mask off unwanted bits
-  lo = _mm_and_si128(lo, mask);
-  hi = _mm_and_si128(hi, mask);
-
-  // Transfer lo to lower half of __m256i variable 'out256'
-  // Use pragmas to avoid "uninitialized use of out256" warning/error
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wuninitialized"
-  __m256i out256 = _mm256_insertf128_si256(out256, lo, 0);
-#pragma GCC diagnostic pop
-
-  // Transfer hi to upper half of __m256i variable 'out256'
-  out256 = _mm256_insertf128_si256(out256, hi, 1);
-
-  // Store 256 bits (32 bytes) with _mm256_stream_si256
-  _mm256_stream_si256(p256_out, out256);
-
-  return 0;
-}
-
 /*
  * The xGPU input buffer is time x channel x antenna x pol x complexity x 4[samples]. Each real/imag
  * input component is a 1Byte + 1Byte complex value.
