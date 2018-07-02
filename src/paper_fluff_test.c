@@ -4,7 +4,7 @@
 
 #include "paper_fluff.h"
 
-#define TEST_ITERATIONS (100)
+#define TEST_ITERATIONS (10)
 
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
@@ -12,6 +12,62 @@
 #define N_WORDS_PER_BLOCK_IN (N_BYTES_PER_BLOCK/sizeof(uint64_t))
 #define N_WORDS_PER_BLOCK_OUT (2*N_WORDS_PER_BLOCK_IN)
 #define N_WORDS_PER_PACKET  (N_BYTES_PER_PACKET/sizeof(uint64_t))
+
+void fluff_check()
+{
+  /*
+  The in-buffer order is time[Nm] x antenna x pol x channel x time[Nt] x complexity
+  Each real+imag sample is 8-bits
+  Make a test input vector to test each of these elements:
+  complexity-test : all real parts 1, all imag parts 2
+  time-test : each 4+4 bit time sample increments by 1, starting at 0, wrapping at 256
+  channel-test: each 4+4 but channel increments by 1, starting at 0, wrapping at 256
+  antenna-test: each 4+4 bit ant-pol sample increments by 1, wrapping at 256
+  */
+  uint64_t *in, *out;
+  int m, a, p, c, t, x;
+  if(posix_memalign((void **)&in,  CACHE_ALIGNMENT,   N_BYTES_PER_BLOCK)
+  || posix_memalign((void **)&out, CACHE_ALIGNMENT, 2*N_BYTES_PER_BLOCK)) {
+    printf("cannot allocate memory\n");
+    return;
+  }
+  // Time test
+  for (m=0; m<Nm; m++){
+    for (a=0; a<Na; a++) {
+      for (p=0; p<Np; p++) {
+        for (c=0; c<Nc; c++) {
+          for (t=0; t<Nt; t++) {
+            *((uint8_t *) in + paper_input_databuf_data_idx8(m,a,p,c,t)) = (((m*Nt + t) % 8) << 4) + ((m*Nt + t) % 8);
+          }
+        }
+      }
+    }
+  }
+
+
+  printf("Running time-ordering test...");
+  paper_fluff(in, out);
+  int errs = 0;
+  for (t=0; t<Nm*Nt; t++) {
+    for (a=0; a<Na; a++) {
+      for (p=0; p<Np; p++) {
+        for (c=0; c<Nc; c++) {
+          for (x=0; x<Nx; x++) {
+            if (*((uint8_t *) out + paper_gpu_input_databuf_data_idx8(t, c, a, p, x)) != t%8) {
+              //printf("Fluff test failed. t=%d, c=%d, a=%d, p=%d, x=%d. Expected %d, got %d!\n", t, c, a, p, x, t%8, *((uint8_t *) out + paper_gpu_input_databuf_data_idx8(t, c, a, p, x)));
+              errs++;
+            }
+          }
+        }
+      }
+    }
+  } 
+  if (errs == 0) {
+    printf("PASSED\n");
+  } else {
+    printf("FAILED\n");
+  }
+}
 
 int main(int argc, char *argv[])
 {
@@ -57,17 +113,17 @@ int main(int argc, char *argv[])
 #else
 
 
-
   printf("N_CHAN_PER_PACKET=%u\n", N_CHAN_PER_PACKET);
   printf("N_TIME_PER_PACKET=%u\n", N_TIME_PER_PACKET);
   printf("N_WORDS_PER_PACKET=%lu\n", N_WORDS_PER_PACKET);
   printf("N_PACKETS_PER_BLOCK=%u\n", N_PACKETS_PER_BLOCK);
   printf("N_BYTES_PER_BLOCK=%u\n", N_BYTES_PER_BLOCK);
 
+
 #ifdef DEBUG_FLUFF
   fluffed = paper_fluff(in, out);
 #else
-  for(j=0; j<20; j++) {
+  for(j=0; j<4; j++) {
     clock_gettime(CLOCK_MONOTONIC, &start);
     for(i=0; i<TEST_ITERATIONS; i++) {
       fluffed = paper_fluff(in, out);
@@ -79,6 +135,8 @@ int main(int argc, char *argv[])
         ((float)fluffed*TEST_ITERATIONS*8*sizeof(uint64_t))/ELAPSED_NS(start, stop));
   }
 #endif // DEBUG_FLUFF_GEN
+  // check the actual contents of the fluffing operation
+  fluff_check();
 
   return 0;
 }

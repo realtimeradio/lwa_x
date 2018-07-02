@@ -115,6 +115,10 @@ typedef uint8_t paper_input_header_cache_alignment[
 #define Na N_ANTS
 #define Nc N_CHAN_PER_X
 #define Nt N_TIME_PER_PACKET
+// Number of pols = 2
+#define Np 2
+// Number of complex elements = 2
+#define Nx 2
 
 // HERA mcount index = m * Na * Nc * Nt * HERA_N_INPUTS_PER_PACKET / sizeof(uint64_t)
 // HERA ant index = a * Nc * Nt * HERA_N_INPUTS_PER_PACKET / sizeof(uint64_t)
@@ -123,10 +127,17 @@ typedef uint8_t paper_input_header_cache_alignment[
 // Computes paper_input_databuf_t data word (uint64_t) offset for complex data
 // word corresponding to the given parameters for HERA F engine packets.
 
+//#define paper_input_databuf_data_idx(m,a,c,t) \ //foo
+//  (((((m * Na + a) * (Nc) + c)*Nt + t) * 2) / sizeof(uint64_t))
 #define paper_input_databuf_data_idx(m,a,c,t) \
-  (((((m * Na + a) * (Nc) + c)*Nt + t) * 2) / sizeof(uint64_t))
+  ((((m) * Na*Nc*Nt*Np) + ((a) * Nc*Nt*Np) + ((c)*Nt*Np) + ((t)*Np)) / sizeof(uint64_t))
+
+#define paper_input_databuf_data_idx8(m,a,p,c,t) \
+  (((m) * Na*Nc*Nt*Np) + ((a) * Nc*Nt*Np) + ((c)*Nt*Np) + ((t)*Np) + (p))
+
 #define paper_input_databuf_data_idx256(m,a,c,t) \
-  (((((m * Na + a) * (Nc) + c)*Nt + t) * 2) / sizeof(__m256i))
+  ((((((m) * Na) + (a))*Nc + (c))*Nt + (t))*Np / sizeof(__m256i))
+  //((((m) * Na*Nc*Nt*Np) + ((a) * Nc*Nt*Np) + ((c)*Nt*Np) + ((t)*Np)) / sizeof(__m256i))
 //TODO  (((((m * Na + a) * (Nc) + c)*Nt + t) * N_INPUTS_PER_PACKET) / sizeof(uint64_t))
 
 typedef struct paper_input_block {
@@ -179,9 +190,20 @@ typedef struct paper_input_databuf {
 // word is 4 bytes later. Only valid for t a multiple of 4
 
 #define paper_gpu_input_databuf_data_idx(m,a,t,c) \
-  ((m*Nt*Nc*Na) + ((t/4)*Nc*Na*4) + (c*Na*4) + a*4)
-#define paper_gpu_input_databuf_data_idx256(m,a,t,c) \
-  (4*((m*Nt*Nc*Na) + (t*Nc*Na) + (c*Na) + a) / sizeof(__m256i))
+  (((m)*Nt*Nc*Na) + (((t)/4)*Nc*Na*4) + ((c)*Na*4) + (a)*4)
+
+#define paper_gpu_input_databuf_data_idx8(t, c, a, p, x) \
+  ((((t)>>2)*4*Nx*Np*Na*Nc) + ((c)*4*Nx*Np*Na) + ((a)*4*Np*Nx) + ((p)*4*Nx) + ((x)*4) + ((t)%4))
+
+#define paper_gpu_input_databuf_data_idx256(t, c, a, p, x) \
+  (((((t)>>2)*4*Nx*Np*Na*Nc) + ((c)*4*Nx*Np*Na) + ((a)*4*Np*Nx) + ((p)*4*Nx) + ((x)*4) + ((t)%4)) / sizeof(__m256i))
+
+#define paper_gpu_input_databuf_data_idx_tca_256(t, c, a) \
+  (((((((t)*Nc) + 4*(c))*Na + 4*(a))*Nx*Np) + (t)%4) / sizeof(__m256i))
+  //(((((((t)>>2)*Nc) + (c))*Na + (a))*Nx*4*Np + ((t)%4)) / sizeof(__m256i))
+
+//#define paper_gpu_input_databuf_data_idx256(m,a,t,c) \ //foo
+//  (4*((m*Nt*Nc*Na) + (t*Nc*Na) + (c*Na) + a) / sizeof(__m256i))
 
 typedef struct paper_gpu_input_block {
   paper_input_header_t header;
