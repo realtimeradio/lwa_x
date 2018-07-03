@@ -189,8 +189,11 @@ typedef struct paper_input_databuf {
 // corresponding to the given parameters.  Corresponding imaginary data
 // word is 4 bytes later. Only valid for t a multiple of 4
 
-#define paper_gpu_input_databuf_data_idx(m,a,t,c) \
-  (((m)*Nt*Nc*Na) + (((t)/4)*Nc*Na*4) + ((c)*Na*4) + (a)*4)
+//#define paper_gpu_input_databuf_data_idx(m,a,t,c) \ //foo
+//  (((m)*Nt*Nc*Na) + (((t)/4)*Nc*Na*4) + ((c)*Na*4) + (a)*4)
+
+#define paper_gpu_input_databuf_data_idx(t, c, a, p, x) \
+  (((((t)>>2)*4*Nx*Np*Na*Nc) + ((c)*4*Nx*Np*Na) + ((a)*4*Np*Nx) + ((p)*4*Nx) + ((x)*4) + ((t)%4)) / sizeof(uint64_t))
 
 #define paper_gpu_input_databuf_data_idx8(t, c, a, p, x) \
   ((((t)>>2)*4*Nx*Np*Na*Nc) + ((c)*4*Nx*Np*Na) + ((a)*4*Np*Nx) + ((p)*4*Nx) + ((x)*4) + ((t)%4))
