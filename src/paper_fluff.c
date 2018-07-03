@@ -49,8 +49,8 @@ int paper_fluff(const uint64_t const * const in, uint64_t * out)
                                            0xff00ff00ff00ff00ULL, 0xff00ff00ff00ff00ULL);
   const __m256i masklo = _mm256_set_epi64x(0x00ff00ff00ff00ffULL, 0x00ff00ff00ff00ffULL,
                                            0x00ff00ff00ff00ffULL, 0x00ff00ff00ff00ffULL);
-  const __m256i shuffle_map = _mm256_set_epi64x(0x0705030106040200ULL, 0x0705030106040200ULL,
-                                                0x0705030106040200ULL, 0x0705030106040200ULL);
+  const __m256i shuffle_map = _mm256_set_epi64x(0x0f0d0b090e0c0a08ULL, 0x0705030106040200ULL,
+                                                0x0f0d0b090e0c0a08ULL, 0x0705030106040200ULL);
   //__m256i row[16], temp0[16], temp1[16], temp2[16];
   __m256i row[8], temp[8];
 
@@ -268,23 +268,23 @@ int paper_fluff(const uint64_t const * const in, uint64_t * out)
             //    A1C4T2yr, A1C4T2yi 
             //    A1C4T3yr, A1C4T3yi 
             outy = _mm256_or_si256(int2, int3);
-            //_mm256_stream_si256((__m256i *) foo0, outx);
-            //_mm256_stream_si256((__m256i *) foo1, outy);
 
             // Interleave these to gather X and Y pols
             // and separate out the two channels.
             // and can be fixed later with a bit shuffle
             // eg, for rn=0 int0 = 
-            //    A[0:1]C0[x/y]T[0:3][r/i] // 256-bits
-            int0 = _mm256_permute2x128_si256(outx, outy, 0x20); //channel 0
-            //int0 = _mm256_unpacklo_epi32(outx, outy);
+            //    [x/y]A[0:1]C0T[0:3][r/i] // 256-bits
+            int0 = _mm256_permute2x128_si256(outx, outy, 0x02); //channel 0
+            //    and then make A[0:1][x/y]C0T[0:3][r/i] // 256-bits
+            int0 = _mm256_permute4x64_epi64(int0, 0xd8); //channel 0
             // eg, for rn=0, int1 =
-            //    A[0:1]C4[x/y]T[0:3][r/i] // 256-bits
-            int1 = _mm256_permute2x128_si256(outx, outy, 0x31); //channel 4
-            //int1 = _mm256_unpackhi_epi32(outx, outy);
+            //    [x/y]A[0:1]C4T[0:3][r/i] // 256-bits
+            int1 = _mm256_permute2x128_si256(outx, outy, 0x13); //channel 4
+            //    and then make A[0:1][x/y]C4T[0:3][r/i] // 256-bits
+            int1 = _mm256_permute4x64_epi64(int1, 0xd8); //channel 0
 
             // Finally perform a bytewise transpose using a shuffle
-            // Outputs are ordered 2-antenna x 1-chan x 2-pol x 4-time x 2-complexity
+            // Outputs are ordered 2-pol x 2-antenna x 1-chan x 4-time x 2-complexity
             // We want 1-chan x 2-antenna x 2-pol x complexity x 4-time ([ants 0..1][real/imag][time 0..3])
             int0 = _mm256_shuffle_epi8(int0, shuffle_map); // Channel 0
             int1 = _mm256_shuffle_epi8(int1, shuffle_map); // Channel 4
