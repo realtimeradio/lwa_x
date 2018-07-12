@@ -195,7 +195,7 @@ static XGPUInfo xgpu_info;
 //   10 megabit per second = 100 nanosecond per bit
 //#define PACKET_DELAY_NS (4 * 10 * 8 * BYTES_PER_PACKET)
 // Really trickle it out...
-#define PACKET_DELAY_NS (10*8 * BYTES_PER_PACKET)
+#define PACKET_DELAY_NS (4*8 * BYTES_PER_PACKET)
 
 // bytes_per_dump depends on xgpu_info.triLength
 static uint64_t bytes_per_dump = 0;

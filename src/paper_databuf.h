@@ -7,8 +7,12 @@
 
 // Determined by F engine
 #define N_CHAN_TOTAL 6144
-#define N_FENGINES   208
+#define N_FENGINES   192
 #define N_CHAN_PER_F N_CHAN_TOTAL
+
+// Number of separate X-engines which deal with
+// alternate time chunks
+#define TIME_DEMUX 2
 
 // Determined by F engine packetizer
 #define N_INPUTS_PER_PACKET  6
@@ -29,7 +33,7 @@
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / 2048)
 #define N_BYTES_PER_BLOCK            (N_TIME_PER_BLOCK * N_CHAN_PER_X * N_INPUTS)
 #define N_PACKETS_PER_BLOCK          (N_BYTES_PER_BLOCK / N_BYTES_PER_PACKET)
-#define N_PACKETS_PER_BLOCK_PER_F    (N_PACKETS_PER_BLOCK / N_FENGINES)
+#define N_PACKETS_PER_BLOCK_PER_F    (N_PACKETS_PER_BLOCK * N_INPUTS_PER_PACKET / 2 / N_FENGINES)
 
 // Validate packet dimensions
 #if    N_BYTES_PER_PACKET != (N_TIME_PER_PACKET*N_CHAN_PER_PACKET*N_INPUTS_PER_PACKET)

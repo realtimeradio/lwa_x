@@ -36,7 +36,7 @@
 //#define PKTSOCK_FRAMES_PER_BLOCK (8)
 //#define PKTSOCK_NBLOCKS (800)
 //#define PKTSOCK_NFRAMES (PKTSOCK_FRAMES_PER_BLOCK * PKTSOCK_NBLOCKS)
-#define PKTSOCK_BYTES_PER_FRAME (3328)
+#define PKTSOCK_BYTES_PER_FRAME (4864)
 #define PKTSOCK_FRAMES_PER_BLOCK (128)
 #define PKTSOCK_NBLOCKS (5000)
 #define PKTSOCK_NFRAMES (PKTSOCK_FRAMES_PER_BLOCK * PKTSOCK_NBLOCKS)
@@ -111,7 +111,7 @@ static void print_ring_mcnts(paper_input_databuf_t *paper_input_databuf_p) {
 // Returns physical block number for given mcnt
 static inline int block_for_mcnt(uint64_t mcnt)
 {
-    return (mcnt / N_TIME_PER_BLOCK) % N_INPUT_BLOCKS;
+    return ((mcnt / TIME_DEMUX) / N_TIME_PER_BLOCK) % N_INPUT_BLOCKS;
 }
 
 #ifdef LOG_MCNTS
@@ -160,8 +160,8 @@ static inline void get_header (unsigned char *p_frame, packet_header_t * pkt_hea
     //pkt_header->time        = (raw_header >> 27) & ((1L<<37)-1);
     //pkt_header->mcnt        = pkt_header->time >> 5;
     //pkt_header->mcnt        = (raw_header >> 32) & 0xffffffff;
-    pkt_header->mcnt        = (raw_header >> 27) & ((1L<<37)-1);
-    pkt_header->chan        = (raw_header >> 16) & ((1<<11)-1);
+    pkt_header->mcnt        = (raw_header >> 29) & ((1L<<35)-1);
+    pkt_header->chan        = (raw_header >> 16) & ((1<<13)-1);
     pkt_header->ant         =  raw_header        & ((1<<16)-1);
 #endif
 
@@ -237,11 +237,12 @@ static uint64_t set_block_filled(paper_input_databuf_t *paper_input_databuf_p, b
 
     // Calculate missing packets.
     block_missed_pkt_cnt = N_PACKETS_PER_BLOCK - binfo->block_packet_counter[block_i];
+    //fprintf(stderr, "Packets in block %d: %d, N_PACKETS_PER_BLOCK: %d, N_PACKETS_PER_BLOCK_PER_F: %d,  mod_cnt: %d\n", block_i, binfo->block_packet_counter[block_i], N_PACKETS_PER_BLOCK,  N_PACKETS_PER_BLOCK_PER_F, block_missed_pkt_cnt % N_PACKETS_PER_BLOCK_PER_F);
     // If we missed more than N_PACKETS_PER_BLOCK_PER_F, then assume we
     // are missing one or more F engines.  Any missed packets beyond an
     // integer multiple of N_PACKETS_PER_BLOCK_PER_F will be considered
     // as dropped packets.
-    block_missed_feng    = block_missed_pkt_cnt / N_PACKETS_PER_BLOCK_PER_F;
+    block_missed_feng    = N_INPUTS_PER_PACKET / 2 * block_missed_pkt_cnt / N_PACKETS_PER_BLOCK_PER_F;
     block_missed_mod_cnt = block_missed_pkt_cnt % N_PACKETS_PER_BLOCK_PER_F;
 
     // Reinitialize our XID to -1 (unknown until read from status buffer)
@@ -283,7 +284,7 @@ static inline int calc_block_indexes(block_info_t *binfo, packet_header_t * pkt_
     }
 
     //binfo->t = pkt_header->time;
-    binfo->m = (pkt_header->mcnt % N_TIME_PER_BLOCK) / N_TIME_PER_PACKET;
+    binfo->m = ((pkt_header->mcnt/TIME_DEMUX) % N_TIME_PER_BLOCK) / N_TIME_PER_PACKET;
     binfo->a = pkt_header->ant;
     binfo->c = pkt_header->chan % Nc;
 
@@ -295,7 +296,7 @@ static inline int calc_block_indexes(block_info_t *binfo, packet_header_t * pkt_
 
 // This allows packets to be two full databufs late without being considered
 // out of sequence.
-#define LATE_PKT_MCNT_THRESHOLD (2*N_TIME_PER_BLOCK*N_INPUT_BLOCKS)
+#define LATE_PKT_MCNT_THRESHOLD (2*TIME_DEMUX*N_TIME_PER_BLOCK*N_INPUT_BLOCKS)
 
 // Initialize a block by clearing its "good data" flag and saving the first
 // (i.e. earliest) mcnt of the block.  Note that mcnt does not have to be a
@@ -335,7 +336,7 @@ static inline void initialize_block_info(block_info_t * binfo)
 
     // On startup mcnt_start will be zero and mcnt_log_late will be Nm.
     binfo->mcnt_start = 0;
-    binfo->mcnt_log_late = N_TIME_PER_BLOCK;
+    binfo->mcnt_log_late = N_TIME_PER_BLOCK*TIME_DEMUX;
     binfo->block_i = 0;
 
     binfo->out_of_seq_cnt = 0;
@@ -399,8 +400,8 @@ static inline uint64_t process_packet(
     //fprintf(stdout, "mcnt:%lu, time:%lu, ant:%d, chan:%d\n", pkt_header.mcnt,
     //    pkt_header.time, pkt_header.ant, pkt_header.chan);
     //if(pkt_header.ant==0){
-    //    fprintf(stdout, "mcnt:%lu, time:%lu, ant:%d, chan:%d\n", pkt_header.mcnt,
-    //    pkt_header.time, pkt_header.ant, pkt_header.chan);
+    //    fprintf(stdout, "mcnt:%lu, time:%lu, ant:%d, chan:%d, block:%d \n", pkt_header.mcnt,
+    //    pkt_header.time, pkt_header.ant, pkt_header.chan, pkt_block_i);
     //}
     //if(pkt_header.ant==69){
     //    fprintf(stdout, "mcnt:%lu, time:%lu, ant:%d, chan:%d\n", pkt_header.mcnt,
@@ -412,16 +413,16 @@ static inline uint64_t process_packet(
     //}
 
     // We expect packets for the current block, the next block, and the block after.
-    if(0 <= pkt_mcnt_dist && pkt_mcnt_dist < 3*N_TIME_PER_BLOCK) {
+    if(0 <= pkt_mcnt_dist && pkt_mcnt_dist < 3*N_TIME_PER_BLOCK*TIME_DEMUX) {
 	// If the packet is for the block after the next block (i.e. current
 	// block + 2 blocks)
-	if(pkt_mcnt_dist >= 2*N_TIME_PER_BLOCK) {
+	if(pkt_mcnt_dist >= 2*N_TIME_PER_BLOCK*TIME_DEMUX) {
 	    // Mark the current block as filled
 	    netmcnt = set_block_filled(paper_input_databuf_p, &binfo);
 
 	    // Advance mcnt_start to next block
-	    cur_mcnt += N_TIME_PER_BLOCK;
-	    binfo.mcnt_start += N_TIME_PER_BLOCK;
+	    cur_mcnt += N_TIME_PER_BLOCK*TIME_DEMUX;
+	    binfo.mcnt_start += N_TIME_PER_BLOCK*TIME_DEMUX;
 	    binfo.block_i = (binfo.block_i + 1) % N_INPUT_BLOCKS;
 
 	    // Wait (hopefully not long!) to acquire the block after next (i.e.
@@ -495,7 +496,7 @@ static inline uint64_t process_packet(
 	if(cur_mcnt != 0 && binfo.out_of_seq_cnt == 0) {
 	    hashpipe_warn("hera_pktsock_thread",
 		    "out of seq mcnt %012lx (expected: %012lx <= mcnt < %012x)",
-		    pkt_mcnt, cur_mcnt, cur_mcnt+3*N_TIME_PER_BLOCK);
+		    pkt_mcnt, cur_mcnt, cur_mcnt+3*N_TIME_PER_BLOCK*TIME_DEMUX);
 	}
 
 	// Increment out-of-seq packet counter
@@ -511,14 +512,14 @@ static inline uint64_t process_packet(
 	    // same databuf block as the old current mcnt.
 	    if(binfo.block_i > pkt_block_i) {
 		// Advance pkt_mcnt to correspond to binfo.block_i
-		pkt_mcnt += N_TIME_PER_BLOCK*(binfo.block_i - pkt_block_i);
+		pkt_mcnt += TIME_DEMUX*N_TIME_PER_BLOCK*(binfo.block_i - pkt_block_i);
 	    } else if(binfo.block_i < pkt_block_i) {
 		// Advance pkt_mcnt to binfo.block_i + N_INPUT_BLOCKS blocks
-		pkt_mcnt += N_TIME_PER_BLOCK*(binfo.block_i + N_INPUT_BLOCKS - pkt_block_i);
+		pkt_mcnt += TIME_DEMUX*N_TIME_PER_BLOCK*(binfo.block_i + N_INPUT_BLOCKS - pkt_block_i);
 	    }
 	    // Round pkt_mcnt down to nearest multiple of Nm
 	    binfo.mcnt_start = pkt_mcnt - (pkt_mcnt%N_TIME_PER_BLOCK);
-	    binfo.mcnt_log_late = binfo.mcnt_start + N_TIME_PER_BLOCK;
+	    binfo.mcnt_log_late = binfo.mcnt_start + N_TIME_PER_BLOCK*TIME_DEMUX;
 	    binfo.block_i = block_for_mcnt(binfo.mcnt_start);
 	    hashpipe_warn("hera_pktsock_thread",
 		    "resetting to mcnt %012lx block %d based on packet mcnt %012lx",
@@ -526,7 +527,7 @@ static inline uint64_t process_packet(
 	    // Reinitialize/recycle our two already acquired blocks with new
 	    // mcnt values.
 	    initialize_block(paper_input_databuf_p, binfo.mcnt_start);
-	    initialize_block(paper_input_databuf_p, binfo.mcnt_start+N_TIME_PER_BLOCK);
+	    initialize_block(paper_input_databuf_p, binfo.mcnt_start+TIME_DEMUX*N_TIME_PER_BLOCK);
 	    // Reset binfo's packet counters for these blocks.
 	    binfo.block_packet_counter[binfo.block_i] = 0;
 	    binfo.block_packet_counter[(binfo.block_i+1)%N_INPUT_BLOCKS] = 0;
@@ -665,7 +666,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     // Initialize the newly acquired block
     initialize_block(db, 0);
-    initialize_block(db, N_TIME_PER_BLOCK);
+    initialize_block(db, N_TIME_PER_BLOCK*TIME_DEMUX);
 
     /* Read network params */
     int bindport = 8511;

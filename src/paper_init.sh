@@ -15,7 +15,7 @@ myip=$(getip $(hostname))
 # If a pxN match is found, mypx gets set to N (i.e. just the numeric part).
 # If no match is found, mypx will be empty.
 mypx=
-for p in {1..8}
+for p in {1..16}
 do
   ip=$(getip px${p})
   [ "${myip}" == "${ip}" ] || continue
@@ -127,12 +127,14 @@ case ${hostname} in
     #                               GPU       NET FLF GPU OUT
     # mask  bind_host               DEV  XID  CPU CPU CPU CPU
     # Calculate XIDs based on mypx
-    xid0=$(( 1*(mypx-1)    ))
+    xid0=$(( 2*(mypx-1)    ))
+    xid1=$(( 2*(mypx-1) + 1))
 
     instances=( 
       #                               GPU       NET FLF GPU OUT
       # mask  bind_host               DEV  XID  CPU CPU CPU CPU
-      "0x00ff ${hostname}-2.tenge.pvt  0  $xid0  1   2   4   6" # Instance 0, eth2
+      "0x00ff eth3                     0  $xid0  0   1   2   3" # Instance 0, eth3
+      "0xff00 eth5                     1  $xid1  8   9   10  11" # Instance 1, eth5
     );;
 
   *)
@@ -169,7 +171,7 @@ function init() {
     -o BINDHOST=$bindhost \
     -o GPUDEV=$gpudev \
     -o XID=$xid \
-    -c $netcpu paper_fake_net_thread \
+    -c $netcpu hera_pktsock_thread \
     -c $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
     -c $outcpu paper_gpu_output_thread
@@ -179,7 +181,7 @@ function init() {
     -o BINDHOST=$bindhost \
     -o GPUDEV=$gpudev \
     -o XID=$xid \
-    -c $netcpu paper_fake_net_thread \
+    -c $netcpu hera_pktsock_thread \
     -c $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
     -c $outcpu paper_gpu_output_thread \

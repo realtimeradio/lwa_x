@@ -144,7 +144,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
               hgeti4(st.buf, "INTCOUNT", &int_count);
               hashpipe_status_unlock_safe(&st);
               // Compute last mcount
-              last_mcount = start_mcount + (int_count-N_TIME_PER_BLOCK);// * N_SUB_BLOCKS_PER_INPUT_BLOCK;
+              last_mcount = start_mcount + TIME_DEMUX*(int_count-N_TIME_PER_BLOCK);// * N_SUB_BLOCKS_PER_INPUT_BLOCK;
               fprintf(stderr, "Accumulating to mcount: %lu\n", last_mcount);
             // Else (missed starting mcount)
             } else {
@@ -226,7 +226,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
             hashpipe_status_unlock_safe(&st);
           } else {
             // Advance last_mcount for end of next integration
-            last_mcount += int_count;// * N_SUB_BLOCKS_PER_INPUT_BLOCK;
+            last_mcount += TIME_DEMUX*int_count;// * N_SUB_BLOCKS_PER_INPUT_BLOCK;
           }
 
           // Mark output block as full and advance

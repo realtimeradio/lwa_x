@@ -36,7 +36,7 @@ exit $1
 do_f=
 do_x=
 do_c=
-paper_init=paper_pktsock_init.sh
+paper_init=paper_init.sh
 xc=X
 ctmode=0
 
@@ -131,7 +131,7 @@ then
   echo Starting $xc Engine instances on $xhosts
   for x in $xhosts
   do
-    ssh $x ${paper_init} 0 1 2 3 &
+    ssh $x ${paper_init} 0 1 &
   done
 
   wait
@@ -141,10 +141,10 @@ then
   for x in $xhosts
   do
     # Start two gateways on each host: one gateway per NUMA node, two instances
-    # per gateway.  The gateways run on the OS core (0 or 6)
+    # per gateway.  The gateways run on the OS core (0 or 8)
     ssh $x "
       taskset 0x0001 hashpipe_redis_gateway.rb -g $x -i 0,1;
-      taskset 0x0040 hashpipe_redis_gateway.rb -g $x -i 2,3
+      taskset 0x0100 hashpipe_redis_gateway.rb -g $x -i 2,3
     "
   done
 
@@ -153,7 +153,7 @@ then
 
   # Turn off HOLD flag on all instances
   echo Enabling all X Engine network threads
-  for i in 3 2 1 0
+  for i in 1 0
   do
     for x in $xhosts
     do
@@ -165,7 +165,7 @@ then
 
   # Reset all NET{WAT,REC,PRC}M{N,X} counters
   echo Resetting all network stats counters
-  for i in 3 2 1 0
+  for i in 1 0
   do
     for x in $xhosts
     do
