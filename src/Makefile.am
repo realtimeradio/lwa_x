@@ -3,6 +3,7 @@ AM_CPPFLAGS     =
 
 AM_CPPFLAGS += -I"@HASHPIPE_INCDIR@"
 AM_CPPFLAGS += -I"@XGPU_INCDIR@"
+AM_CPPFLAGS += -I/usr/include/hdf5/serial/
 
 # AM_CFLAGS is used for all C compiles
 #AM_CFLAGS = -ggdb -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx2
@@ -23,6 +24,9 @@ paper_threads = paper_fake_net_thread.c       \
 paper_fluff = paper_fluff.h \
 	      paper_fluff.c
 
+hera_capture = hera_hdf5.h \
+               hera_write_hdf5.c
+
 # This is the paper_gpu plugin itself
 lib_LTLIBRARIES = paper_gpu.la
 paper_gpu_la_SOURCES  = $(paper_databuf) $(paper_threads) $(paper_fluff)
@@ -38,11 +42,18 @@ dist_bin_SCRIPTS = paper_init.sh \
 		   xtor_up.sh
 
 # Non-installed test programs
-noinst_PROGRAMS = paper_fluff_test
+noinst_PROGRAMS = paper_fluff_test hera_write_hdf5
 paper_fluff_test_SOURCES = paper_fluff_test.c $(paper_fluff)
 # The paper_fluff_test_CFLAGS is an autotools workaround.
 # http://www.gnu.org/software/automake/manual/html_node/Objects-created-both-with-libtool-and-without.html
 paper_fluff_test_CFLAGS = $(AM_CFLAGS)
 paper_fluff_test_LDADD = -lrt
+
+hera_write_hdf5_SOURCES = hera_write_hdf5 $(hera_capture)
+# The hera_write_hdf5_CFLAGS is an autotools workaround.
+# http://www.gnu.org/software/automake/manual/html_node/Objects-created-both-with-libtool-and-without.html
+hera_write_hdf5_CFLAGS = -O3 -Wall -Werror -fno-strict-aliasing -mavx2 -march=native -funroll-loops
+hera_write_hdf5_LDADD = -lrt -lpthread -lsz -lz -ldl -lm
+hera_write_hdf5_LDFLAGS = -L/usr/lib/x86_64-linux-gnu/hdf5/serial /usr/lib/x86_64-linux-gnu/hdf5/serial/libhdf5_hl.a /usr/lib/x86_64-linux-gnu/hdf5/serial/libhdf5.a
 
 # vi: set ts=8 noet :
