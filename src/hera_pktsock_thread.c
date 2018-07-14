@@ -466,7 +466,7 @@ static inline uint64_t process_packet(
 	// Copy data into buffer
         for(i=0; i<N_INPUTS_PER_PACKET/2; i++) {
 	    // Calculate starting points for unpacking this packet into block's data buffer.
-	    dest_p = paper_input_databuf_p->block[pkt_block_i].data
+	    dest_p = (uint64_t *)(paper_input_databuf_p->block[pkt_block_i].data)
 	        + paper_input_databuf_data_idx(binfo.m, binfo.a + i, binfo.c, 0); //time index is always zero
             //fprintf(stdout, "m:%d, a:%d, c:%d, %lu\n", binfo.m, binfo.a, binfo.c, paper_input_databuf_data_idx(binfo.m, binfo.a, binfo.c, 0));
 	    payload_p        = (uint64_t *)(PKT_UDP_DATA(p_frame)+8+(i*2*N_CHAN_PER_PACKET*N_TIME_PER_PACKET));

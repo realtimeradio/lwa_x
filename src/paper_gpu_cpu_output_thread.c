@@ -86,8 +86,8 @@ static void *run(hashpipe_thread_args_t * args)
 
         // Compare blocks
         error_count = 0.0;
-        gpu_data = db->block[block_idx[0]].data;
-        cpu_data = db->block[block_idx[1]].data;
+        gpu_data = (float *) db->block[block_idx[0]].data;
+        cpu_data = (float *) db->block[block_idx[1]].data;
         for(i=0; i<xgpu_info.matLength; i+=2) {
             if(zabs(cpu_data,i) == 0) {
                 error = zabs(gpu_data,i);

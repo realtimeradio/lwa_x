@@ -242,7 +242,7 @@ typedef uint8_t paper_output_header_cache_alignment[
 typedef struct paper_output_block {
   paper_output_header_t header;
   paper_output_header_cache_alignment padding; // Maintain cache alignment
-  float data[N_OUTPUT_MATRIX];
+  int32_t data[N_OUTPUT_MATRIX];
 } paper_output_block_t;
 
 typedef struct paper_output_databuf {
