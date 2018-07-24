@@ -1,0 +1,3 @@
+[submodule "xGPU"]
+	path = xGPU
+	url = https://github.com/GPU-correlators/xGPU
