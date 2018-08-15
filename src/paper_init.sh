@@ -113,7 +113,7 @@ case ${hostname} in
       "0x0606 ${hostname}-2.tenge.pvt  0  $xid0  2   4   3   4" # Instance 0, eth2
     );;
 
-  hera-gpu*)
+  px*)
     # Setup parameters for two instances.
     # 2 x E5-2620 v4 (disabled-HyperThreading,  8-cores @ 2.1 GHz, 20 MB L3, 8 GT/s QPI, 2667 MHz DRAM)
     # Fluff thread and output thread share a core.

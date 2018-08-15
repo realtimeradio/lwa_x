@@ -49,7 +49,7 @@ done
 shift $((OPTIND-1))
 
 # Name of PAPER server
-PAPER=paper1
+PAPER=hera-corr-head
 
 # Make sure we are on the PAPER server
 hostname=`hostname -s`
