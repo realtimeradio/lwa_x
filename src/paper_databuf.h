@@ -49,6 +49,13 @@
 #define PAGE_SIZE (4096)
 #define CACHE_ALIGNMENT (128)
 
+// Correlator Output parameters
+#define CATCHER_PORT 10000
+#define OUTPUT_BYTES_PER_PACKET (1024)
+#define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL * (N_INPUTS * (N_INPUTS + 1)) / 2 * 4)
+#define PACKETS_PER_VIS_MATRIX ((8L*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
+
+
 // The HERA correlator is based largely on the PAPER correlator.  The main 
 // difference will be in the F engines.  The ROACH2 based F engines are being
 // replaced by SNAP based F engines.  Because SNAPs have a different number of
@@ -252,6 +259,32 @@ typedef struct paper_output_databuf {
 } paper_output_databuf_t;
 
 /*
+ * CATCHER BUFFER STRUCTURES
+ */
+
+typedef struct hera_catcher_input_header{
+  uint64_t mcnt;
+  uint64_t good_data;
+  uint64_t flags[VIS_MATRIX_ENTRIES];
+} hera_catcher_input_header_t;
+
+typedef uint8_t hera_catcher_input_header_cache_alignment[
+  CACHE_ALIGNMENT - (sizeof(hera_catcher_input_header_t)%CACHE_ALIGNMENT)
+];
+
+typedef struct hera_catcher_input_block {
+  hera_catcher_input_header_t header;
+  hera_catcher_input_header_cache_alignment padding; // Maintain cache alignment
+  uint64_t data[VIS_MATRIX_ENTRIES];
+} hera_catcher_input_block_t;
+
+typedef struct hera_catcher_input_databuf {
+  hashpipe_databuf_t header;
+  hashpipe_databuf_cache_alignment padding; // Maintain cache alignment
+  hera_catcher_input_block_t block[N_INPUT_BLOCKS];
+} hera_catcher_input_databuf_t;
+
+/*
  * INPUT BUFFER FUNCTIONS
  */
 
@@ -294,6 +327,50 @@ int paper_input_databuf_busywait_filled(paper_input_databuf_t *d, int block_id);
 int paper_input_databuf_set_free(paper_input_databuf_t *d, int block_id);
 
 int paper_input_databuf_set_filled(paper_input_databuf_t *d, int block_id);
+
+/*
+ * CATCHER BUFFER FUNCTIONS
+ */
+
+hashpipe_databuf_t *hera_catcher_input_databuf_create(int instance_id, int databuf_id);
+
+static inline hera_catcher_input_databuf_t *hera_catcher_input_databuf_attach(int instance_id, int databuf_id)
+{
+    return (hera_catcher_input_databuf_t *)hashpipe_databuf_attach(instance_id, databuf_id);
+}
+
+static inline int hera_catcher_input_databuf_detach(hera_catcher_input_databuf_t *d)
+{
+    return hashpipe_databuf_detach((hashpipe_databuf_t *)d);
+}
+
+static inline void hera_catcher_input_databuf_clear(hera_catcher_input_databuf_t *d)
+{
+    hashpipe_databuf_clear((hashpipe_databuf_t *)d);
+}
+
+static inline int hera_catcher_input_databuf_block_status(hera_catcher_input_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_block_status((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_catcher_input_databuf_total_status(hera_catcher_input_databuf_t *d)
+{
+    return hashpipe_databuf_total_status((hashpipe_databuf_t *)d);
+}
+
+
+int hera_catcher_input_databuf_wait_free(hera_catcher_input_databuf_t *d, int block_id);
+
+int hera_catcher_input_databuf_busywait_free(hera_catcher_input_databuf_t *d, int block_id);
+
+int hera_catcher_input_databuf_wait_filled(hera_catcher_input_databuf_t *d, int block_id);
+
+int hera_catcher_input_databuf_busywait_filled(hera_catcher_input_databuf_t *d, int block_id);
+
+int hera_catcher_input_databuf_set_free(hera_catcher_input_databuf_t *d, int block_id);
+
+int hera_catcher_input_databuf_set_filled(hera_catcher_input_databuf_t *d, int block_id);
 
 /*
  * GPU INPUT BUFFER FUNCTIONS

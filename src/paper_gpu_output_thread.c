@@ -36,8 +36,6 @@ typedef struct pkthdr {
   uint16_t payload_len;
 } pkthdr_t;
 
-#define BYTES_PER_PACKET 1024
-
 // Macros for generating values for the pkthdr_t fields
 #define TIMESTAMP(x) (htobe64((uint64_t)x))
 #define OFFSET(x)    (htobe32((uint32_t)x))
@@ -51,7 +49,7 @@ typedef int32_t pktdata_t;
 // Structure of a packet
 typedef struct pkt {
   pkthdr_t hdr;
-  pktdata_t data[BYTES_PER_PACKET/sizeof(pktdata_t)];
+  pktdata_t data[OUTPUT_BYTES_PER_PACKET/sizeof(pktdata_t)];
 } pkt_t;
 
 static XGPUInfo xgpu_info;
@@ -70,11 +68,11 @@ static XGPUInfo xgpu_info;
 
 // Set to 200 Mbps -- OK for two instances per node.
 // With 16 nodes, amounts to 6.4 Gbps of data
-#define PACKET_DELAY_NS (2 * 8*BYTES_PER_PACKET)
+#define PACKET_DELAY_NS (2 * 8*OUTPUT_BYTES_PER_PACKET)
 
 // bytes_per_dump depends on xgpu_info.triLength
 static uint64_t bytes_per_dump = 0;
-// packets_per_dump is bytes_per_dump / BYTES_PER_PACKET
+// packets_per_dump is bytes_per_dump / OUTPUT_BYTES_PER_PACKET
 static unsigned int packets_per_dump = 0;
 
 // Open and connect a UDP socket to the given host and port.  Note that port is
@@ -271,7 +269,7 @@ static int init(struct hashpipe_thread_args *args)
     // Get sizing parameters
     xgpuInfo(&xgpu_info);
     bytes_per_dump = xgpu_info.triLength * sizeof(Complex);
-    packets_per_dump = bytes_per_dump / BYTES_PER_PACKET;
+    packets_per_dump = bytes_per_dump / OUTPUT_BYTES_PER_PACKET;
     printf("bytes_per_dump = %lu\n", bytes_per_dump);
 
     if(init_idx_map()) {
@@ -309,13 +307,10 @@ static void *run(hashpipe_thread_args_t * args)
 
     pkt_t pkt;
     pkt.hdr.xeng_id = XENG_ID(xengine_id);
-    pkt.hdr.payload_len = PAYLOAD_LEN(BYTES_PER_PACKET);
+    pkt.hdr.payload_len = PAYLOAD_LEN(OUTPUT_BYTES_PER_PACKET);
 
     // TODO Get catcher hostname and port from somewhere
 
-#ifndef CATCHER_PORT
-#define CATCHER_PORT 7148
-#endif
 #define stringify2(x) #x
 #define stringify(x) stringify2(x)
 
@@ -402,8 +397,8 @@ static void *run(hashpipe_thread_args_t * args)
             *p_out++ = re;
             *p_out++ = -im; // Conjugate data to match downstream expectations
             nbytes += 2*sizeof(pktdata_t);
-            if(nbytes % BYTES_PER_PACKET == 0) {
-              int bytes_sent = send(sockfd, &pkt, sizeof(pkt.hdr)+BYTES_PER_PACKET, 0);
+            if(nbytes % OUTPUT_BYTES_PER_PACKET == 0) {
+              int bytes_sent = send(sockfd, &pkt, sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET, 0);
               if(bytes_sent == -1) {
                 // Send all packets even if cactcher is not listening (i.e. we
                 // we get a connection refused error), but abort sending this
@@ -420,8 +415,8 @@ static void *run(hashpipe_thread_args_t * args)
                   // Break out of both for loops
                   goto done_sending;
                 }
-              } else if(bytes_sent != sizeof(pkt.hdr)+BYTES_PER_PACKET) {
-                printf("only sent %d of %lu bytes!!!\n", bytes_sent, sizeof(pkt.hdr)+BYTES_PER_PACKET);
+              } else if(bytes_sent != sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET) {
+                printf("only sent %d of %lu bytes!!!\n", bytes_sent, sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET);
               }
 
               // Delay to prevent overflowing network TX queue

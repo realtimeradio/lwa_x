@@ -19,7 +19,8 @@ paper_threads = paper_fake_net_thread.c       \
 		paper_gpu_thread.c            \
 		paper_fluff_thread.c          \
 		hera_pktsock_thread.c         \
-		paper_crc_thread.c
+		paper_crc_thread.c            \
+                hera_catcher_net_thread.c
 
 paper_fluff = paper_fluff.h \
 	      paper_fluff.c
