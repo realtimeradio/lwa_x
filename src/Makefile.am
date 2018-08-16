@@ -20,7 +20,8 @@ paper_threads = paper_fake_net_thread.c       \
 		paper_fluff_thread.c          \
 		hera_pktsock_thread.c         \
 		paper_crc_thread.c            \
-                hera_catcher_net_thread.c
+                hera_catcher_net_thread.c     \
+                hera_catcher_disk_thread.c
 
 paper_fluff = paper_fluff.h \
 	      paper_fluff.c
@@ -40,7 +41,9 @@ paper_gpu_la_LDFLAGS += -L"@HASHPIPE_LIBDIR@" -Wl,-rpath,"@HASHPIPE_LIBDIR@"
 dist_bin_SCRIPTS = paper_init.sh \
 		   paper_crc_init.sh \
 		   xtor_down.sh \
-		   xtor_up.sh
+		   xtor_up.sh \
+                   catcher_init.sh \
+                   catcher_up.sh
 
 # Non-installed test programs
 noinst_PROGRAMS = paper_fluff_test hera_write_hdf5

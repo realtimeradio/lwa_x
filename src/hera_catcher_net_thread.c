@@ -53,7 +53,7 @@ typedef struct {
 typedef struct {
     int initialized;
     int block_i;
-    int block_packet_counter[N_INPUT_BLOCKS];
+    int block_packet_counter[CATCHER_N_BLOCKS];
 } block_info_t;
 
 
@@ -74,7 +74,7 @@ static uint64_t set_block_filled(hera_catcher_input_databuf_t *hera_catcher_inpu
     uint32_t block_i = binfo->block_i;
 
     // Validate that we're filling blocks in the proper sequence
-    last_filled = (last_filled+1) % N_INPUT_BLOCKS;
+    last_filled = (last_filled+1) % CATCHER_N_BLOCKS;
     if(last_filled != block_i) {
 	printf("block %d being marked filled, but expected block %d!\n", block_i, last_filled);
 
@@ -100,13 +100,12 @@ static uint64_t set_block_filled(hera_catcher_input_databuf_t *hera_catcher_inpu
 
     // Calculate missing packets.
     block_missed_pkt_cnt = PACKETS_PER_VIS_MATRIX - binfo->block_packet_counter[block_i];
-    //fprintf(stderr, "Packets in block %d: %d, N_PACKETS_PER_BLOCK: %d, N_PACKETS_PER_BLOCK_PER_F: %d,  mod_cnt: %d\n", block_i, binfo->block_packet_counter[block_i], N_PACKETS_PER_BLOCK,  N_PACKETS_PER_BLOCK_PER_F, block_missed_pkt_cnt % N_PACKETS_PER_BLOCK_PER_F);
 
     // Update status buffer
     hashpipe_status_lock_busywait_safe(st_p);
     hputu4(st_p->buf, "NETBKOUT", block_i);
     if(block_missed_pkt_cnt) {
-        //fprintf(stdout, "Expected %d packets, Got %d\n", N_PACKETS_PER_BLOCK, binfo->block_packet_counter[block_i]);
+        //fprintf(stdout, "Expected %lu packets, Got %d\n", PACKETS_PER_VIS_MATRIX, binfo->block_packet_counter[block_i]);
 	// Increment MISSEDPK by number of missed packets for this block
 	hgetu4(st_p->buf, "MISSEDPK", &missed_pkt_cnt);
 	missed_pkt_cnt += block_missed_pkt_cnt;
@@ -139,7 +138,7 @@ static inline void initialize_block_info(block_info_t * binfo)
 	return;
     }
 
-    for(i = 0; i < N_INPUT_BLOCKS; i++) {
+    for(i = 0; i < CATCHER_N_BLOCKS; i++) {
 	binfo->block_packet_counter[i] = 0;
     }
 
@@ -176,8 +175,8 @@ static inline uint64_t process_packet(
 
     // Parse packet header
     packet_header_p = (packet_header_t *)PKT_UDP_DATA(p_frame);
-    time_demux_block = packet_header_p->mcnt % TIME_DEMUX;
-    pkt_mcnt = packet_header_p->mcnt - time_demux_block;
+    time_demux_block = (packet_header_p->mcnt / Nt) % TIME_DEMUX;
+    pkt_mcnt = packet_header_p->mcnt - (Nt*time_demux_block);
     cur_mcnt = hera_catcher_input_databuf_p->block[binfo.block_i].header.mcnt;
 
     pkt_mcnt_dist = pkt_mcnt - cur_mcnt;
@@ -185,46 +184,45 @@ static inline uint64_t process_packet(
     // pkt_mcnt values (which have the time_demux offsets removed, should always
     // be the same in consecutive packets, until an integration is complete, at which
     // point they should increase (in a step determined by the accumulation length)
-    if(0 <= pkt_mcnt_dist) {
-	// Mark the current block as filled
-        if (0 < pkt_mcnt_dist) {
-	    netmcnt = set_block_filled(hera_catcher_input_databuf_p, &binfo);
-	    // Wait (hopefully not long!) to acquire the block after next (i.e.
-	    // the block that gets the current packet).
-	    if(hera_catcher_input_databuf_busywait_free(hera_catcher_input_databuf_p, binfo.block_i) != HASHPIPE_OK) {
-	        if (errno == EINTR) {
-	            // Interrupted by signal, return -1
-	            hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
-	            pthread_exit(NULL);
-	            return -1; // We're exiting so return value is kind of moot
-	        } else {
-	            hashpipe_error(__FUNCTION__, "error waiting for free databuf");
-	            pthread_exit(NULL);
-	            return -1; // We're exiting so return value is kind of moot
-	        }
-	    }
-            // Increment the current block number
-            binfo.block_i = (binfo.block_i +1) % N_INPUT_BLOCKS;
-	    // Initialize the newly acquired block
-	    initialize_block(hera_catcher_input_databuf_p, pkt_mcnt, binfo.block_i);
-	    // Reset binfo's packet counter for this packet's block
-	    binfo.block_packet_counter[binfo.block_i] = 0;
-
-	    // Increment packet count for block
-	    binfo.block_packet_counter[binfo.block_i]++;
+    // If the MCNT has changed, we need to start a new buffer.
+    // Mark the current block as filled
+    if (0 != pkt_mcnt_dist) {
+        netmcnt = set_block_filled(hera_catcher_input_databuf_p, &binfo);
+        // Reset binfo's packet counter for this packet's block
+        binfo.block_packet_counter[binfo.block_i] = 0;
+        // Wait (hopefully not long!) to acquire the block after next (i.e.
+        // the block that gets the current packet).
+        if(hera_catcher_input_databuf_busywait_free(hera_catcher_input_databuf_p, binfo.block_i) != HASHPIPE_OK) {
+    	    if (errno == EINTR) {
+    	        // Interrupted by signal, return -1
+    	        hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
+    	        pthread_exit(NULL);
+    	        return -1; // We're exiting so return value is kind of moot
+    	    } else {
+    	        hashpipe_error(__FUNCTION__, "error waiting for free databuf");
+    	        pthread_exit(NULL);
+    	        return -1; // We're exiting so return value is kind of moot
+    	    }
         }
-
-	// Copy data into buffer
-	dest_p = (uint64_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (packet_header_p->offset >> 3);
-	payload_p = (uint64_t *)(PKT_UDP_DATA(p_frame) + (sizeof(packet_header_t) >> 3));
-	memcpy(dest_p, payload_p, packet_header_p->payload_len);
-	return netmcnt;
-    } else {
-	// If not just after an mcnt reset, issue warning.
-	hashpipe_warn("hera_catcher_net_thread", "Ignoring late packet (%d mcnts late)", cur_mcnt - pkt_mcnt);
-	return -1;
+        // Increment the current block number
+        binfo.block_i = (binfo.block_i +1) % CATCHER_N_BLOCKS;
+        // Initialize the newly acquired block
+        initialize_block(hera_catcher_input_databuf_p, pkt_mcnt, binfo.block_i);
+    
+        if (0 > pkt_mcnt_dist) {
+            // If the MCNT went down, then we are relocking. Flag this as a warning.
+    	    hashpipe_warn("hera_catcher_net_thread", "Locking on to new MCNT: %lu", pkt_mcnt);
+        }
     }
+    
+    // Increment packet count for block
+    binfo.block_packet_counter[binfo.block_i]++;
 
+    // Copy data into buffer
+    dest_p = (uint64_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (packet_header_p->offset >> 3);
+    payload_p = (uint64_t *)(PKT_UDP_DATA(p_frame) + (sizeof(packet_header_t) >> 3));
+    memcpy(dest_p, payload_p, packet_header_p->payload_len);
+    
     return netmcnt;
 }
 
@@ -398,7 +396,7 @@ static void *run(hashpipe_thread_args_t * args)
 	if(!run_threads()) break;
 
 	// Make sure received packet size matches expected packet size.
-        int packet_size = PKT_UDP_SIZE(p_frame) - sizeof(packet_header_t);
+        int packet_size = PKT_UDP_SIZE(p_frame) - 8; // -8 for the UDP header (not the *App* header!)
 	if (expected_packet_size != packet_size) {
 	    // Log warning and ignore wrongly sized packet
 	    #ifdef DEBUG_NET

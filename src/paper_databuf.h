@@ -52,8 +52,9 @@
 // Correlator Output parameters
 #define CATCHER_PORT 10000
 #define OUTPUT_BYTES_PER_PACKET (1024)
-#define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL * (N_INPUTS * (N_INPUTS + 1)) / 2 * 4)
-#define PACKETS_PER_VIS_MATRIX ((8L*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
+#define CATCHER_N_BLOCKS 2
+#define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL * (N_INPUTS * (N_INPUTS + 1)) / 2L)
+#define PACKETS_PER_VIS_MATRIX ((8L*TIME_DEMUX*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
 
 
 // The HERA correlator is based largely on the PAPER correlator.  The main 
@@ -265,7 +266,7 @@ typedef struct paper_output_databuf {
 typedef struct hera_catcher_input_header{
   uint64_t mcnt;
   uint64_t good_data;
-  uint64_t flags[VIS_MATRIX_ENTRIES];
+  //uint8_t flags[VIS_MATRIX_ENTRIES*TIME_DEMUX];
 } hera_catcher_input_header_t;
 
 typedef uint8_t hera_catcher_input_header_cache_alignment[
@@ -275,7 +276,7 @@ typedef uint8_t hera_catcher_input_header_cache_alignment[
 typedef struct hera_catcher_input_block {
   hera_catcher_input_header_t header;
   hera_catcher_input_header_cache_alignment padding; // Maintain cache alignment
-  uint64_t data[VIS_MATRIX_ENTRIES];
+  uint64_t data[VIS_MATRIX_ENTRIES*TIME_DEMUX];
 } hera_catcher_input_block_t;
 
 typedef struct hera_catcher_input_databuf {
@@ -359,18 +360,36 @@ static inline int hera_catcher_input_databuf_total_status(hera_catcher_input_dat
     return hashpipe_databuf_total_status((hashpipe_databuf_t *)d);
 }
 
+static inline int hera_catcher_input_databuf_wait_free(hera_catcher_input_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_wait_free((hashpipe_databuf_t *)d, block_id);
+}
 
-int hera_catcher_input_databuf_wait_free(hera_catcher_input_databuf_t *d, int block_id);
+static inline int hera_catcher_input_databuf_busywait_free(hera_catcher_input_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_busywait_free((hashpipe_databuf_t *)d, block_id);
+}
 
-int hera_catcher_input_databuf_busywait_free(hera_catcher_input_databuf_t *d, int block_id);
+static inline int hera_catcher_input_databuf_wait_filled(hera_catcher_input_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_wait_filled((hashpipe_databuf_t *)d, block_id);
+}
 
-int hera_catcher_input_databuf_wait_filled(hera_catcher_input_databuf_t *d, int block_id);
+static inline int hera_catcher_input_databuf_busywait_filled(hera_catcher_input_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_busywait_filled((hashpipe_databuf_t *)d, block_id);
+}
 
-int hera_catcher_input_databuf_busywait_filled(hera_catcher_input_databuf_t *d, int block_id);
+static inline int hera_catcher_input_databuf_set_free(hera_catcher_input_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_set_free((hashpipe_databuf_t *)d, block_id);
+}
 
-int hera_catcher_input_databuf_set_free(hera_catcher_input_databuf_t *d, int block_id);
+static inline int hera_catcher_input_databuf_set_filled(hera_catcher_input_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_set_filled((hashpipe_databuf_t *)d, block_id);
+}
 
-int hera_catcher_input_databuf_set_filled(hera_catcher_input_databuf_t *d, int block_id);
 
 /*
  * GPU INPUT BUFFER FUNCTIONS

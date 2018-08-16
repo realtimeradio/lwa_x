@@ -133,6 +133,29 @@ int paper_input_databuf_set_filled(paper_input_databuf_t *d, int block_id)
     return hashpipe_databuf_set_filled((hashpipe_databuf_t *)d, block_id);
 }
 
+hashpipe_databuf_t *hera_catcher_input_databuf_create(int instance_id, int databuf_id)
+{
+#ifdef DEBUG_SEMS
+    // Init clock variables
+    if(databuf_id==1) {
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        now.tv_sec = start.tv_sec;
+        now.tv_nsec = start.tv_nsec;
+    }
+#endif
+
+    /* Calc databuf sizes */
+    size_t header_size = sizeof(hashpipe_databuf_t)
+                       + sizeof(hashpipe_databuf_cache_alignment);
+    size_t block_size  = sizeof(hera_catcher_input_block_t);
+    int    n_block = CATCHER_N_BLOCKS;
+    fprintf(stderr, "size_t: %u, block size: %lu, nblocks size: %u\n", (uint32_t)sizeof(size_t),(uint64_t)block_size, (uint32_t)n_block);
+    fprintf(stderr, "header size: %u, words: %lu\n", (uint32_t)header_size, (uint64_t)(VIS_MATRIX_ENTRIES *TIME_DEMUX));
+
+    return hashpipe_databuf_create(
+        instance_id, databuf_id, header_size, block_size, n_block);
+}
+
 hashpipe_databuf_t *paper_gpu_input_databuf_create(int instance_id, int databuf_id)
 {
 #ifdef DEBUG_SEMS
