@@ -1,7 +1,7 @@
 /*
- * paper_fluff_thread.c
+ * hera_catcher_disk_thread.c
  *
- * Fluffs 4bit+4bit complex data into 8bit+8bit complex data
+ * Writes correlator to disk as hdf5 files
  */
 
 #include <stdio.h>
@@ -12,13 +12,43 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/types.h>
+#include <sys/sendfile.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <hdf5.h>
 
 #include "hashpipe.h"
 #include "paper_databuf.h"
-#include "paper_fluff.h"
 
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
+
+hid_t open_hdf5_from_template(char * sourcename, char * destname)
+{
+    int read_fd, write_fd;
+    struct stat stat_buf;
+    off_t offset = 0;
+    
+    read_fd = open(sourcename, O_RDONLY);
+    if (read_fd < 0) {
+        return -1;
+    }
+
+    // Get the file size
+    fstat(read_fd, &stat_buf);
+
+    write_fd = open(destname, O_WRONLY | O_CREAT, stat_buf.st_mode);
+    if (write_fd < 0) {
+        return -1;
+    }
+
+    sendfile(write_fd, read_fd, &offset, stat_buf.st_size);
+    
+    close(read_fd);
+    close(write_fd);
+    return H5Fopen(sourcename, H5F_ACC_RDWR, H5P_DEFAULT);
+}
 
 static void *run(hashpipe_thread_args_t * args)
 {
@@ -71,7 +101,6 @@ static void *run(hashpipe_thread_args_t * args)
         hputu8(st.buf, "DISKMCNT", db_in->block[curblock_in].header.mcnt);
         hashpipe_status_unlock_safe(&st);
 
-        // Copy header and call fluff function
         clock_gettime(CLOCK_MONOTONIC, &start);
 
         clock_gettime(CLOCK_MONOTONIC, &finish);
