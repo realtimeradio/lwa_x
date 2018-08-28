@@ -54,6 +54,7 @@
 #define OUTPUT_BYTES_PER_PACKET (1024)
 #define CATCHER_N_BLOCKS 2
 #define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL * (N_INPUTS * (N_INPUTS + 1)) / 2L)
+#define VIS_MATRIX_ENTRIES_PER_CHAN ((N_INPUTS * (N_INPUTS + 1)) / 2L)
 #define PACKETS_PER_VIS_MATRIX ((8L*TIME_DEMUX*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
 
 
@@ -284,6 +285,9 @@ typedef struct hera_catcher_input_databuf {
   hashpipe_databuf_cache_alignment padding; // Maintain cache alignment
   hera_catcher_input_block_t block[N_INPUT_BLOCKS];
 } hera_catcher_input_databuf_t;
+
+#define hera_catcher_input_databuf_idx64(t, x, o) \
+  (((32*2*VIS_MATRIX_ENTRIES*t) + (VIS_MATRIX_ENTRIES_PER_CHAN *N_CHAN_PER_X*x) + o) / sizeof(uint64_t))
 
 /*
  * INPUT BUFFER FUNCTIONS

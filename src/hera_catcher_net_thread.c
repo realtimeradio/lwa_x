@@ -219,7 +219,7 @@ static inline uint64_t process_packet(
     binfo.block_packet_counter[binfo.block_i]++;
 
     // Copy data into buffer
-    dest_p = (uint64_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (packet_header_p->offset >> 3);
+    dest_p = (uint64_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset);
     payload_p = (uint64_t *)(PKT_UDP_DATA(p_frame) + (sizeof(packet_header_t) >> 3));
     memcpy(dest_p, payload_p, packet_header_p->payload_len);
     
