@@ -1,6 +1,7 @@
 import h5py
 import sys
 import numpy as np
+import time
 
 def get_bl_order(n_ants):
     """
@@ -36,7 +37,8 @@ def create_header(h5):
     header.create_dataset("Nants_data", dtype="<i8", data=NANTS_DATA)
     header.create_dataset("Nants_telescope", dtype="<i8", data=NANTS)
     header.create_dataset("Nbls",   dtype="<i8", data=n_bls)
-    header.create_dataset("Nblts",  dtype="<i8", data=n_bls * NTIMES)
+    # Nblts needs populating by receiver
+    #header.create_dataset("Nblts",  dtype="<i8", data=n_bls * NTIMES)
     header.create_dataset("Nfreqs", dtype="<i8", data=8192/4*3)
     header.create_dataset("Npols",  dtype="<i8", data=2)
     header.create_dataset("Nspws",  dtype="<i8", data=1)
@@ -50,32 +52,37 @@ def create_header(h5):
     header.create_dataset("antenna_positions", dtype="<f8", data=np.zeros([NANTS,3]))
     header.create_dataset("channel_width",     dtype="<f8", data=250e6 / 8192)
     header.create_dataset("freq_array",        dtype="<f8", shape=(1, 8192/4*3), data=np.linspace(0, 250e6, 8192/4*3))
-    header.create_dataset("history",   data="File created\n")
+    header.create_dataset("history",   data="%s: Template file created\n" % time.ctime())
     header.create_dataset("telescope", data="HERA")
     header.create_dataset("integration_time", dtype="<f8", data=10.0)
     header.create_dataset("latitude",    dtype="<f8", data=0.0)
-    header.create_dataset("longitude",   dtype="<f8",data= 0.0)
-    header.create_dataset("lst_array",   dtype="<f8", data=np.zeros(n_bls * NTIMES))
+    header.create_dataset("longitude",   dtype="<f8", data= 0.0)
+    # lst_array needs populating by receiver. Should be center of integrations in radians
+    #header.create_dataset("lst_array",   dtype="<f8", data=np.zeros(n_bls * NTIMES))
     header.create_dataset("object_name", data="zenith")
     header.create_dataset("phase_type",  data="drift")
     header.create_dataset("polarization_array", dtype="<i8", data=[-5, -6, -7, -8])
     header.create_dataset("spw_array",      dtype="<i8", data=0)
     header.create_dataset("telescope_name", data="HERA")
-    header.create_dataset("time_array", dtype="<f8", data=np.zeros(n_bls * NTIMES))
-    header.create_dataset("uvw_array",  dtype="<f8", data=np.zeros([n_bls * NTIMES, 3]))
+    # time_array needs populating by receiver (should be center of integrations in JD)
+    #header.create_dataset("time_array", dtype="<f8", data=np.zeros(n_bls * NTIMES))
+    # uvw_needs populating by receiver: uvw = xyz(ant2) - xyz(ant1). Units, metres.
+    #header.create_dataset("uvw_array",  dtype="<f8", data=np.zeros([n_bls * NTIMES, 3]))
     header.create_dataset("vis_units",  data="uncalib")
-    header.create_dataset("zenith_dec", dtype="<f8", data=np.zeros(n_bls * NTIMES))
-    header.create_dataset("zenith_ra",  dtype="<f8", data=np.zeros(n_bls * NTIMES))
+    #header.create_dataset("zenith_dec", dtype="<f8", data=np.zeros(n_bls * NTIMES))
+    #header.create_dataset("zenith_ra",  dtype="<f8", data=np.zeros(n_bls * NTIMES))
+    # !Some! extra_keywords need to be computed for each file
     add_extra_keywords(header)
 
 
 def add_extra_keywords(obj):
     extras = obj.create_group("extra_keywords")
-    #extras.create_dataset("cm_info", dtype="|S")
-    #extras.create_dataset("cmver", dtype="|S")
+    extras.create_dataset("cm_info", dtype="|S")
+    extras.create_dataset("cmver", dtype="|S")
+    extras.create_dataset("st_type", dtype="|S16")
+    # The following keywords can only be set when the file is written
     extras.create_dataset("duration", dtype="<f8")
     extras.create_dataset("obs_id", dtype="<i8")
-    extras.create_dataset("st_type", dtype="|S16")
     extras.create_dataset("startt", dtype="<f8")
     extras.create_dataset("stopt",  dtype="<f8")
 
