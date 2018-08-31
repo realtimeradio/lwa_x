@@ -6,6 +6,8 @@
 #include "config.h"
 
 // Determined by F engine
+#define N_CHAN_TOTAL_GENERATED (8192)
+#define FENG_SAMPLE_RATE (500000000)
 #define N_CHAN_TOTAL 6144
 #define N_FENGINES   192
 #define N_CHAN_PER_F N_CHAN_TOTAL
@@ -53,9 +55,11 @@
 #define CATCHER_PORT 10000
 #define OUTPUT_BYTES_PER_PACKET (1024)
 #define CATCHER_N_BLOCKS 2
+#define CATCHER_CHAN_SUM 4
 #define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL * (N_INPUTS * (N_INPUTS + 1)) / 2L)
 #define VIS_MATRIX_ENTRIES_PER_CHAN ((N_INPUTS * (N_INPUTS + 1)) / 2L)
 #define PACKETS_PER_VIS_MATRIX ((8L*TIME_DEMUX*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
+#define N_STOKES 4
 
 
 // The HERA correlator is based largely on the PAPER correlator.  The main 

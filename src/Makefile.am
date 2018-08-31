@@ -36,7 +36,8 @@ paper_gpu_la_LIBADD   = -lrt -lxgpu
 paper_gpu_la_LDFLAGS  = -avoid-version -module -shared -export-dynamic
 paper_gpu_la_LDFLAGS += -L"@XGPU_LIBDIR@" -Wl,-rpath,"@XGPU_LIBDIR@"
 paper_gpu_la_LDFLAGS += -L"@HASHPIPE_LIBDIR@" -Wl,-rpath,"@HASHPIPE_LIBDIR@"
-paper_gpu_la_LDFLAGS += -L/usr/lib/x86_64-linux-gnu/hdf5/serial /usr/lib/x86_64-linux-gnu/hdf5/serial/libhdf5_hl.so /usr/lib/x86_64-linux-gnu/hdf5/serial/libhdf5.so
+paper_gpu_la_LDFLAGS += -L/usr/lib/x86_64-linux-gnu/hdf5/serial
+paper_gpu_la_LDFLAGS += -lhdf5_hl -lhdf5
 
 # Installed scripts
 dist_bin_SCRIPTS = paper_init.sh \
