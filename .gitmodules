@@ -1,3 +1,6 @@
 [submodule "xGPU"]
 	path = xGPU
 	url = https://github.com/GPU-correlators/xGPU
+[submodule "bitshuffle"]
+	path = bitshuffle
+	url = https://github.com/kiyo-masui/bitshuffle

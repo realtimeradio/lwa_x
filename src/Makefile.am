@@ -21,7 +21,11 @@ paper_threads = paper_fake_net_thread.c       \
 		hera_pktsock_thread.c         \
 		paper_crc_thread.c            \
                 hera_catcher_net_thread.c     \
-                hera_catcher_disk_thread.c
+                hera_catcher_disk_thread.c    \
+                lzf/lzf/lzf_c.c \
+                lzf/lzf/lzf_d.c \
+                lzf/lzf_filter.c \
+                lzf_filter.h
 
 paper_fluff = paper_fluff.h \
 	      paper_fluff.c
@@ -36,8 +40,13 @@ paper_gpu_la_LIBADD   = -lrt -lxgpu
 paper_gpu_la_LDFLAGS  = -avoid-version -module -shared -export-dynamic
 paper_gpu_la_LDFLAGS += -L"@XGPU_LIBDIR@" -Wl,-rpath,"@XGPU_LIBDIR@"
 paper_gpu_la_LDFLAGS += -L"@HASHPIPE_LIBDIR@" -Wl,-rpath,"@HASHPIPE_LIBDIR@"
+# Include HDF5 Libraries
 paper_gpu_la_LDFLAGS += -L/usr/lib/x86_64-linux-gnu/hdf5/serial
 paper_gpu_la_LDFLAGS += -lhdf5_hl -lhdf5
+# Include HDF5 compression libraries
+#paper_gpu_la_LDFLAGS += -L/usr/local/lib/python2.7/dist-packages/bitshuffle/plugin
+#paper_gpu_la_LDFLAGS += -lh5LZF -lh5bshuf
+
 
 # Installed scripts
 dist_bin_SCRIPTS = paper_init.sh \

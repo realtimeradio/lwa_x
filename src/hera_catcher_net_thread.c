@@ -105,7 +105,7 @@ static uint64_t set_block_filled(hera_catcher_input_databuf_t *hera_catcher_inpu
     hashpipe_status_lock_busywait_safe(st_p);
     hputu4(st_p->buf, "NETBKOUT", block_i);
     if(block_missed_pkt_cnt) {
-        //fprintf(stdout, "Expected %lu packets, Got %d\n", PACKETS_PER_VIS_MATRIX, binfo->block_packet_counter[block_i]);
+        fprintf(stdout, "Expected %lu packets, Got %d\n", PACKETS_PER_VIS_MATRIX, binfo->block_packet_counter[block_i]);
 	// Increment MISSEDPK by number of missed packets for this block
 	hgetu4(st_p->buf, "MISSEDPK", &missed_pkt_cnt);
 	missed_pkt_cnt += block_missed_pkt_cnt;
@@ -164,19 +164,24 @@ static inline uint64_t process_packet(
     int64_t pkt_mcnt_dist;
     uint64_t pkt_mcnt;
     int time_demux_block;
-    uint64_t cur_mcnt;
+    uint64_t cur_mcnt = -1;
     uint64_t netmcnt = -1; // Value to return (!=-1 is stored in status memory)
     //int i;
 
-    // Lazy init binfo
-    if(!binfo.initialized) {
-	initialize_block_info(&binfo);
-    }
 
     // Parse packet header
     packet_header_p = (packet_header_t *)PKT_UDP_DATA(p_frame);
     time_demux_block = (packet_header_p->mcnt / Nt) % TIME_DEMUX;
     pkt_mcnt = packet_header_p->mcnt - (Nt*time_demux_block);
+    //fprintf(stdout, "header_cal: %lu, time_demux_block: %d; mcnt: %lu\n", packet_header_p->mcnt, time_demux_block, pkt_mcnt);
+
+    // Lazy init binfo
+    if(!binfo.initialized) {
+	initialize_block_info(&binfo);
+        // If this is the first block, then set it's mcnt (which was dummy init-ed to 0)`
+        initialize_block(hera_catcher_input_databuf_p, pkt_mcnt, binfo.block_i);
+    }
+
     cur_mcnt = hera_catcher_input_databuf_p->block[binfo.block_i].header.mcnt;
 
     pkt_mcnt_dist = pkt_mcnt - cur_mcnt;
@@ -187,6 +192,7 @@ static inline uint64_t process_packet(
     // If the MCNT has changed, we need to start a new buffer.
     // Mark the current block as filled
     if (0 != pkt_mcnt_dist) {
+        fprintf(stdout, "Marking block filled\n");
         netmcnt = set_block_filled(hera_catcher_input_databuf_p, &binfo);
         // Reset binfo's packet counter for this packet's block
         binfo.block_packet_counter[binfo.block_i] = 0;
@@ -219,8 +225,10 @@ static inline uint64_t process_packet(
     binfo.block_packet_counter[binfo.block_i]++;
 
     // Copy data into buffer
-    dest_p = (uint64_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset);
-    payload_p = (uint64_t *)(PKT_UDP_DATA(p_frame) + (sizeof(packet_header_t) >> 3));
+    dest_p = (uint64_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset));
+    payload_p = (uint64_t *)(PKT_UDP_DATA(p_frame) + sizeof(packet_header_t));
+    //fprintf(stdout, "mcnt: %lu, t-demux: %d, offset: %d, xeng: %d (%d,%d)\n", packet_header_p->mcnt, time_demux_block, packet_header_p->offset, packet_header_p->xeng_id, ((int32_t *)payload_p)[0], ((int32_t*)payload_p)[1]);
+    //fprintf(stdout, "offset: %d\n", hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset));
     memcpy(dest_p, payload_p, packet_header_p->payload_len);
     
     return netmcnt;

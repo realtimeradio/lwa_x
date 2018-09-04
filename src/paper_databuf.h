@@ -53,11 +53,11 @@
 
 // Correlator Output parameters
 #define CATCHER_PORT 10000
-#define OUTPUT_BYTES_PER_PACKET (1024)
+#define OUTPUT_BYTES_PER_PACKET (4096)
 #define CATCHER_N_BLOCKS 2
 #define CATCHER_CHAN_SUM 4
-#define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL * (N_INPUTS * (N_INPUTS + 1)) / 2L)
-#define VIS_MATRIX_ENTRIES_PER_CHAN ((N_INPUTS * (N_INPUTS + 1)) / 2L)
+#define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL * (N_INPUTS * ((N_INPUTS>>1) + 1)))
+#define VIS_MATRIX_ENTRIES_PER_CHAN (N_INPUTS * ((N_INPUTS>>1) + 1))
 #define PACKETS_PER_VIS_MATRIX ((8L*TIME_DEMUX*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
 #define N_STOKES 4
 
@@ -291,7 +291,7 @@ typedef struct hera_catcher_input_databuf {
 } hera_catcher_input_databuf_t;
 
 #define hera_catcher_input_databuf_idx64(t, x, o) \
-  (((32*2*VIS_MATRIX_ENTRIES*t) + (VIS_MATRIX_ENTRIES_PER_CHAN *N_CHAN_PER_X*x) + o) / sizeof(uint64_t))
+  (((VIS_MATRIX_ENTRIES*t) + (VIS_MATRIX_ENTRIES_PER_CHAN * N_CHAN_PER_X*x)) + (o>>3))
 
 /*
  * INPUT BUFFER FUNCTIONS
