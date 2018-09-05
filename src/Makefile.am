@@ -22,10 +22,10 @@ paper_threads = paper_fake_net_thread.c       \
 		paper_crc_thread.c            \
                 hera_catcher_net_thread.c     \
                 hera_catcher_disk_thread.c    \
-                lzf/lzf/lzf_c.c \
-                lzf/lzf/lzf_d.c \
-                lzf/lzf_filter.c \
-                lzf_filter.h
+                #lzf/lzf/lzf_c.c \
+                #lzf/lzf/lzf_d.c \
+                #lzf/lzf_filter.c \
+                #lzf_filter.h
 
 paper_fluff = paper_fluff.h \
 	      paper_fluff.c

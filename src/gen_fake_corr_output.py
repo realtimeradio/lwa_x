@@ -38,7 +38,8 @@ while(True):
         #    print pkt
         for t in range(TIME_DEMUX):
             for xeng in range(NX):
-                p = struct.pack('<QLHH', mcnt+NT*t, offset, xeng, BYTES_PER_PACKET) + data
+                #p = struct.pack('<QLHH', mcnt+NT*t, offset, xeng, BYTES_PER_PACKET) + data
+                p = struct.pack('<QQQQ', mcnt+NT*t, offset, xeng, BYTES_PER_PACKET) + data
                 s.sendto(p, (DESTIP, DESTPORT))
             time.sleep(1e-6)
         offset += BYTES_PER_PACKET

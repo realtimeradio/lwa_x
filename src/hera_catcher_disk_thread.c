@@ -22,14 +22,22 @@
 
 #include "hashpipe.h"
 #include "paper_databuf.h"
-#include "lzf_filter.h"
+//#include "lzf_filter.h"
 
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
 
+#ifndef MIN
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
+
 #define N_DATA_DIMS (4)
 #define N_CHAN_PROCESSED (N_CHAN_TOTAL / CATCHER_CHAN_SUM)
-#define N_BL_PER_WRITE (8)
+#define N_BL_PER_WRITE (32)
 
 static hid_t complex_id;
 
@@ -46,7 +54,7 @@ typedef struct {
     hid_t nsamples_fs;
 } hdf5_id_t;  
 
-void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, uint64_t file_nblts) {
+static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, uint64_t file_nblts) {
     hid_t dataset_id;
     dataset_id = H5Dopen(id->extra_keywords_gid, "stopt", H5P_DEFAULT);
     H5Dwrite(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_stop_t);
@@ -77,7 +85,7 @@ see https://gist.github.com/simleb/5205083/
 // see https://support.hdfgroup.org/services/contributions.html
 # define FILTER_H5_LZF 32000
 # define FILTER_H5_BITSHUFFLE 32008
-void make_extensible_hdf5(hdf5_id_t *id)
+static void make_extensible_hdf5(hdf5_id_t *id)
 {
     hsize_t dims[N_DATA_DIMS] = {0, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, N_CHAN_PROCESSED, N_STOKES};
     hsize_t max_dims[N_DATA_DIMS] = {16, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, N_CHAN_PROCESSED, N_STOKES};
@@ -118,7 +126,7 @@ void make_extensible_hdf5(hdf5_id_t *id)
     H5Sclose(file_space);
 }
 
-hid_t open_hdf5_from_template(char * sourcename, char * destname)
+static hid_t open_hdf5_from_template(char * sourcename, char * destname)
 {
     int read_fd, write_fd;
     struct stat stat_buf;
@@ -155,7 +163,7 @@ hid_t open_hdf5_from_template(char * sourcename, char * destname)
 }
 
 
-void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, uint64_t file_obs_id, double file_start_t) {
+static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, uint64_t file_obs_id, double file_start_t) {
     hid_t dataset_id;
 
     id->file_id = open_hdf5_from_template(template_fname, hdf5_fname);
@@ -191,7 +199,7 @@ void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, uint64_t 
     H5Dclose(dataset_id);
 }
 
-void extend_datasets(hdf5_id_t *id, int n) {
+static void extend_datasets(hdf5_id_t *id, int n) {
     hsize_t dims[N_DATA_DIMS] = {n, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, N_CHAN_PROCESSED, N_STOKES};
     H5Dset_extent(id->visdata_did, dims);
     H5Dset_extent(id->flags_did, dims);
@@ -201,7 +209,7 @@ void extend_datasets(hdf5_id_t *id, int n) {
     id->nsamples_fs = H5Dget_space(id->nsamples_did);
 }
 
-void close_filespaces(hdf5_id_t *id) {
+static void close_filespaces(hdf5_id_t *id) {
     H5Sclose(id->visdata_fs);
     H5Sclose(id->flags_fs);
     H5Sclose(id->nsamples_fs);
@@ -212,7 +220,7 @@ void close_filespaces(hdf5_id_t *id) {
 /*
 Write an n_baselines x n_stokes data block to dataset `id` at time position `t`, channel number `c`
 */
-void write_channels(hdf5_id_t *id, hsize_t t, hsize_t b, hid_t mem_space, uint64_t *visdata_buf)
+static void write_channels(hdf5_id_t *id, hsize_t t, hsize_t b, hid_t mem_space, uint64_t *visdata_buf)
 {
     hsize_t start[N_DATA_DIMS] = {t, b, 0, 0};
     hsize_t count[N_DATA_DIMS] = {1, N_BL_PER_WRITE, N_CHAN_PROCESSED, N_STOKES};
@@ -223,7 +231,7 @@ void write_channels(hdf5_id_t *id, hsize_t t, hsize_t b, hid_t mem_space, uint64
 /*
 Turn an mcnt into a UNIX time in double-precision.
 */
-double mcnt2time(uint64_t mcnt, uint32_t sync_time)
+static double mcnt2time(uint64_t mcnt, uint32_t sync_time)
 {
     return (sync_time + mcnt) * (N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE);
 }
@@ -239,7 +247,7 @@ This function sums over CATCHER_SUM_CHANS as it transposes, and computes even/od
 
 */
 #define corr_databuf_data_idx(c, b) (2*((c*VIS_MATRIX_ENTRIES_PER_CHAN) + (N_STOKES*b)))
-void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, int b) {
+static void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, int b) {
     
     int i, chan, output_chan;
     __m256i sum_even[N_BL_PER_WRITE], sum_odd[N_BL_PER_WRITE];
@@ -256,15 +264,12 @@ void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, int b) 
     __m256i *in_odd256  = (__m256i *)in_odd;
     __m256i *out_sum256 = (__m256i *)out_sum;
     __m256i *out_diff256 = (__m256i *)out_diff;
-    int32_t temp[8];
 
     for (chan=0; chan<N_CHAN_TOTAL; chan++) {
         //val_odd  = _mm256_load_si256(in_odd256 + 1);
         for(i=0; i<N_BL_PER_WRITE; i++) {
             val_even[i] = _mm256_load_si256(in_even256 + i);
             val_odd[i] = _mm256_load_si256(in_odd256 + i);
-            _mm256_store_si256((__m256i *)temp, val_even[i]);
-            //fprintf(stdout, "%d, %d, %d, %d, %d, %d, %d, %d\n", temp[0], temp[1], temp[2], temp[3], temp[4], temp[5], temp[6], temp[7]);
         }
         if ((chan % CATCHER_CHAN_SUM) == 0) {
             // Start new accumulation (count to VIS_MATRIX_ENTRIES_PER_CHAN*2 for real/imag)
@@ -288,8 +293,8 @@ void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, int b) 
             output_chan = chan / CATCHER_CHAN_SUM;
             // Compute sums/diffs
             for(i=0; i<N_BL_PER_WRITE; i++) {
-                _mm256_store_si256(out_sum256  + i*N_CHAN_PROCESSED + output_chan, _mm256_add_epi32(sum_even[i], sum_odd[i]));
-                _mm256_store_si256(out_diff256 + i*N_CHAN_PROCESSED + output_chan, _mm256_sub_epi32(sum_even[i], sum_odd[i]));
+                _mm256_stream_si256(out_sum256  + i*N_CHAN_PROCESSED + output_chan, _mm256_add_epi32(sum_even[i], sum_odd[i]));
+                _mm256_stream_si256(out_diff256 + i*N_CHAN_PROCESSED + output_chan, _mm256_sub_epi32(sum_even[i], sum_odd[i]));
             }
         }
     }
@@ -299,10 +304,10 @@ void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, int b) 
 static int init(hashpipe_thread_args_t *args)
 {
     //hashpipe_status_t st = args->st;
-    if (register_lzf() < 0) {
-        hashpipe_error(__FUNCTION__, "error registering LZF filter");
-        pthread_exit(NULL);
-    }
+    //if (register_lzf() < 0) {
+    //    hashpipe_error(__FUNCTION__, "error registering LZF filter");
+    //    pthread_exit(NULL);
+    //}
     fprintf(stdout, "Initializing Catcher disk thread\n");
 
     // generate the complex data type
@@ -320,6 +325,22 @@ static void *run(hashpipe_thread_args_t * args)
     hera_catcher_input_databuf_t *db_in = (hera_catcher_input_databuf_t *)args->ibuf;
     hashpipe_status_t st = args->st;
     const char * status_key = args->thread_desc->skey;
+
+    // Timers for performance monitoring
+    struct timespec t_start, w_start, w_stop; // transpose start, write start, write stop
+    float gbps, min_gbps;
+
+    struct timespec start, finish;
+    uint64_t t_ns;
+    uint64_t w_ns;
+    uint64_t min_t_ns = 999999999;
+    uint64_t min_w_ns = 999999999;
+    uint64_t max_t_ns = 0;
+    uint64_t max_w_ns = 0;
+    uint64_t elapsed_t_ns = 0;
+    uint64_t elapsed_w_ns = 0;
+    float bl_t_ns = 0.0;
+    float bl_w_ns = 0.0;
      
     // Buffers for file name strings
     char template_fname[128];
@@ -359,9 +380,6 @@ static void *run(hashpipe_thread_args_t * args)
     double curr_file_time = -1.0;
     double file_start_t, file_stop_t, file_duration;
     int64_t file_obs_id, file_nblts=0, file_nts=0;
-    float gbps, min_gbps;
-
-    struct timespec start, finish;
 
     hdf5_id_t sum_file, diff_file;
     
@@ -410,8 +428,7 @@ static void *run(hashpipe_thread_args_t * args)
 
         clock_gettime(CLOCK_MONOTONIC, &start);
         gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt, sync_time);
-        fprintf(stdout, "Processing new block with: mcnt: %lu\n", db_in->block[curblock_in].header.mcnt);
-        fprintf(stdout, "Processing new block with: gps_time: %lf\n", gps_time);
+        fprintf(stdout, "Processing new block with: mcnt: %lu (gps time: %lf\n", db_in->block[curblock_in].header.mcnt, gps_time);
         julian_time = 2440587.5 + (gps_time / (double)(86400.0));
 
         if ((curr_file_time < 0) || (1000*(gps_time - curr_file_time) > ms_per_file)) {
@@ -450,26 +467,44 @@ static void *run(hashpipe_thread_args_t * args)
         // TODO: Write lst_array, time_array, uvw_array, zenith_dec, zenith_ra
 
         // Sum over channels, compute even/odd sum/diffs, and get data on a per-baseline basis
-        fprintf(stdout, "Writing integration\n");
         for(bl=0; bl<(VIS_MATRIX_ENTRIES_PER_CHAN/N_STOKES); bl+=N_BL_PER_WRITE) {
+	    clock_gettime(CLOCK_MONOTONIC, &t_start);
             transpose_bl_chan(db_in32, bl_buf_sum, bl_buf_diff, bl);
             //write data to file
+	    clock_gettime(CLOCK_MONOTONIC, &w_start);
             write_channels(&sum_file, file_nts-1, bl, mem_space, (uint64_t *)bl_buf_sum); 
             write_channels(&diff_file, file_nts-1, bl, mem_space, (uint64_t *)bl_buf_diff); 
-            //write_baselines(nsamples_id, file_nts-1, chunk_index*CHAN_CHUNK_SIZE, fs_nsamples_id, mem_space, (uint64_t *)nsamples, H5T_STD_I64LE); 
+	    clock_gettime(CLOCK_MONOTONIC, &w_stop);
             flags = flags;
             nsamples = nsamples;
+
+	    t_ns = ELAPSED_NS(t_start, w_start);
+	    w_ns = ELAPSED_NS(w_start, w_stop);
+            elapsed_t_ns += t_ns;
+            elapsed_w_ns += w_ns;
+            min_t_ns = MIN(t_ns, min_t_ns);
+            max_t_ns = MAX(t_ns, min_t_ns);
+            min_w_ns = MIN(w_ns, min_w_ns);
+            max_w_ns = MAX(w_ns, min_w_ns);
         }
 
-        fprintf(stdout, "Integration written\n");
         // Close the filespaces - leave the datasets open. We'll close those when the file is done
         close_filespaces(&sum_file);
         close_filespaces(&diff_file);
 
         clock_gettime(CLOCK_MONOTONIC, &finish);
 
-        // Note processing time for this integration
+        // Note processing time for this integration and update other stats
+        bl_t_ns = (float)elapsed_t_ns / VIS_MATRIX_ENTRIES_PER_CHAN;
+        bl_w_ns = (float)elapsed_w_ns / VIS_MATRIX_ENTRIES_PER_CHAN;
+
         hashpipe_status_lock_safe(&st);
+        hputr4(st.buf, "DISKTBNS", bl_t_ns); 
+        hputi8(st.buf, "DISKTMIN", min_t_ns); 
+        hputi8(st.buf, "DISKTMAX", max_t_ns); 
+        hputr4(st.buf, "DISKWBNS", bl_w_ns); 
+        hputi8(st.buf, "DISKWMIN", min_w_ns); 
+        hputi8(st.buf, "DISKWMAX", max_w_ns); 
 
         hgetr4(st.buf, "DISKMING", &min_gbps);
         gbps = (float)(2*64L*VIS_MATRIX_ENTRIES/CATCHER_CHAN_SUM)/ELAPSED_NS(start,finish); //Gigabits / s

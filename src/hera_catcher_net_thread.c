@@ -43,9 +43,9 @@
 
 typedef struct {
     uint64_t mcnt;         // MCNT of the first block in this integrations
-    uint32_t offset;       // offset in bytes where this packet belongs in the correlation
-    uint16_t xeng_id;	   // First channel in a packet
-    uint16_t payload_len;  // Antenna in a packet
+    uint64_t offset;       // offset in bytes where this packet belongs in the correlation
+    uint64_t xeng_id;	   // First channel in a packet
+    uint64_t payload_len;  // Antenna in a packet
 } packet_header_t;
 
 // The fields of a block_info_t structure hold meta-data about the contents of
@@ -58,9 +58,7 @@ typedef struct {
 
 
 static hashpipe_status_t *st_p;
-
-//static uint64_t mcnt_log[MAX_MCNT_LOG];
-//static int mcnt_log_idx = 0;
+static const char * status_key;
 
 // This sets the "current" block to be marked as filled.  The current block is
 // the block corresponding to binfo->block_i.  Returns mcnt of the block
@@ -192,12 +190,16 @@ static inline uint64_t process_packet(
     // If the MCNT has changed, we need to start a new buffer.
     // Mark the current block as filled
     if (0 != pkt_mcnt_dist) {
-        fprintf(stdout, "Marking block filled\n");
         netmcnt = set_block_filled(hera_catcher_input_databuf_p, &binfo);
         // Reset binfo's packet counter for this packet's block
         binfo.block_packet_counter[binfo.block_i] = 0;
+        // Increment the current block number
+        binfo.block_i = (binfo.block_i +1) % CATCHER_N_BLOCKS;
         // Wait (hopefully not long!) to acquire the block after next (i.e.
         // the block that gets the current packet).
+        hashpipe_status_lock_safe(st_p);
+        hputs(st_p->buf, status_key, "waiting for outbuf");
+        hashpipe_status_unlock_safe(st_p);
         if(hera_catcher_input_databuf_busywait_free(hera_catcher_input_databuf_p, binfo.block_i) != HASHPIPE_OK) {
     	    if (errno == EINTR) {
     	        // Interrupted by signal, return -1
@@ -210,8 +212,9 @@ static inline uint64_t process_packet(
     	        return -1; // We're exiting so return value is kind of moot
     	    }
         }
-        // Increment the current block number
-        binfo.block_i = (binfo.block_i +1) % CATCHER_N_BLOCKS;
+        hashpipe_status_lock_safe(st_p);
+        hputs(st_p->buf, status_key, "running");
+        hashpipe_status_unlock_safe(st_p);
         // Initialize the newly acquired block
         initialize_block(hera_catcher_input_databuf_p, pkt_mcnt, binfo.block_i);
     
@@ -225,11 +228,14 @@ static inline uint64_t process_packet(
     binfo.block_packet_counter[binfo.block_i]++;
 
     // Copy data into buffer
-    dest_p = (uint64_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset));
+    //dest_p = (uint64_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset));
+    dest_p = (uint64_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data);
     payload_p = (uint64_t *)(PKT_UDP_DATA(p_frame) + sizeof(packet_header_t));
-    //fprintf(stdout, "mcnt: %lu, t-demux: %d, offset: %d, xeng: %d (%d,%d)\n", packet_header_p->mcnt, time_demux_block, packet_header_p->offset, packet_header_p->xeng_id, ((int32_t *)payload_p)[0], ((int32_t*)payload_p)[1]);
+    //fprintf(stdout, "mcnt: %lu, t-demux: %d, offset: %d, xeng: %d (%d,%d), payload:%d\n", packet_header_p->mcnt, time_demux_block, packet_header_p->offset, packet_header_p->xeng_id, ((int32_t *)payload_p)[0], ((int32_t*)payload_p)[1], packet_header_p->payload_len);
     //fprintf(stdout, "offset: %d\n", hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset));
     memcpy(dest_p, payload_p, packet_header_p->payload_len);
+    //dest_p = dest_p;
+    //payload_p = payload_p;
     
     return netmcnt;
 }
@@ -242,6 +248,7 @@ static int init(hashpipe_thread_args_t *args)
     /* Read network params */
     char bindhost[80];
     int bindport = CATCHER_PORT;
+    status_key = args->thread_desc->skey;
 
     strcpy(bindhost, "0.0.0.0");
 
@@ -298,7 +305,6 @@ static void *run(hashpipe_thread_args_t * args)
     // Our output buffer happens to be a paper_input_databuf
     hera_catcher_input_databuf_t *db = (hera_catcher_input_databuf_t *)args->obuf;
     hashpipe_status_t st = args->st;
-    const char * status_key = args->thread_desc->skey;
 
     st_p = &st;	// allow global (this source file) access to the status buffer
 
@@ -322,6 +328,7 @@ static void *run(hashpipe_thread_args_t * args)
 	    // Done holding, so delete the key
 	    hdel(st.buf, "CNETHOLD");
 	    hputs(st.buf, status_key, "starting");
+            fprintf(stdout, "Starting...\n");
 	}
 	hashpipe_status_unlock_safe(&st);
     }
