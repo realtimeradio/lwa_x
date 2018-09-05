@@ -43,9 +43,9 @@
 
 typedef struct {
     uint64_t mcnt;         // MCNT of the first block in this integrations
-    uint64_t offset;       // offset in bytes where this packet belongs in the correlation
-    uint64_t xeng_id;	   // First channel in a packet
-    uint64_t payload_len;  // Antenna in a packet
+    uint32_t offset;       // offset in bytes where this packet belongs in the correlation
+    uint16_t xeng_id;	   // First channel in a packet
+    uint16_t payload_len;  // Antenna in a packet
 } packet_header_t;
 
 // The fields of a block_info_t structure hold meta-data about the contents of
@@ -155,23 +155,34 @@ static inline uint64_t process_packet(
 	hera_catcher_input_databuf_t *hera_catcher_input_databuf_p, unsigned char*p_frame)
 {
 
+    int i;
     static block_info_t binfo;
     packet_header_t *packet_header_p;
-    const uint64_t *payload_p;
-    uint64_t *dest_p;
+    const uint32_t *payload_p;
+    uint32_t *dest_p;
     int64_t pkt_mcnt_dist;
     uint64_t pkt_mcnt;
     int time_demux_block;
     uint64_t cur_mcnt = -1;
     uint64_t netmcnt = -1; // Value to return (!=-1 is stored in status memory)
-    //int i;
+    // These are just the header entries, after we've network->host endianed them
+    uint64_t mcnt;
+    uint32_t offset;
+    uint16_t xeng_id;
+    uint16_t payload_len;
 
 
     // Parse packet header
     packet_header_p = (packet_header_t *)PKT_UDP_DATA(p_frame);
-    time_demux_block = (packet_header_p->mcnt / Nt) % TIME_DEMUX;
-    pkt_mcnt = packet_header_p->mcnt - (Nt*time_demux_block);
-    //fprintf(stdout, "header_cal: %lu, time_demux_block: %d; mcnt: %lu\n", packet_header_p->mcnt, time_demux_block, pkt_mcnt);
+    mcnt        = be64toh(packet_header_p->mcnt);
+    offset      = be32toh(packet_header_p->offset);
+    xeng_id     = be16toh(packet_header_p->xeng_id);
+    payload_len = be16toh(packet_header_p->payload_len);
+
+    // Split the mcnt into a "pkt_mcnt" which is the same for all even/odd samples,
+    // and "time_demux_block", which indicates which even/odd block this packet came from
+    time_demux_block = (mcnt / Nt) % TIME_DEMUX;
+    pkt_mcnt = mcnt - (Nt*time_demux_block);
 
     // Lazy init binfo
     if(!binfo.initialized) {
@@ -228,12 +239,17 @@ static inline uint64_t process_packet(
     binfo.block_packet_counter[binfo.block_i]++;
 
     // Copy data into buffer
-    //dest_p = (uint64_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset));
-    dest_p = (uint64_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data);
-    payload_p = (uint64_t *)(PKT_UDP_DATA(p_frame) + sizeof(packet_header_t));
+    dest_p = (uint32_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id, offset));
+    payload_p = (uint32_t *)(PKT_UDP_DATA(p_frame) + sizeof(packet_header_t));
     //fprintf(stdout, "mcnt: %lu, t-demux: %d, offset: %d, xeng: %d (%d,%d), payload:%d\n", packet_header_p->mcnt, time_demux_block, packet_header_p->offset, packet_header_p->xeng_id, ((int32_t *)payload_p)[0], ((int32_t*)payload_p)[1], packet_header_p->payload_len);
     //fprintf(stdout, "offset: %d\n", hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset));
-    memcpy(dest_p, payload_p, packet_header_p->payload_len);
+    
+    //memcpy(dest_p, payload_p, payload_len);
+    // Copy with byte swap
+    for(i=0; i<(payload_len >> 2); i++){
+        dest_p[i] = be32toh(payload_p[i]);
+    }
+    
     //dest_p = dest_p;
     //payload_p = payload_p;
     

@@ -27,7 +27,7 @@ print "Packets per Xeng: %.4f" % n_pkts_per_x
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 mcnt = 1310720
-data = struct.pack('<2i', 1, 2) * (BYTES_PER_PACKET/8)
+data = struct.pack('>2i', 1, 2) * (BYTES_PER_PACKET/8)
 assert len(data) == BYTES_PER_PACKET
 
 while(True):
@@ -38,8 +38,7 @@ while(True):
         #    print pkt
         for t in range(TIME_DEMUX):
             for xeng in range(NX):
-                #p = struct.pack('<QLHH', mcnt+NT*t, offset, xeng, BYTES_PER_PACKET) + data
-                p = struct.pack('<QQQQ', mcnt+NT*t, offset, xeng, BYTES_PER_PACKET) + data
+                p = struct.pack('>QLHH', mcnt+NT*t, offset, xeng, BYTES_PER_PACKET) + data
                 s.sendto(p, (DESTIP, DESTPORT))
             time.sleep(1e-6)
         offset += BYTES_PER_PACKET
