@@ -62,7 +62,7 @@ if args.action == 'start':
             pass
 
     # Delay before starting, in MCNTs, rounded to 4096
-    time_delay = args.starttime - time.time()
+    time_delay = args.starttime - int(rdb['corr:feng_sync_time'])
     delay_mcnts = 4096 * ((int(time_delay * mcnts_per_second()) + 2047) / 4096)
     
     # MCNT to start on. Don't need to round, becase gpumcnts has to be aligned to a block boundary
@@ -79,4 +79,6 @@ if args.action == 'start':
     
     msg = 'INTSYNC=%d\nINTCOUNT=%d\nINTSTAT=start\nOUTDUMPS=0' % (trig_mcnt, args.acclen)
     rdb.publish("hashpipe:///set", msg)
+    rdb['corr:trig_mcnt'] = trig_mcnt
+    rdb['corr:acc_len'] = args.acclen
 
