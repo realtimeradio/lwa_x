@@ -54,7 +54,9 @@ dist_bin_SCRIPTS = paper_init.sh \
 		   xtor_down.sh \
 		   xtor_up.sh \
                    catcher_init.sh \
-                   catcher_up.sh
+                   catcher_up.sh \
+                   hera_ctl.py \
+                   hera_make_hdf5_template.py
 
 # Non-installed test programs
 noinst_PROGRAMS = paper_fluff_test hera_write_hdf5
