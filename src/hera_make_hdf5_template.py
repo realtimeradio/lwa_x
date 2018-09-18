@@ -25,12 +25,18 @@ def get_ant_names():
     Generate a list of antenna names, where position
     in the list indicates numbering in the data files.
     """
-    return ["foo"]*350
+    return ["foo"]*352
 
 def get_cm_info():
-    from hera_cm import sys_handler
-    h = sys_handler.Handler()
+    from hera_mc import sys_handling
+    h = sys_handling.Handling()
     return h.get_cminfo_correlator()
+
+def get_antpos_enu(antpos, lat, lon, alt):
+    import pyuvdata
+    ecef = pyuvdata.ECEF_from_rotECEF(antpos, lon)
+    enu  = pyuvdata.ENU_from_ECEF(ecef, lat, lon, alt)
+    return enu
 
 def create_header(h5, use_cm=False):
     """
@@ -44,9 +50,12 @@ def create_header(h5, use_cm=False):
     """
     if use_cm:
         cminfo = get_cm_info()
+        # add the enu co-ords
+        cminfo["antenna_positions_enu"] = get_antpos_enu(cminfo["antenna_positions"], cminfo["cofa_lat"],
+                                                             cminfo["cofa_lon"], cminfo["cofa_alt"])
 
     NANTS_DATA = 196
-    NANTS = 350
+    NANTS = 352
     NCHANS = 2048 / 4. * 3
     ANT_DIAMETER = 14.0
     INT_TIME = 10.0
@@ -79,22 +88,26 @@ def create_header(h5, use_cm=False):
     if use_cm:
         header.create_dataset("altitude",    dtype="<f8", data=cminfo['cofa_alt'])
         ant_pos = np.zeros([NANTS,3], dtype=np.int64)
-        ant_names = cminfo["antenna_names"] + ["NONE"]*NANTS
+        ant_pos_enu = np.zeros([NANTS,3], dtype=np.int64)
+        ant_names = ["NONE"]*NANTS
         ant_nums = [-1]*NANTS
         for n, i in enumerate(cminfo["antenna_numbers"]):
-            ant_pos[i] = cminfo["antenna_positions"][n]
-            ant_names[i] = cminfo["antenna_names"][n]
-            ant_nums[i] = cminfo["antenna_numbers"][n]
+            ant_pos[i]     = cminfo["antenna_positions"][n]
+            ant_names[i]   = cminfo["antenna_names"][n].encode()
+            ant_nums[i]    = cminfo["antenna_numbers"][n]
+            ant_pos_enu[i] = cminfo["antenna_positions_enu"][n]
         header.create_dataset("antenna_names",     dtype="|S5", shape=(NANTS,), data=ant_names)
         header.create_dataset("antenna_numbers",   dtype="<i8", shape=(NANTS,), data=ant_nums)
         header.create_dataset("antenna_positions",   dtype="<i8", shape=(NANTS,3), data=ant_pos)
+        header.create_dataset("antenna_positions_enu",   dtype="<i8", shape=(NANTS,3), data=ant_pos_enu)
         header.create_dataset("latitude",    dtype="<f8", data=cminfo["cofa_lat"])
-        header.create_dataset("longitude",   dtype="<f8", data=cminfo["coofa_lon"])
+        header.create_dataset("longitude",   dtype="<f8", data=cminfo["cofa_lon"])
     else:
         header.create_dataset("altitude",    dtype="<f8", data=0.0)
         header.create_dataset("antenna_names",     dtype="|S5", shape=(NANTS,), data=["NONE"]*NANTS)
         header.create_dataset("antenna_numbers",   dtype="<i8", shape=(NANTS,), data=range(NANTS))
         header.create_dataset("antenna_positions",   dtype="<i8", shape=(NANTS,3), data=np.zeros([NANTS,3]))
+        header.create_dataset("antenna_positions_enu",   dtype="<i8", shape=(NANTS,3), data=np.zeros([NANTS,3]))
         header.create_dataset("latitude",    dtype="<f8", data=0.0)
         header.create_dataset("longitude",   dtype="<f8", data=0.0)
 
@@ -104,8 +117,6 @@ def create_header(h5, use_cm=False):
     #header.create_dataset("time_array", dtype="<f8", data=np.zeros(n_bls * NTIMES))
     # uvw_needs populating by receiver: uvw = xyz(ant2) - xyz(ant1). Units, metres.
     #header.create_dataset("uvw_array",  dtype="<f8", data=np.zeros([n_bls * NTIMES, 3]))
-    #header.create_dataset("zenith_dec", dtype="<f8", data=np.zeros(n_bls * NTIMES))
-    #header.create_dataset("zenith_ra",  dtype="<f8", data=np.zeros(n_bls * NTIMES))
     # !Some! extra_keywords need to be computed for each file
     if use_cm:
         add_extra_keywords(header, cminfo)
@@ -129,11 +140,15 @@ def add_extra_keywords(obj, cminfo=None):
     extras.create_dataset("stopt",  dtype="<f8", data=0.0)   # filled in by receiver
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print "Usage: make_hera_hdf5_template.py <filename>"
-        exit()
+    import argparse
     
-    with h5py.File(sys.argv[1], 'w') as h5:
-        create_header(h5)
+    parser = argparse.ArgumentParser(description='Create a template HDF5 header file, optionally '\
+                                     'using the correlator C+M system to get current meta-data',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('output',type=str, help = 'Path to which the template header file should be output')
+    parser.add_argument('-c', dest='use_cminfo', action='store_true', default=False,
+                        help ='Use this flag to get up-to-date (hopefully) array meta-data from the C+M system')
+    args = parser.parse_args()
 
-    
+    with h5py.File(args.output, "w") as h5:
+        create_header(h5, args.use_cminfo)
