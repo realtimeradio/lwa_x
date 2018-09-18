@@ -50,7 +50,7 @@ if args.action == 'start':
     n_missing_mcnts = gpumcnts.count(None)
     if n_missing_mcnts == xinstances:
         print 'Could\'t find any GPUMCNT values. Cannot start'
-        exit
+        exit()
     elif n_missing_mcnts > 0:
         print 'WARNING: Missing GPUMCNT values from instances' % n_missing_mcnts
 
@@ -62,11 +62,13 @@ if args.action == 'start':
             pass
 
     # Delay before starting, in MCNTs, rounded to 4096
-    time_delay = args.starttime - int(rdb['corr:feng_sync_time'])
+    mcnt_origin = int(rdb['corr:feng_sync_time'])
+    time_delay = args.starttime - mcnt_origin
     delay_mcnts = 4096 * ((int(time_delay * mcnts_per_second()) + 2047) / 4096)
     
     # MCNT to start on. Don't need to round, becase gpumcnts has to be aligned to a block boundary
-    trig_mcnt = max(gpumcnts) + delay_mcnts
+    trig_mcnt = delay_mcnts
+    trig_time = delay_mcnts * mcnts_per_second() + mcnt_origin
 
     print 'Current MCNTs are:', gpumcnts
     print 'MCNTs per second: %.1f' % mcnts_per_second()
@@ -80,5 +82,6 @@ if args.action == 'start':
     msg = 'INTSYNC=%d\nINTCOUNT=%d\nINTSTAT=start\nOUTDUMPS=0' % (trig_mcnt, args.acclen)
     rdb.publish("hashpipe:///set", msg)
     rdb['corr:trig_mcnt'] = trig_mcnt
+    rdb['corr:trig_time'] = trig_time
     rdb['corr:acc_len'] = args.acclen
 
