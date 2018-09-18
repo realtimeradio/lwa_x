@@ -96,7 +96,7 @@ pkill -9 cn_rx.py
 
 # Stop integrations
 echo "stopping integrations"
-paper_ctl.rb stop
+hera_ctl.py stop
 
 # Stop hashpipe-redis gateways
 echo "stopping hashpipe-redis gateways"
@@ -104,23 +104,23 @@ redis-cli -h redishost publish hashpipe:///gateway quit
 
 # Just to be sure
 echo "killing any remaining hashpipe-redis gateways"
-for x; do ssh px$x pkill    -f hashpipe_redis_gateway.rb; done
-for x; do ssh px$x pkill -9 -f hashpipe_redis_gateway.rb; done
+for x; do ssh root@px$x pkill    -f hashpipe_redis_gateway.rb; done
+for x; do ssh root@px$x pkill -9 -f hashpipe_redis_gateway.rb; done
 
 # Stop hashpipe instances
 echo "killing hashpipe instances"
-for x; do ssh px$x pkill    hashpipe; done
-for x; do ssh px$x pkill -9 hashpipe; done
+for x; do ssh root@px$x pkill    hashpipe; done
+for x; do ssh root@px$x pkill -9 hashpipe; done
 
 # Delete shared memory and semaphores
 echo "deleting shared memory and semaphores"
 for x; do
   for i in {0..3}; do
-    ssh px$x hashpipe_clean_shmem -d -I $i > /dev/null
+    ssh root@px$x hashpipe_clean_shmem -d -I $i > /dev/null
   done
 done
 
 # Just to be sure
 echo "nuking any remaining shared memory and semaphores"
-for x; do ssh px$x 'ipcs -m | awk "/0x/{print \"ipcrm -m\", \$2}" | sh'; done
-for x; do ssh px$x 'ipcs -s | awk "/0x/{print \"ipcrm -s\", \$2}" | sh'; done
+for x; do ssh root@px$x 'ipcs -m | awk "/0x/{print \"ipcrm -m\", \$2}" | sh'; done
+for x; do ssh root@px$x 'ipcs -s | awk "/0x/{print \"ipcrm -s\", \$2}" | sh'; done
