@@ -11,6 +11,7 @@ exit $1
 }
 
 paper_init=paper_init.sh
+perf_tweaker=tweak-perf.sh
 xc=X
 
 while getopts :fxcm:h-: opt
@@ -43,6 +44,15 @@ then
 fi
 
 xhosts=$(echo "$@" | sed 's/^/px/;s/ / px/g')
+
+# Run performance tweaking script
+echo Running performance tweaking script on $xhosts
+for x in $xhosts
+do
+  ssh root@$x ${perf_tweaker} &
+done
+
+wait
 
 # Start X engines
 echo Starting $xc Engine instances on $xhosts
