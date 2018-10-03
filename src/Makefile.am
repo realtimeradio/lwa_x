@@ -55,6 +55,7 @@ dist_bin_SCRIPTS = paper_init.sh \
 		   xtor_up.sh \
                    catcher_init.sh \
                    catcher_up.sh \
+                   tweak-perf.sh \
                    hera_ctl.py \
                    hera_make_hdf5_template.py
 
