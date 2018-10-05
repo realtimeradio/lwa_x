@@ -54,7 +54,7 @@ typedef struct {
     hid_t nsamples_fs;
 } hdf5_id_t;  
 
-static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, uint64_t file_nblts) {
+static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, uint64_t file_nblts, uint64_t file_nts) {
     hid_t dataset_id;
     dataset_id = H5Dopen(id->extra_keywords_gid, "stopt", H5P_DEFAULT);
     H5Dwrite(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_stop_t);
@@ -64,6 +64,9 @@ static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, 
     H5Dclose(dataset_id);
     dataset_id = H5Dopen(id->header_gid, "Nblts", H5P_DEFAULT);
     H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_nblts);
+    H5Dclose(dataset_id);
+    dataset_id = H5Dopen(id->header_gid, "Ntimes", H5P_DEFAULT);
+    H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_nts);
     H5Dclose(dataset_id);
     // Close datasets
     H5Dclose(id->visdata_did);
@@ -436,8 +439,8 @@ static void *run(hashpipe_thread_args_t * args)
             // If a file is open, finish its meta-data and close it.
             if (curr_file_time >= 0) {
                 fprintf(stdout, "Closing datasets and files\n");
-                close_file(&sum_file, file_stop_t, file_duration, file_nblts);
-                close_file(&diff_file, file_stop_t, file_duration, file_nblts);
+                close_file(&sum_file, file_stop_t, file_duration, file_nblts, file_nts);
+                close_file(&diff_file, file_stop_t, file_duration, file_nblts, file_nts);
             }
 
             // And now start a new file
