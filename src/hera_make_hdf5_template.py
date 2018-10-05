@@ -54,7 +54,8 @@ def create_header(h5, use_cm=False):
         cminfo["antenna_positions_enu"] = get_antpos_enu(cminfo["antenna_positions"], cminfo["cofa_lat"],
                                                              cminfo["cofa_lon"], cminfo["cofa_alt"])
 
-    NANTS_DATA = 196
+    INSTRUMENT = "HERA"
+    NANTS_DATA = 192
     NANTS = 352
     NCHANS = 2048 / 4. * 3
     ANT_DIAMETER = 14.0
@@ -77,7 +78,7 @@ def create_header(h5, use_cm=False):
     header.create_dataset("channel_width",     dtype="<f8", data=250e6 / (NCHANS / 3 * 4))
     header.create_dataset("freq_array",        dtype="<f8", shape=(1, NCHANS), data=np.linspace(0, 250e6, NCHANS))
     header.create_dataset("history",   data="%s: Template file created\n" % time.ctime())
-    header.create_dataset("telescope", data="HERA")
+    header.create_dataset("instrument", data=INSTRUMENT)
     header.create_dataset("integration_time", dtype="<f8", data=INT_TIME)
     header.create_dataset("object_name", data="zenith")
     header.create_dataset("phase_type",  data="drift")
