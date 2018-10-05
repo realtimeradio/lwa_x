@@ -60,8 +60,8 @@ def create_header(h5, use_cm=False):
     NCHANS = 2048 / 4. * 3
     ANT_DIAMETER = 14.0
     INT_TIME = 10.0
-    n_bls = (NANTS * (NANTS + 1)) / 2
     bls = np.array(get_bl_order(NANTS_DATA))
+    n_bls = len(bls)
 
     header = h5.create_group("Header")
     header.create_dataset("Nants_data", dtype="<i8", data=NANTS_DATA)
