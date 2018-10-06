@@ -30,7 +30,7 @@ wait = True
 start = time.time()
 while True:
     data = sock.recv(BYTES_PER_PACKET)
-    unpacked = struct.unpack('<QLHH', data[0:16])
+    unpacked = struct.unpack('>QLHH', data[0:16])
     timestamp = unpacked[0]
     offset = unpacked[1]
     xeng_id = unpacked[2]
@@ -40,7 +40,7 @@ while True:
     if (not wait) or (offset == 0):
         n += 1
         wait = False
-        #print time, packet_num, xeng_id, payload_len
+        print timestamp, offset, xeng_id, payload_len
         #print dout[256*packet_num:256*(packet_num+1)].shape
         #print len(unpacked[4:])
         #dout[offset/4:(offset+PAYLOAD_LEN)/4] = np.fromstring(data[16:], dtype='>i')
