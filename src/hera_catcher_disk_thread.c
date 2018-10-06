@@ -336,6 +336,22 @@ static double mcnt2time(uint64_t mcnt, uint32_t sync_time)
     return (sync_time + mcnt) * (N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE);
 }
 
+static void compute_time_array(double time, double *time_buf)
+{
+    int i;
+    for (i=0; i<(VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES); i++) {
+        time_buf[i] = time;
+    }
+}
+
+static void compute_integration_time_array(double integration_time, double *integration_time_buf)
+{
+    int i;
+    for (i=0; i<(VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES); i++) {
+        integration_time_buf[i] = integration_time;
+    }
+}
+
 /*
 Given an intire input buffer --
 even/odd x 1 time x N_chans x N_bls x  N_stokes x 2 (real/imag)
@@ -450,6 +466,7 @@ static void *run(hashpipe_thread_args_t * args)
     uint32_t sync_time = 0;
     double gps_time;
     double julian_time;
+    double integration_time;
 
     // How many integrations to dump to a file before starting the next one
     // This is read from shared memory
@@ -463,6 +480,9 @@ static void *run(hashpipe_thread_args_t * args)
     hgetu4(st.buf, "SYNCTIME", &sync_time);
 
     hgetu4(st.buf, "MSPERFIL", &ms_per_file);
+
+    // Get the integration time reported by the correlator
+    hgetr8(st.buf, "INTSECS", &integration_time);
 
     // Init status variables
     hputi8(st.buf, "DISKMCNT", 0);
@@ -578,6 +598,8 @@ static void *run(hashpipe_thread_args_t * args)
             
         // Write this integration's entries for lst_array, time_array, uvw_array
         // TODO: compute uvw array
+        compute_time_array(julian_time, time_array_buf);
+        compute_integration_time_array(integration_time, integration_time_buf);
         write_extensible_headers(&sum_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf);
         write_extensible_headers(&diff_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf);
 
