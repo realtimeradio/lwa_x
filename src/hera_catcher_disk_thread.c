@@ -49,10 +49,16 @@ typedef struct {
     hid_t visdata_did;
     hid_t flags_did;
     hid_t nsamples_did;
+    hid_t time_array_did;
+    hid_t integration_time_did;
+    hid_t uvw_array_did;
     hid_t visdata_fs;
     hid_t flags_fs;
     hid_t nsamples_fs;
-} hdf5_id_t;  
+    hid_t time_array_fs;
+    hid_t integration_time_fs;
+    hid_t uvw_array_fs;
+} hdf5_id_t;
 
 static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, uint64_t file_nblts, uint64_t file_nts) {
     hid_t dataset_id;
@@ -93,7 +99,7 @@ static void make_extensible_hdf5(hdf5_id_t *id)
     hsize_t dims[N_DATA_DIMS] = {0, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, N_CHAN_PROCESSED, N_STOKES};
     hsize_t max_dims[N_DATA_DIMS] = {16, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, N_CHAN_PROCESSED, N_STOKES};
     hsize_t chunk_dims[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
-    
+
     hid_t file_space = H5Screate_simple(N_DATA_DIMS, dims, max_dims);
     hid_t plist = H5Pcreate(H5P_DATASET_CREATE);
 
@@ -105,7 +111,7 @@ static void make_extensible_hdf5(hdf5_id_t *id)
     H5Pset_layout(plist, H5D_CHUNKED);
 
     H5Pset_chunk(plist, N_DATA_DIMS, chunk_dims);
-    
+
     // Now we have the dataspace properties, create the datasets
     id->visdata_did = H5Dcreate(id->data_gid, "visdata", complex_id, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
     if (id->visdata_did < 0) {
@@ -122,6 +128,66 @@ static void make_extensible_hdf5(hdf5_id_t *id)
     id->flags_did = H5Dcreate(id->data_gid, "flags", H5T_NATIVE_HBOOL, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
     if (id->flags_did < 0) {
         hashpipe_error(__FUNCTION__, "Failed to create flags dataset");
+        pthread_exit(NULL);
+    }
+
+    H5Pclose(plist);
+    H5Sclose(file_space);
+}
+
+/* Create the extensible header entries which have dimensions ~Nblts.
+ * These are:
+ * Header/uvw_array (Nblts x 3)
+ * Header/time_array (Nblts)
+ * Header/integration_time (Nblts)
+ */
+#define DIM1 1
+#define DIM2 2
+static void make_extensible_headers_hdf5(hdf5_id_t *id)
+{
+    hsize_t dims1[DIM1] = {0};
+    hsize_t max_dims1[DIM1]   = {16 * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES};
+    hsize_t chunk_dims1[DIM1] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES};
+
+    hid_t file_space = H5Screate_simple(DIM1, dims1, max_dims1);
+    hid_t plist = H5Pcreate(H5P_DATASET_CREATE);
+
+    H5Pset_layout(plist, H5D_CHUNKED);
+
+    H5Pset_chunk(plist, DIM1, chunk_dims1);
+
+    // Now we have the dataspace properties, create the datasets
+    id->time_array_did = H5Dcreate(id->header_gid, "time_array", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+    if (id->visdata_did < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to create visdata dataset");
+        pthread_exit(NULL);
+    }
+
+    id->integration_time_did = H5Dcreate(id->header_gid, "integration_time", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+    if (id->nsamples_did < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to create nsamples dataset");
+        pthread_exit(NULL);
+    }
+
+    H5Pclose(plist);
+    H5Sclose(file_space);
+
+    /* And now uvw_array, which has shape Nblts x 3 */
+    hsize_t dims2[DIM2] = {0, 3};
+    hsize_t max_dims2[DIM2]   = {16 * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 3};
+    hsize_t chunk_dims2[DIM2] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 3};
+
+    file_space = H5Screate_simple(DIM2, dims2, max_dims2);
+    plist = H5Pcreate(H5P_DATASET_CREATE);
+
+    H5Pset_layout(plist, H5D_CHUNKED);
+
+    H5Pset_chunk(plist, DIM2, chunk_dims2);
+
+    // Now we have the dataspace properties, create the datasets
+    id->uvw_array_did = H5Dcreate(id->header_gid, "uvw_array", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+    if (id->visdata_did < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to create visdata dataset");
         pthread_exit(NULL);
     }
 
@@ -192,6 +258,9 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     // Create the extensible "Data" group datasets. This function
     // assigns all the dataset ids to the id struct
     make_extensible_hdf5(id);
+    // Create the extensible "Header/*" group datasets. This function
+    // assigns all the dataset ids to the id struct
+    make_extensible_headers_hdf5(id);
     
     // Write meta-data values we know at file-open
     dataset_id = H5Dopen(id->extra_keywords_gid, "obs_id", H5P_DEFAULT);
@@ -212,6 +281,17 @@ static void extend_datasets(hdf5_id_t *id, int n) {
     id->nsamples_fs = H5Dget_space(id->nsamples_did);
 }
 
+static void extend_header_datasets(hdf5_id_t *id, int n) {
+    hsize_t dims1[DIM1] = {n * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES};
+    hsize_t dims2[DIM2] = {n * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 3};
+    H5Dset_extent(id->time_array_did, dims1);
+    H5Dset_extent(id->integration_time_did, dims1);
+    H5Dset_extent(id->uvw_array_did, dims2);
+    id->time_array_fs = H5Dget_space(id->time_array_did);
+    id->integration_time_fs = H5Dget_space(id->integration_time_did);
+    id->uvw_array_fs = H5Dget_space(id->uvw_array_did);
+}
+
 static void close_filespaces(hdf5_id_t *id) {
     H5Sclose(id->visdata_fs);
     H5Sclose(id->flags_fs);
@@ -229,6 +309,23 @@ static void write_channels(hdf5_id_t *id, hsize_t t, hsize_t b, hid_t mem_space,
     hsize_t count[N_DATA_DIMS] = {1, N_BL_PER_WRITE, N_CHAN_PROCESSED, N_STOKES};
     H5Sselect_hyperslab(id->visdata_fs, H5S_SELECT_SET, start, NULL, count, NULL);
     H5Dwrite(id->visdata_did, complex_id, mem_space, id->visdata_fs, H5P_DEFAULT, visdata_buf);
+}
+
+/*
+Write Nbls entries into the integration_time and time_array arrays. Write Nbls x 3 entries into uvw_array
+*/
+static void write_extensible_headers(hdf5_id_t *id, hsize_t t, hid_t mem_space1, hid_t mem_space2, double *integration_time_buf, double *time_array_buf, double*uvw_array_buf)
+{
+    hsize_t start1[DIM1] = {t * (VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES)};
+    hsize_t count1[DIM1] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES};
+    hsize_t start2[DIM2] = {t * (VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES), 0};
+    hsize_t count2[DIM2] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 3};
+    H5Sselect_hyperslab(id->integration_time_fs, H5S_SELECT_SET, start1, NULL, count1, NULL);
+    H5Dwrite(id->integration_time_did, H5T_NATIVE_DOUBLE, mem_space1, id->integration_time_fs, H5P_DEFAULT, integration_time_buf);
+    H5Sselect_hyperslab(id->time_array_fs, H5S_SELECT_SET, start1, NULL, count1, NULL);
+    H5Dwrite(id->time_array_did, H5T_NATIVE_DOUBLE, mem_space1, id->time_array_fs, H5P_DEFAULT, time_array_buf);
+    H5Sselect_hyperslab(id->uvw_array_fs, H5S_SELECT_SET, start2, NULL, count2, NULL);
+    H5Dwrite(id->uvw_array_did, H5T_NATIVE_DOUBLE, mem_space2, id->uvw_array_fs, H5P_DEFAULT, uvw_array_buf);
 }
 
 /*
@@ -389,6 +486,10 @@ static void *run(hashpipe_thread_args_t * args)
     int32_t *bl_buf_sum  = (int32_t *)aligned_alloc(32, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
     int32_t *bl_buf_diff = (int32_t *)aligned_alloc(32, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
 
+    double *integration_time_buf = (double *)malloc((VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES) * sizeof(double));
+    double *time_array_buf       = (double *)malloc((VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES) * sizeof(double));
+    double *uvw_array_buf        = (double *)malloc((VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES) * 3 * sizeof(double));
+
     // Allocate an array of bools for flags and n_samples
     hbool_t *flags = (hbool_t *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED * sizeof(hbool_t));
     uint64_t *nsamples = (uint64_t *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED* sizeof(uint64_t));
@@ -397,6 +498,12 @@ static void *run(hashpipe_thread_args_t * args)
     // We write 1 baseline-time at a time
     hsize_t dims[N_DATA_DIMS] = {1, N_BL_PER_WRITE, N_CHAN_PROCESSED, N_STOKES};
     hid_t mem_space = H5Screate_simple(N_DATA_DIMS, dims, NULL);
+    // Memory spaces to Nblts-element header vectors
+    hsize_t dims1[DIM1] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES};
+    hid_t mem_space1 = H5Screate_simple(DIM1, dims1, NULL);
+    // Memory spaces to (Nblts x 3)-element header vectors
+    hsize_t dims2[DIM2] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 3};
+    hid_t mem_space2 = H5Screate_simple(DIM2, dims2, NULL);
 
     while (run_threads()) {
         // Note waiting status,
@@ -466,8 +573,13 @@ static void *run(hashpipe_thread_args_t * args)
         // extend the datasets with time axes and update filespace IDs
         extend_datasets(&sum_file, file_nts);
         extend_datasets(&diff_file, file_nts);
+        extend_header_datasets(&sum_file, file_nts);
+        extend_header_datasets(&diff_file, file_nts);
             
-        // TODO: Write lst_array, time_array, uvw_array, zenith_dec, zenith_ra
+        // Write this integration's entries for lst_array, time_array, uvw_array
+        // TODO: compute uvw array
+        write_extensible_headers(&sum_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf);
+        write_extensible_headers(&diff_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf);
 
         // Sum over channels, compute even/odd sum/diffs, and get data on a per-baseline basis
         for(bl=0; bl<(VIS_MATRIX_ENTRIES_PER_CHAN/N_STOKES); bl+=N_BL_PER_WRITE) {
