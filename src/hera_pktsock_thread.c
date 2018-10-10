@@ -518,7 +518,7 @@ static inline uint64_t process_packet(
 		pkt_mcnt += TIME_DEMUX*N_TIME_PER_BLOCK*(binfo.block_i + N_INPUT_BLOCKS - pkt_block_i);
 	    }
 	    // Round pkt_mcnt down to nearest multiple of Nm
-	    binfo.mcnt_start = pkt_mcnt - (pkt_mcnt%N_TIME_PER_BLOCK);
+	    binfo.mcnt_start = pkt_mcnt - (pkt_mcnt%(N_TIME_PER_BLOCK*TIME_DEMUX));
 	    binfo.mcnt_log_late = binfo.mcnt_start + N_TIME_PER_BLOCK*TIME_DEMUX;
 	    binfo.block_i = block_for_mcnt(binfo.mcnt_start);
 	    hashpipe_warn("hera_pktsock_thread",
