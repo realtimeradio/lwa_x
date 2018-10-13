@@ -13,10 +13,10 @@ myip=$(getip $(hostname))
 
 function init() {
   instance=0
-  mask=0x00ff
+  mask=0x003f
   bindhost=eth3
   netcpu=0
-  outcpu=1
+  outcpu=3
 
   echo taskset $mask \
   hashpipe -p paper_gpu -I $instance \

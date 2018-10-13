@@ -18,8 +18,8 @@ wait
 
 # Start hashpipe-redis gateways
 echo Starting hashpipe-redis gateways on $catcherhost
-echo "ssh $catcherhost \"taskset 0x0001 hashpipe_redis_gateway.rb -g $catcherhost -i 0\""
-ssh $catcherhost "taskset 0x0001 hashpipe_redis_gateway.rb -g $catcherhost -i 0"
+echo "ssh $catcherhost \"taskset 0x0004 hashpipe_redis_gateway.rb -g $catcherhost -i 0\""
+ssh $catcherhost "taskset 0x0004 hashpipe_redis_gateway.rb -g $catcherhost -i 0"
 
 # Let the gateways come up and the pipelines start
 sleep 10

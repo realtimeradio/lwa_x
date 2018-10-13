@@ -29,6 +29,6 @@ ethtool -G eth3 rx 8192
 #ethtool -U eth3 flow-type udp4 src-ip 10.0.10.111 m 0.0.0.0 action 5 loc 2
 #ethtool -U eth3 flow-type udp4 src-ip 10.0.10.113 m 0.0.0.0 action 6 loc 3
 #ethtool -U eth3 flow-type udp4 src-ip 10.0.10.114 m 0.0.0.0 action 7 loc 4
-ethtool -U eth3 flow-type udp4 src-ip 10.80.40.1 m 255.255.255.255 action 4 loc 2
+ethtool -U eth3 flow-type udp4 src-ip 10.80.40.1 m 255.255.255.255 action 1 loc 1
 
 
