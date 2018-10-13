@@ -656,8 +656,7 @@ static void *run(hashpipe_thread_args_t * args)
 
         fprintf(stdout, "disk thread freeing buf %d \n", curblock_in);
         // Mark input block as free and advance
-        if (hashpipe_databuf_wait_free((hashpipe_databuf_t *)db_in, curblock_in) != HASHPIPE_OK) {
-        //if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+        if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
             hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
             pthread_exit(NULL);
         }

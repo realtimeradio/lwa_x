@@ -157,6 +157,7 @@ static inline uint64_t process_packet(
 {
 
     int i;
+    int rv;
     static block_info_t binfo;
     packet_header_t *packet_header_p;
     const uint32_t *payload_p;
@@ -218,18 +219,19 @@ static inline uint64_t process_packet(
         hputs(st_p->buf, status_key, "waiting for outbuf");
         hashpipe_status_unlock_safe(st_p);
         fprintf(stdout, "Catcher netthread waiting for lock onto block %d\n", binfo.block_i);
-        if(hera_catcher_input_databuf_busywait_free(hera_catcher_input_databuf_p, binfo.block_i) != HASHPIPE_OK) {
-    	    if (errno == EINTR) {
-    	        // Interrupted by signal, return -1
-    	        hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
-    	        pthread_exit(NULL);
-    	        return -1; // We're exiting so return value is kind of moot
-    	    } else {
-    	        hashpipe_error(__FUNCTION__, "error waiting for free databuf");
-    	        pthread_exit(NULL);
-    	        return -1; // We're exiting so return value is kind of moot
-    	    }
+        while ((rv=hera_catcher_input_databuf_wait_free(hera_catcher_input_databuf_p, binfo.block_i)) != HASHPIPE_OK) {
+            if (rv==HASHPIPE_TIMEOUT) {
+                hashpipe_status_lock_safe(st_p);
+                hputs(st_p->buf, status_key, "blocked output");
+                hashpipe_status_unlock_safe(st_p);
+                continue;
+            } else {
+                hashpipe_error(__FUNCTION__, "error waiting for free databuf");
+                pthread_exit(NULL);
+                break;
+            }
         }
+
         fprintf(stdout, "Catcher netthread got lock onto block %d\n", binfo.block_i);
         hashpipe_status_lock_safe(st_p);
         hputs(st_p->buf, status_key, "running");
@@ -247,9 +249,10 @@ static inline uint64_t process_packet(
     binfo.block_packet_counter[binfo.block_i]++;
 
     // Copy data into buffer
-    dest_p = (uint32_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id, offset));
+    dest_p = (uint32_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (hera_catcher_input_databuf_idx32(xeng_id, offset));
     payload_p = (uint32_t *)(PKT_UDP_DATA(p_frame) + sizeof(packet_header_t));
-    //fprintf(stdout, "mcnt: %lu, t-demux: %d, offset: %d, xeng: %d (%d,%d), payload:%d\n", packet_header_p->mcnt, time_demux_block, packet_header_p->offset, packet_header_p->xeng_id, ((int32_t *)payload_p)[0], ((int32_t*)payload_p)[1], packet_header_p->payload_len);
+    //fprintf(stdout, "mcnt: %lu, t-demux: %d, offset: %d, xeng: %d (%d,%d), payload:%d, block:%d\n", mcnt, time_demux_block, offset, xeng_id, ((int32_t *)payload_p)[0], ((int32_t*)payload_p)[1], payload_len, binfo.block_i);
+    //fprintf(stdout, "offset is %u\n", (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id, offset)));
     //fprintf(stdout, "offset: %d\n", hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset));
     
     //memcpy(dest_p, payload_p, payload_len);
@@ -257,9 +260,6 @@ static inline uint64_t process_packet(
     for(i=0; i<(payload_len >> 2); i++){
         dest_p[i] = be32toh(payload_p[i]);
     }
-    
-    //dest_p = dest_p;
-    //payload_p = payload_p;
     
     return netmcnt;
 }
