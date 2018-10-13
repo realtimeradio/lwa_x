@@ -91,6 +91,7 @@ static uint64_t set_block_filled(hera_catcher_input_databuf_t *hera_catcher_inpu
     }
 
     // Set the block as filled
+    fprintf(stdout, "Catcher netthread marking block %d full\n", block_i);
     if(hera_catcher_input_databuf_set_filled(hera_catcher_input_databuf_p, block_i) != HASHPIPE_OK) {
 	hashpipe_error(__FUNCTION__, "error waiting for databuf filled call");
 	pthread_exit(NULL);
@@ -184,6 +185,11 @@ static inline uint64_t process_packet(
     time_demux_block = (mcnt / Nt) % TIME_DEMUX;
     pkt_mcnt = mcnt - (Nt*time_demux_block);
 
+    // Holdoff until the start of an integration
+    if(!binfo.initialized && (offset!=0)) {
+        return -1;
+    }
+
     // Lazy init binfo
     if(!binfo.initialized) {
 	initialize_block_info(&binfo);
@@ -211,6 +217,7 @@ static inline uint64_t process_packet(
         hashpipe_status_lock_safe(st_p);
         hputs(st_p->buf, status_key, "waiting for outbuf");
         hashpipe_status_unlock_safe(st_p);
+        fprintf(stdout, "Catcher netthread waiting for lock onto block %d\n", binfo.block_i);
         if(hera_catcher_input_databuf_busywait_free(hera_catcher_input_databuf_p, binfo.block_i) != HASHPIPE_OK) {
     	    if (errno == EINTR) {
     	        // Interrupted by signal, return -1
@@ -223,6 +230,7 @@ static inline uint64_t process_packet(
     	        return -1; // We're exiting so return value is kind of moot
     	    }
         }
+        fprintf(stdout, "Catcher netthread got lock onto block %d\n", binfo.block_i);
         hashpipe_status_lock_safe(st_p);
         hputs(st_p->buf, status_key, "running");
         hashpipe_status_unlock_safe(st_p);

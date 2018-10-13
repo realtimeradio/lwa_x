@@ -81,7 +81,7 @@ def create_header(h5, use_cm=False):
     header.create_dataset("freq_array",        dtype="<f8", shape=(1, NCHANS), data=np.linspace(0, 250e6, NCHANS))
     header.create_dataset("history",   data="%s: Template file created\n" % time.ctime())
     header.create_dataset("instrument", data=INSTRUMENT)
-    header.create_dataset("integration_time", dtype="<f8", data=INT_TIME)
+    #header.create_dataset("integration_time", dtype="<f8", data=INT_TIME)
     header.create_dataset("object_name", data="zenith")
     header.create_dataset("phase_type",  data="drift")
     header.create_dataset("polarization_array", dtype="<i8", data=[-5, -6, -7, -8])

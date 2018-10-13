@@ -287,7 +287,7 @@ typedef struct hera_catcher_input_block {
 typedef struct hera_catcher_input_databuf {
   hashpipe_databuf_t header;
   hashpipe_databuf_cache_alignment padding; // Maintain cache alignment
-  hera_catcher_input_block_t block[N_INPUT_BLOCKS];
+  hera_catcher_input_block_t block[CATCHER_N_BLOCKS];
 } hera_catcher_input_databuf_t;
 
 #define hera_catcher_input_databuf_idx32(t, x, o) \
@@ -368,35 +368,17 @@ static inline int hera_catcher_input_databuf_total_status(hera_catcher_input_dat
     return hashpipe_databuf_total_status((hashpipe_databuf_t *)d);
 }
 
-static inline int hera_catcher_input_databuf_wait_free(hera_catcher_input_databuf_t *d, int block_id)
-{
-    return hashpipe_databuf_wait_free((hashpipe_databuf_t *)d, block_id);
-}
+int hera_catcher_input_databuf_wait_free(hera_catcher_input_databuf_t *d, int block_id);
 
-static inline int hera_catcher_input_databuf_busywait_free(hera_catcher_input_databuf_t *d, int block_id)
-{
-    return hashpipe_databuf_busywait_free((hashpipe_databuf_t *)d, block_id);
-}
+int hera_catcher_input_databuf_busywait_free(hera_catcher_input_databuf_t *d, int block_id);
 
-static inline int hera_catcher_input_databuf_wait_filled(hera_catcher_input_databuf_t *d, int block_id)
-{
-    return hashpipe_databuf_wait_filled((hashpipe_databuf_t *)d, block_id);
-}
+int hera_catcher_input_databuf_wait_filled(hera_catcher_input_databuf_t *d, int block_id);
 
-static inline int hera_catcher_input_databuf_busywait_filled(hera_catcher_input_databuf_t *d, int block_id)
-{
-    return hashpipe_databuf_busywait_filled((hashpipe_databuf_t *)d, block_id);
-}
+int hera_catcher_input_databuf_busywait_filled(hera_catcher_input_databuf_t *d, int block_id);
 
-static inline int hera_catcher_input_databuf_set_free(hera_catcher_input_databuf_t *d, int block_id)
-{
-    return hashpipe_databuf_set_free((hashpipe_databuf_t *)d, block_id);
-}
+int hera_catcher_input_databuf_set_free(hera_catcher_input_databuf_t *d, int block_id);
 
-static inline int hera_catcher_input_databuf_set_filled(hera_catcher_input_databuf_t *d, int block_id)
-{
-    return hashpipe_databuf_set_filled((hashpipe_databuf_t *)d, block_id);
-}
+int hera_catcher_input_databuf_set_filled(hera_catcher_input_databuf_t *d, int block_id);
 
 
 /*

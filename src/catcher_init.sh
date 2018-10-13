@@ -30,8 +30,8 @@ function init() {
     -c $netcpu hera_catcher_net_thread \
     -c $outcpu hera_catcher_disk_thread \
      < /dev/null \
-    1> catcher.out.$instance \
-    2> catcher.err.$instance &
+    1> ~/catcher.out.$instance \
+    2> ~/catcher.err.$instance &
 }
 
 if [ -z "$1" ]

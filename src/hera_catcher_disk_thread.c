@@ -158,14 +158,14 @@ static void make_extensible_headers_hdf5(hdf5_id_t *id)
 
     // Now we have the dataspace properties, create the datasets
     id->time_array_did = H5Dcreate(id->header_gid, "time_array", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
-    if (id->visdata_did < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to create visdata dataset");
+    if (id->time_array_did < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to create time_array dataset");
         pthread_exit(NULL);
     }
 
     id->integration_time_did = H5Dcreate(id->header_gid, "integration_time", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
-    if (id->nsamples_did < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to create nsamples dataset");
+    if (id->integration_time_did < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to create integration_time dataset");
         pthread_exit(NULL);
     }
 
@@ -186,8 +186,8 @@ static void make_extensible_headers_hdf5(hdf5_id_t *id)
 
     // Now we have the dataspace properties, create the datasets
     id->uvw_array_did = H5Dcreate(id->header_gid, "uvw_array", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
-    if (id->visdata_did < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to create visdata dataset");
+    if (id->uvw_array_did < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to create uvw_array dataset");
         pthread_exit(NULL);
     }
 
@@ -296,6 +296,9 @@ static void close_filespaces(hdf5_id_t *id) {
     H5Sclose(id->visdata_fs);
     H5Sclose(id->flags_fs);
     H5Sclose(id->nsamples_fs);
+    H5Sclose(id->time_array_fs);
+    H5Sclose(id->integration_time_fs);
+    H5Sclose(id->uvw_array_fs);
 }
 
 
@@ -472,26 +475,11 @@ static void *run(hashpipe_thread_args_t * args)
     // This is read from shared memory
     uint32_t ms_per_file;
 
-    // Get template filename from redis
-    hashpipe_status_lock_safe(&st);
-    hgets(st.buf, "HDF5TPLT", 128, template_fname);
-    
-    // Get time that F-engines were last sync'd
-    hgetu4(st.buf, "SYNCTIME", &sync_time);
-
-    hgetu4(st.buf, "MSPERFIL", &ms_per_file);
-
-    // Get the integration time reported by the correlator
-    hgetr8(st.buf, "INTSECS", &integration_time);
-
     // Init status variables
+    hashpipe_status_lock_safe(&st);
     hputi8(st.buf, "DISKMCNT", 0);
     hashpipe_status_unlock_safe(&st);
     
-    fprintf(stdout, "Catcher using header template %s\n", template_fname);
-    fprintf(stdout, "Catcher using sync time %u\n", sync_time);
-    fprintf(stdout, "Catcher recording %ums per file\n", ms_per_file);
-
     /* Loop */
     int32_t *db_in32;
     int rv;
@@ -534,7 +522,8 @@ static void *run(hashpipe_thread_args_t * args)
         hashpipe_status_unlock_safe(&st);
 
         // Wait for new input block to be filled
-        while ((rv=hera_catcher_input_databuf_wait_filled(db_in, curblock_in)) != HASHPIPE_OK) {
+        fprintf(stdout, "disk thread waiting for block %d to be filled\n", curblock_in);
+        while ((rv=hera_catcher_input_databuf_busywait_filled(db_in, curblock_in)) != HASHPIPE_OK) {
             if (rv==HASHPIPE_TIMEOUT) {
                 hashpipe_status_lock_safe(&st);
                 hputs(st.buf, status_key, "blocked_in");
@@ -546,9 +535,21 @@ static void *run(hashpipe_thread_args_t * args)
                 break;
             }
         }
+        fprintf(stdout, "disk thread acquired block %d\n", curblock_in);
+
+        // Get template filename from redis
+        hashpipe_status_lock_safe(&st);
+        hgets(st.buf, "HDF5TPLT", 128, template_fname);
+        
+        // Get time that F-engines were last sync'd
+        hgetu4(st.buf, "SYNCTIME", &sync_time);
+
+        hgetu4(st.buf, "MSPERFIL", &ms_per_file);
+
+        // Get the integration time reported by the correlator
+        hgetr8(st.buf, "INTSECS", &integration_time);
 
         // Got a new data block, update status
-        hashpipe_status_lock_safe(&st);
         hputs(st.buf, status_key, "writing");
         hputi4(st.buf, "DISKBKIN", curblock_in);
         hputu8(st.buf, "DISKMCNT", db_in->block[curblock_in].header.mcnt);
@@ -558,7 +559,7 @@ static void *run(hashpipe_thread_args_t * args)
 
         clock_gettime(CLOCK_MONOTONIC, &start);
         gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt, sync_time);
-        fprintf(stdout, "Processing new block with: mcnt: %lu (gps time: %lf\n", db_in->block[curblock_in].header.mcnt, gps_time);
+        //fprintf(stdout, "Processing new block with: mcnt: %lu (gps time: %lf)\n", db_in->block[curblock_in].header.mcnt, gps_time);
         julian_time = 2440587.5 + (gps_time / (double)(86400.0));
 
         if ((curr_file_time < 0) || (1000*(gps_time - curr_file_time) > ms_per_file)) {
@@ -625,6 +626,7 @@ static void *run(hashpipe_thread_args_t * args)
             max_w_ns = MAX(w_ns, min_w_ns);
         }
 
+
         // Close the filespaces - leave the datasets open. We'll close those when the file is done
         close_filespaces(&sum_file);
         close_filespaces(&diff_file);
@@ -652,9 +654,14 @@ static void *run(hashpipe_thread_args_t * args)
         }
         hashpipe_status_unlock_safe(&st);
 
+        fprintf(stdout, "disk thread freeing buf %d \n", curblock_in);
         // Mark input block as free and advance
-        hera_catcher_input_databuf_set_free(db_in, curblock_in);
-        curblock_in = (curblock_in + 1) % db_in->header.n_block;
+        if (hashpipe_databuf_wait_free((hashpipe_databuf_t *)db_in, curblock_in) != HASHPIPE_OK) {
+        //if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+            hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
+            pthread_exit(NULL);
+        }
+        curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
 
         /* Check for cancel */
         pthread_testcancel();

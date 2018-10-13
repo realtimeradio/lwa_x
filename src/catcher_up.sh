@@ -12,8 +12,8 @@ catcherhost=hera-sn1
 
 # Start X engines
 echo Starting catcher instance on $catcherhost
-echo "ssh $catcherhost \"cd /datax1; ${init} 0\" &"
-ssh $catcherhost "cd /datax1; ${init} 0" &
+echo "ssh $catcherhost \"cd /data; ${init} 0\" &"
+ssh $catcherhost "cd /data; ${init} 0" &
 wait
 
 # Start hashpipe-redis gateways
@@ -21,8 +21,8 @@ echo Starting hashpipe-redis gateways on $catcherhost
 echo "ssh $catcherhost \"taskset 0x0001 hashpipe_redis_gateway.rb -g $catcherhost -i 0\""
 ssh $catcherhost "taskset 0x0001 hashpipe_redis_gateway.rb -g $catcherhost -i 0"
 
-# Let the gateways come up
-sleep 3
+# Let the gateways come up and the pipelines start
+sleep 10
 
 # Generate meta-data template
 echo "ssh $catcherhost \"source ~/hera-venv/bin/activate; hera_make_hdf5_template.py -c /tmp/template.h5\""
@@ -30,9 +30,9 @@ ssh $catcherhost "source ~/hera-venv/bin/activate; hera_make_hdf5_template.py -c
 
 # Configure runtime parameters
 SYNCTIME=`redis-cli -h redishost get corr:feng_sync_time`
-redis-cli -h redishost publish hashpipe://hera-sn1/0/set HDF5TPLT=/tmp/template.h5 > /dev/null
-redis-cli -h redishost publish hashpipe://hera-sn1/0/set MSPERFIL=10000 > /dev/null
-redis-cli -h redishost publish hashpipe://hera-sn1/0/set SYNCTIME=$SYNCTIME > /dev/null
+redis-cli -h redishost publish hashpipe://$catcherhost/0/set HDF5TPLT=/tmp/template.h5 > /dev/null
+redis-cli -h redishost publish hashpipe://$catcherhost/0/set MSPERFIL=60000 > /dev/null
+redis-cli -h redishost publish hashpipe://$catcherhost/0/set SYNCTIME=$SYNCTIME > /dev/null
 
 # Turn off HOLD flag on all instances
 echo Enabling catcher network threads

@@ -133,6 +133,54 @@ int paper_input_databuf_set_filled(paper_input_databuf_t *d, int block_id)
     return hashpipe_databuf_set_filled((hashpipe_databuf_t *)d, block_id);
 }
 
+int hera_catcher_input_databuf_wait_free(hera_catcher_input_databuf_t *d, int block_id)
+{
+    int rv;
+    SEMLOG(d, "wait free");
+    rv = hashpipe_databuf_wait_free((hashpipe_databuf_t *)d, block_id);
+    SEMLOG(d, "got  free");
+    return rv;
+}
+
+int hera_catcher_input_databuf_busywait_free(hera_catcher_input_databuf_t *d, int block_id)
+{
+    int rv;
+    SEMLOG(d, "busy-wait free");
+    rv = hashpipe_databuf_busywait_free((hashpipe_databuf_t *)d, block_id);
+    SEMLOG(d, "busy-got  free");
+    return rv;
+}
+
+int hera_catcher_input_databuf_wait_filled(hera_catcher_input_databuf_t *d, int block_id)
+{
+    int rv;
+    SEMLOG(d, "wait fill");
+    rv = hashpipe_databuf_wait_filled((hashpipe_databuf_t *)d, block_id);
+    SEMLOG(d, "got  fill");
+    return rv;
+}
+
+int hera_catcher_input_databuf_busywait_filled(hera_catcher_input_databuf_t *d, int block_id)
+{
+    int rv;
+    SEMLOG(d, "busy-wait fill");
+    rv = hashpipe_databuf_busywait_filled((hashpipe_databuf_t *)d, block_id);
+    SEMLOG(d, "busy-got  fill");
+    return rv;
+}
+
+int hera_catcher_input_databuf_set_free(hera_catcher_input_databuf_t *d, int block_id)
+{
+    SEMLOG(d, "set  free");
+    return hashpipe_databuf_set_free((hashpipe_databuf_t *)d, block_id);
+}
+
+int hera_catcher_input_databuf_set_filled(hera_catcher_input_databuf_t *d, int block_id)
+{
+    SEMLOG(d, "set  fill");
+    return hashpipe_databuf_set_filled((hashpipe_databuf_t *)d, block_id);
+}
+
 hashpipe_databuf_t *hera_catcher_input_databuf_create(int instance_id, int databuf_id)
 {
 #ifdef DEBUG_SEMS
