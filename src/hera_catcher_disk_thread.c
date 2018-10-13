@@ -356,7 +356,7 @@ static void compute_integration_time_array(double integration_time, double *inte
 }
 
 /*
-Given an intire input buffer --
+Given an entire input buffer --
 even/odd x 1 time x N_chans x N_bls x  N_stokes x 2 (real/imag)
 Write --
 even/odd-sum x 1 bl x N_chans x N_stokes x 2 (real/imag) into `out_sum`.
@@ -366,58 +366,96 @@ This function sums over CATCHER_SUM_CHANS as it transposes, and computes even/od
 
 */
 #define corr_databuf_data_idx(c, b) (2*((c*VIS_MATRIX_ENTRIES_PER_CHAN) + (N_STOKES*b)))
-static void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, int b) {
+static void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, int bl) {
     
-    int i, chan, output_chan;
-    __m256i sum_even[N_BL_PER_WRITE], sum_odd[N_BL_PER_WRITE];
-    __m256i val_even[N_BL_PER_WRITE], val_odd[N_BL_PER_WRITE];
-    // Wasteful, but initialize so that the compiler is happy...
-    for(i=0; i<N_BL_PER_WRITE; i++) {
-        sum_even[i] = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
-        sum_odd[i]  = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
-    }
+    int c, b, s, i, chan;
+    int sum_even[N_BL_PER_WRITE][4][2], sum_odd[N_BL_PER_WRITE][4][2];
+    int val_even[CATCHER_CHAN_SUM][N_BL_PER_WRITE][4][2], val_odd[CATCHER_CHAN_SUM][N_BL_PER_WRITE][4][2];
 
-    int32_t *in_even = in + corr_databuf_data_idx(0,b);
+    int32_t *in_even = in + corr_databuf_data_idx(0,bl);
     int32_t *in_odd = in_even + 2*VIS_MATRIX_ENTRIES;
-    __m256i *in_even256 = (__m256i *)in_even;
-    __m256i *in_odd256  = (__m256i *)in_odd;
-    __m256i *out_sum256 = (__m256i *)out_sum;
-    __m256i *out_diff256 = (__m256i *)out_diff;
 
-    for (chan=0; chan<N_CHAN_TOTAL; chan++) {
-        //val_odd  = _mm256_load_si256(in_odd256 + 1);
-        for(i=0; i<N_BL_PER_WRITE; i++) {
-            val_even[i] = _mm256_load_si256(in_even256 + i);
-            val_odd[i] = _mm256_load_si256(in_odd256 + i);
-        }
-        if ((chan % CATCHER_CHAN_SUM) == 0) {
-            // Start new accumulation (count to VIS_MATRIX_ENTRIES_PER_CHAN*2 for real/imag)
-            for(i=0; i<N_BL_PER_WRITE; i++) {
-                sum_even[i] = val_even[i];
-                sum_odd[i] = val_odd[i];
-            }
-        } else {
-            // Add to existing accumulation
-            for(i=0; i<N_BL_PER_WRITE; i++) {
-                sum_even[i] = _mm256_add_epi32(sum_even[i], val_even[i]);
-                sum_odd[i] = _mm256_add_epi32(sum_odd[i], val_odd[i]);
+    for (chan=0; chan<N_CHAN_TOTAL/CATCHER_CHAN_SUM; chan++) {
+        // Load all the values for an accumulation
+        for(c=0; c<CATCHER_CHAN_SUM; c++) {
+            for(b=0; b<N_BL_PER_WRITE; b++) {
+                for (s=0; s<4; s++) {
+                    for (i=0; i<2; i++) {
+                        val_even[c][b][s][i] = in_even[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
+                        val_odd[c][b][s][i]  =  in_odd[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
+                    }
+                }
             }
         }
+        // Accumulate
+        for(c=0; c<CATCHER_CHAN_SUM; c++) {
+            for(b=0; b<N_BL_PER_WRITE; b++) {
+                for (s=0; s<4; s++) {
+                    for (i=0; i<2; i++) {
+                        sum_even[b][s][i] += val_even[c][b][s][i];
+                        sum_odd[b][s][i]  += val_odd[c][b][s][i];
+                    }
+                }
+            }
+        }
 
-        in_even256 += (VIS_MATRIX_ENTRIES_PER_CHAN >> 2);
-        in_odd256  += (VIS_MATRIX_ENTRIES_PER_CHAN >> 2);
-        // If this is the last channel in the sum, take the even/odd sum/diff, and write to the
-        // output buffer
-        if ((chan % CATCHER_CHAN_SUM) == (CATCHER_CHAN_SUM-1)) {
-            output_chan = chan / CATCHER_CHAN_SUM;
-            // Compute sums/diffs
-            for(i=0; i<N_BL_PER_WRITE; i++) {
-                _mm256_stream_si256(out_sum256  + i*N_CHAN_PROCESSED + output_chan, _mm256_add_epi32(sum_even[i], sum_odd[i]));
-                _mm256_stream_si256(out_diff256 + i*N_CHAN_PROCESSED + output_chan, _mm256_sub_epi32(sum_even[i], sum_odd[i]));
+        // Write to output and clear accumulators
+        for(b=0; b<N_BL_PER_WRITE; b++) {
+            for (s=0; s<4; s++) {
+                for (i=0; i<2; i++) {
+                    out_sum[(b*N_CHAN_PROCESSED + chan)*8 + 2*s + i] = sum_even[b][s][i] + sum_odd[b][s][i];
+                    out_diff[(b*N_CHAN_PROCESSED + chan)*8 + 2*s + i] = sum_even[b][s][i] - sum_odd[b][s][i];
+                    sum_even[b][s][i] = 0;
+                    sum_odd[b][s][i] = 0;
+                }
             }
         }
     }
 }
+
+/*
+    for (chan=0; chan<N_CHAN_TOTAL; chan++) {
+        if ((chan % CATCHER_CHAN_SUM) == 0) {
+            // Start new accumulation (count to VIS_MATRIX_ENTRIES_PER_CHAN*2 for real/imag)
+            for(b=0; b<N_BL_PER_WRITE; b++) {
+                for (s=0; s<4; s++) {
+                    for (i=0; i<2; i++) {
+                        sum_even[b][s][i] = in_even[8*b + 2*s + i];
+                        sum_odd[b][s][i] = in_odd[8*b + 2*s + i];
+                    }
+                }
+            }
+        } else {
+            // Add to existing accumulation
+            for(b=0; b<N_BL_PER_WRITE; b++) {
+                for (s=0; s<4; s++) {
+                    for (i=0; i<2; i++) {
+                        sum_even[b][s][i] += in_even[8*b + 2*s + i];
+                        sum_odd[b][s][i] += in_odd[8*b + 2*s + i];
+                    }
+                }
+            }
+        }
+
+        // If this is the last channel in the sum, take the even/odd sum/diff, and write to the
+        // output buffer
+        if ((chan % CATCHER_CHAN_SUM) == (CATCHER_CHAN_SUM-1)) {
+            output_chan = chan / CATCHER_CHAN_SUM;
+            for(b=0; b<N_BL_PER_WRITE; b++) {
+                for (s=0; s<4; s++) {
+                    for (i=0; i<2; i++) {
+                        out_sum[(b*N_CHAN_PROCESSED + output_chan)*8 + 2*s + i] = sum_even[b][s][i] + sum_odd[b][s][i];
+                        out_diff[(b*N_CHAN_PROCESSED + output_chan)*8 + 2*s + i] = sum_even[b][s][i] - sum_odd[b][s][i];
+                    }
+                }
+            }
+        }
+        in_even += (VIS_MATRIX_ENTRIES_PER_CHAN << 1);
+        in_odd  += (VIS_MATRIX_ENTRIES_PER_CHAN << 1);
+
+    }
+}
+*/
 
 
 static int init(hashpipe_thread_args_t *args)
@@ -450,6 +488,7 @@ static void *run(hashpipe_thread_args_t * args)
     float gbps, min_gbps;
 
     struct timespec start, finish;
+    clock_gettime(CLOCK_MONOTONIC, &finish);
     uint64_t t_ns;
     uint64_t w_ns;
     uint64_t min_t_ns = 999999999;
