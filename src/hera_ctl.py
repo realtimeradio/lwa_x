@@ -13,7 +13,6 @@ def mcnts_per_second(sample_rate=500e6, spectra_len=8192):
     this is the same as the number of spectra in 1 second.
     sample_rate: ADC clock rate in MHz
     spectra_len: Number of frequency channels in 1 F-Engine spectra (prior to any subselecting)
-    round_to   : Output the number of mcnts per second rounded up to a multiple of this number
     """
     return sample_rate / (spectra_len * 2)
 
@@ -60,7 +59,7 @@ if args.action == 'start':
     time_delay = args.starttime - mcnt_origin
     delay_mcnts = int(time_delay * mcnts_per_second())
     # round delay_mcnts down to an acceptable value
-    round_to = MCNT_XGPU_BLOCK_SIZE
+    round_to = MCNT_XGPU_BLOCK_SIZE * args.slices # This represents the granularity with which an integration can be started
     trig_mcnt = delay_mcnts - (delay_mcnts % round_to)
     
     trig_time = trig_mcnt / mcnts_per_second() + mcnt_origin

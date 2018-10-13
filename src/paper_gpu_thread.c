@@ -137,7 +137,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
             } else if(db_in->block[curblock_in].header.mcnt == start_mcount) {
               // Set integration status to "on"
               // Read integration count (INTCOUNT)
-              fprintf(stderr, "--- integration on ---\n");
+              fprintf(stdout, "--- integration on ---\n");
               strcpy(integ_status, "on");
               hashpipe_status_lock_safe(&st);
               hputs(st.buf,  "INTSTAT", integ_status);
@@ -145,7 +145,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
               hashpipe_status_unlock_safe(&st);
               // Compute last mcount
               last_mcount = start_mcount + TIME_DEMUX*(int_count-N_TIME_PER_BLOCK);// * N_SUB_BLOCKS_PER_INPUT_BLOCK;
-              fprintf(stderr, "Accumulating to mcount: %lu\n", last_mcount);
+              fprintf(stdout, "Accumulating %d spectra to mcount: %lu\n", int_count, last_mcount);
             // Else (missed starting mcount)
             } else {
               // Handle missed start of integration

@@ -68,6 +68,11 @@ typedef struct {
 
 static hashpipe_status_t *st_p;
 
+// A variable to store whether this receiver is processing
+// even or odd samples (or in principle a subset of a higher
+// order 2^<integer> split
+static int time_index;
+
 #if 0
 static void print_pkt_header(packet_header_t * pkt_header) {
 
@@ -112,6 +117,13 @@ static void print_ring_mcnts(paper_input_databuf_t *paper_input_databuf_p) {
 static inline int block_for_mcnt(uint64_t mcnt)
 {
     return ((mcnt / TIME_DEMUX) / N_TIME_PER_BLOCK) % N_INPUT_BLOCKS;
+}
+
+// Returns start mcnt for the block containing a  given mcnt
+static inline uint64_t start_for_mcnt(uint64_t mcnt)
+{
+    uint64_t mcnt_time_index = ((mcnt / N_TIME_PER_PACKET) % TIME_DEMUX);
+    return (mcnt - (mcnt%(N_TIME_PER_BLOCK * TIME_DEMUX)) + (mcnt_time_index*N_TIME_PER_PACKET));
 }
 
 #ifdef LOG_MCNTS
@@ -306,10 +318,15 @@ static inline int calc_block_indexes(block_info_t *binfo, packet_header_t * pkt_
 static inline void initialize_block(paper_input_databuf_t * paper_input_databuf_p, uint64_t mcnt)
 {
     int block_i = block_for_mcnt(mcnt);
+    uint64_t mcnt_time_index;
 
     paper_input_databuf_p->block[block_i].header.good_data = 0;
     // Round pkt_mcnt down to nearest multiple of N_TIME_PER_BLOCK
-    paper_input_databuf_p->block[block_i].header.mcnt = mcnt - (mcnt%N_TIME_PER_BLOCK);
+    mcnt_time_index = ((mcnt / N_TIME_PER_PACKET) % TIME_DEMUX);
+    if (mcnt_time_index != time_index) {
+        fprintf(stderr, "Expected packets from time index %d, but got index %lu\n", time_index, mcnt_time_index);
+    }
+    paper_input_databuf_p->block[block_i].header.mcnt = start_for_mcnt(mcnt);
 }
 
 // This function must be called once and only once per block_info structure!
@@ -335,8 +352,8 @@ static inline void initialize_block_info(block_info_t * binfo)
     hashpipe_status_unlock_safe(st_p);
 
     // On startup mcnt_start will be zero and mcnt_log_late will be Nm.
-    binfo->mcnt_start = 0;
-    binfo->mcnt_log_late = N_TIME_PER_BLOCK*TIME_DEMUX;
+    binfo->mcnt_start = time_index;
+    binfo->mcnt_log_late = N_TIME_PER_BLOCK*TIME_DEMUX + time_index;
     binfo->block_i = 0;
 
     binfo->out_of_seq_cnt = 0;
@@ -518,7 +535,7 @@ static inline uint64_t process_packet(
 		pkt_mcnt += TIME_DEMUX*N_TIME_PER_BLOCK*(binfo.block_i + N_INPUT_BLOCKS - pkt_block_i);
 	    }
 	    // Round pkt_mcnt down to nearest multiple of Nm
-	    binfo.mcnt_start = pkt_mcnt - (pkt_mcnt%(N_TIME_PER_BLOCK*TIME_DEMUX));
+	    binfo.mcnt_start = start_for_mcnt(pkt_mcnt);
 	    binfo.mcnt_log_late = binfo.mcnt_start + N_TIME_PER_BLOCK*TIME_DEMUX;
 	    binfo.block_i = block_for_mcnt(binfo.mcnt_start);
 	    hashpipe_warn("hera_pktsock_thread",
@@ -622,6 +639,9 @@ static void *run(hashpipe_thread_args_t * args)
 	hashpipe_status_lock_safe(&st);
 	// Look for NETHOLD value
 	hgeti4(st.buf, "NETHOLD", &holdoff);
+	// Get the time index of this correlator. I.e. is it correlating
+	// even or odd blocks of samples.
+	hgeti4(st.buf, "TIMEIDX", &time_index);
 	if(!holdoff) {
 	    // Done holding, so delete the key
 	    hdel(st.buf, "NETHOLD");
@@ -665,8 +685,8 @@ static void *run(hashpipe_thread_args_t * args)
     }
 
     // Initialize the newly acquired block
-    initialize_block(db, 0);
-    initialize_block(db, N_TIME_PER_BLOCK*TIME_DEMUX);
+    initialize_block(db, time_index);
+    initialize_block(db, N_TIME_PER_BLOCK*TIME_DEMUX + time_index);
 
     /* Read network params */
     int bindport = 8511;
