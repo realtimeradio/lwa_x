@@ -36,8 +36,8 @@
 #endif
 
 #define N_DATA_DIMS (4)
-#define N_CHAN_PROCESSED (N_CHAN_TOTAL / CATCHER_CHAN_SUM)
-#define N_BL_PER_WRITE (32)
+#define N_CHAN_PROCESSED (N_CHAN_TOTAL / (CATCHER_CHAN_SUM * XENG_CHAN_SUM))
+#define N_BL_PER_WRITE (193)
 
 static hid_t complex_id;
 
@@ -370,30 +370,23 @@ static void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, 
     
     int c, b, s, i, chan;
     int sum_even[N_BL_PER_WRITE][4][2], sum_odd[N_BL_PER_WRITE][4][2];
-    int val_even[CATCHER_CHAN_SUM][N_BL_PER_WRITE][4][2], val_odd[CATCHER_CHAN_SUM][N_BL_PER_WRITE][4][2];
 
     int32_t *in_even = in + corr_databuf_data_idx(0,bl);
     int32_t *in_odd = in_even + 2*VIS_MATRIX_ENTRIES;
 
-    for (chan=0; chan<N_CHAN_TOTAL/CATCHER_CHAN_SUM; chan++) {
+    for (chan=0; chan<N_CHAN_PROCESSED; chan++) {
         // Load all the values for an accumulation
         for(c=0; c<CATCHER_CHAN_SUM; c++) {
             for(b=0; b<N_BL_PER_WRITE; b++) {
                 for (s=0; s<4; s++) {
                     for (i=0; i<2; i++) {
-                        val_even[c][b][s][i] = in_even[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
-                        val_odd[c][b][s][i]  =  in_odd[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
-                    }
-                }
-            }
-        }
-        // Accumulate
-        for(c=0; c<CATCHER_CHAN_SUM; c++) {
-            for(b=0; b<N_BL_PER_WRITE; b++) {
-                for (s=0; s<4; s++) {
-                    for (i=0; i<2; i++) {
-                        sum_even[b][s][i] += val_even[c][b][s][i];
-                        sum_odd[b][s][i]  += val_odd[c][b][s][i];
+                        if(c==0) {
+                            sum_even[b][s][i] = in_even[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
+                            sum_odd[b][s][i]  =  in_odd[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
+                        } else {
+                            sum_even[b][s][i] += in_even[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
+                            sum_odd[b][s][i]  +=  in_odd[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
+                        }
                     }
                 }
             }
@@ -405,11 +398,12 @@ static void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, 
                 for (i=0; i<2; i++) {
                     out_sum[(b*N_CHAN_PROCESSED + chan)*8 + 2*s + i] = sum_even[b][s][i] + sum_odd[b][s][i];
                     out_diff[(b*N_CHAN_PROCESSED + chan)*8 + 2*s + i] = sum_even[b][s][i] - sum_odd[b][s][i];
-                    sum_even[b][s][i] = 0;
-                    sum_odd[b][s][i] = 0;
                 }
             }
         }
+
+        in_even += (VIS_MATRIX_ENTRIES_PER_CHAN*2*CATCHER_CHAN_SUM);
+        in_odd  += (VIS_MATRIX_ENTRIES_PER_CHAN*2*CATCHER_CHAN_SUM);
     }
 }
 

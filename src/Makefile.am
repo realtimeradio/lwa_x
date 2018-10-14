@@ -22,6 +22,7 @@ paper_threads = paper_fake_net_thread.c       \
 		paper_crc_thread.c            \
                 hera_catcher_net_thread.c     \
                 hera_catcher_disk_thread.c    \
+                hera_gpu_output_thread.c      \
                 #lzf/lzf/lzf_c.c \
                 #lzf/lzf/lzf_d.c \
                 #lzf/lzf_filter.c \
@@ -52,9 +53,10 @@ paper_gpu_la_LDFLAGS += -lhdf5_hl -lhdf5
 dist_bin_SCRIPTS = paper_init.sh \
 		   paper_crc_init.sh \
 		   xtor_down.sh \
-		   xtor_up.sh \
+		   xtor_up.py \
                    catcher_init.sh \
                    catcher_up.sh \
+                   catcher_down.sh \
                    tweak-perf.sh \
                    hera_ctl.py \
                    hera_make_hdf5_template.py

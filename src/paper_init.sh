@@ -174,7 +174,7 @@ function init() {
     -c $netcpu hera_pktsock_thread \
     -c $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
-    -c $outcpu paper_gpu_output_thread
+    -c $outcpu hera_gpu_output_thread
 
   taskset $mask \
   hashpipe -p paper_gpu -I $instance \
@@ -184,7 +184,7 @@ function init() {
     -c $netcpu hera_pktsock_thread \
     -c $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
-    -c $outcpu paper_gpu_output_thread \
+    -c $outcpu hera_gpu_output_thread \
      < /dev/null \
     1> px${mypx}.out.$instance \
     2> px${mypx}.err.$instance &
