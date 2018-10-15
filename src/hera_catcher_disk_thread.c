@@ -42,6 +42,17 @@
 static hid_t complex_id;
 
 typedef struct {
+    double e;
+    double n;
+    double u;
+} enu_t;
+
+typedef struct {
+    int a;
+    int b;
+} bl_t;
+
+typedef struct {
     hid_t file_id;
     hid_t header_gid;
     hid_t data_gid;
