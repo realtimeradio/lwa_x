@@ -86,3 +86,4 @@ if args.action == 'start':
     rdb['corr:trig_mcnt'] = trig_mcnt
     rdb['corr:trig_time'] = trig_time
     rdb['corr:acc_len'] = args.acclen
+    rdb['corr:int_time'] = args.acclen * args.slices * mcnts_per_second()
