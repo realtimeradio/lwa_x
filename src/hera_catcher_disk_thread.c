@@ -327,8 +327,54 @@ static void write_extensible_headers(hdf5_id_t *id, hsize_t t, hid_t mem_space1,
     H5Dwrite(id->integration_time_did, H5T_NATIVE_DOUBLE, mem_space1, id->integration_time_fs, H5P_DEFAULT, integration_time_buf);
     H5Sselect_hyperslab(id->time_array_fs, H5S_SELECT_SET, start1, NULL, count1, NULL);
     H5Dwrite(id->time_array_did, H5T_NATIVE_DOUBLE, mem_space1, id->time_array_fs, H5P_DEFAULT, time_array_buf);
+    H5Sselect_hyperslab(id->ant_1_array_fs, H5S_SELECT_SET, start1, NULL, count1, NULL);
+    H5Dwrite(id->ant_1_array_did, H5T_NATIVE_INT, mem_space1, id->ant_1_array_fs, H5P_DEFAULT, ant_1);
+    H5Sselect_hyperslab(id->ant_2_array_fs, H5S_SELECT_SET, start1, NULL, count1, NULL);
+    H5Dwrite(id->ant_2_array_did, H5T_NATIVE_INT, mem_space1, id->ant_2_array_fs, H5P_DEFAULT, ant_2);
     H5Sselect_hyperslab(id->uvw_array_fs, H5S_SELECT_SET, start2, NULL, count2, NULL);
     H5Dwrite(id->uvw_array_did, H5T_NATIVE_DOUBLE, mem_space2, id->uvw_array_fs, H5P_DEFAULT, uvw_array_buf);
+}
+
+/* Read the baseline order from an HDF5 file via the Header/corr_bl_order dataset */
+static void get_bl_order(hdf5_id_t *id, bl_t *bl_order) {
+    hid_t dataset_id;
+    herr_t status;
+    dataset_id = H5Dopen(id->header_gid, "corr_bl_order", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/corr_bl_order dataset");
+        pthread_exit(NULL);
+    }
+    status = H5Dread(dataset_id, H5T_STD_I32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, bl_order);
+    if (status < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to read Header/corr_bl_order dataset");
+        pthread_exit(NULL);
+    }
+    status = H5Dclose(dataset_id);
+    if (status < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/corr_bl_order dataset");
+        pthread_exit(NULL);
+    }
+}
+
+/* Read the antenna positions from an HDF5 file via the Header/antenna_positions_enu dataset */
+static void get_ant_pos(hdf5_id_t *id, enu_t *ant_pos) {
+    hid_t dataset_id;
+    herr_t status;
+    dataset_id = H5Dopen(id->header_gid, "antenna_positions_enu", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/antenna_positions_enu dataset");
+        pthread_exit(NULL);
+    }
+    status = H5Dread(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, ant_pos);
+    if (status < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to read Header/antenna_positions_enu dataset");
+        pthread_exit(NULL);
+    }
+    status = H5Dclose(dataset_id);
+    if (status < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/antenna_positions_enu dataset");
+        pthread_exit(NULL);
+    }
 }
 
 /*
@@ -336,7 +382,7 @@ Turn an mcnt into a UNIX time in double-precision.
 */
 static double mcnt2time(uint64_t mcnt, uint32_t sync_time)
 {
-    return (sync_time + mcnt) * (N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE);
+    return sync_time + (mcnt * (2 * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
 }
 
 static void compute_time_array(double time, double *time_buf)
@@ -502,7 +548,15 @@ static void *run(hashpipe_thread_args_t * args)
     uint32_t sync_time = 0;
     double gps_time;
     double julian_time;
-    double integration_time;
+    uint32_t acc_len;
+    uint32_t nfiles;
+    uint32_t file_cnt = 0;
+    uint32_t trigger = 0;
+
+    // Variables for antenna positions and baseline orders. These should be provided
+    // via the HDF5 header template.
+    bl_t bl_order[VIS_MATRIX_ENTRIES / N_STOKES];
+    enu_t ant_pos[N_ANTS];
 
     // How many integrations to dump to a file before starting the next one
     // This is read from shared memory
@@ -511,6 +565,7 @@ static void *run(hashpipe_thread_args_t * args)
     // Init status variables
     hashpipe_status_lock_safe(&st);
     hputi8(st.buf, "DISKMCNT", 0);
+    hputu4(st.buf, "TRIGGER", 0);
     hashpipe_status_unlock_safe(&st);
     
     /* Loop */
@@ -555,7 +610,6 @@ static void *run(hashpipe_thread_args_t * args)
         hashpipe_status_unlock_safe(&st);
 
         // Wait for new input block to be filled
-        fprintf(stdout, "disk thread waiting for block %d to be filled\n", curblock_in);
         while ((rv=hera_catcher_input_databuf_busywait_filled(db_in, curblock_in)) != HASHPIPE_OK) {
             if (rv==HASHPIPE_TIMEOUT) {
                 hashpipe_status_lock_safe(&st);
@@ -568,21 +622,49 @@ static void *run(hashpipe_thread_args_t * args)
                 break;
             }
         }
-        fprintf(stdout, "disk thread acquired block %d\n", curblock_in);
 
         // Get template filename from redis
         hashpipe_status_lock_safe(&st);
         hgets(st.buf, "HDF5TPLT", 128, template_fname);
-        
+
         // Get time that F-engines were last sync'd
         hgetu4(st.buf, "SYNCTIME", &sync_time);
 
         hgetu4(st.buf, "MSPERFIL", &ms_per_file);
 
         // Get the integration time reported by the correlator
-        hgetr8(st.buf, "INTSECS", &integration_time);
+        hgetu4(st.buf, "INTTIME", &acc_len);
+
+        // Get the number of files to write
+        hgetu4(st.buf, "NFILES", &nfiles);
+
+        // Get the number of files to write
+        hgetu4(st.buf, "TRIGGER", &trigger);
+        hashpipe_status_unlock_safe(&st);
+
+        // If we have written all the files we were commanded to
+        // start marking blocks as done and idling until a new
+        // trigger is received
+        if (file_cnt >= nfiles) {
+            if (trigger) {
+                fprintf(stdout, "Catcher got a new trigger and will write %d files\n", nfiles);
+                file_cnt = 0;
+                hashpipe_status_lock_safe(&st);
+                hputu4(st.buf, "TRIGGER", 0);
+                hashpipe_status_unlock_safe(&st);
+            } else {
+                // Mark input block as free and advance
+                if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+                    hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
+                    pthread_exit(NULL);
+                }
+                curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
+                continue;
+            }
+        }
 
         // Got a new data block, update status
+        hashpipe_status_lock_safe(&st);
         hputs(st.buf, status_key, "writing");
         hputi4(st.buf, "DISKBKIN", curblock_in);
         hputu8(st.buf, "DISKMCNT", db_in->block[curblock_in].header.mcnt);
@@ -602,6 +684,18 @@ static void *run(hashpipe_thread_args_t * args)
                 fprintf(stdout, "Closing datasets and files\n");
                 close_file(&sum_file, file_stop_t, file_duration, file_nblts, file_nts);
                 close_file(&diff_file, file_stop_t, file_duration, file_nblts, file_nts);
+                file_cnt += 1;
+                // If this is the last file, mark this block done and get out of the loop
+                if (file_cnt >= nfiles) {
+                    fprintf(stdout, "Catcher has written %d file and is going to sleep\n", file_cnt);
+                    if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+                        hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
+                        pthread_exit(NULL);
+                    }
+                    curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
+                    curr_file_time = -1; //So the next trigger will start a new file
+                    continue;
+                }
             }
 
             // And now start a new file
@@ -621,7 +715,7 @@ static void *run(hashpipe_thread_args_t * args)
         // Update time and sample counters
         file_stop_t = gps_time;
         file_duration = file_stop_t - file_start_t; //really want a +1 * acc_len here
-        file_nblts += VIS_MATRIX_ENTRIES_PER_CHAN;
+        file_nblts += VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES;
         file_nts += 1;
 
         // extend the datasets with time axes and update filespace IDs
@@ -687,7 +781,6 @@ static void *run(hashpipe_thread_args_t * args)
         }
         hashpipe_status_unlock_safe(&st);
 
-        fprintf(stdout, "disk thread freeing buf %d \n", curblock_in);
         // Mark input block as free and advance
         if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
             hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
