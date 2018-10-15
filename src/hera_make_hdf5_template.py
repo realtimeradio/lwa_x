@@ -74,8 +74,10 @@ def create_header(h5, use_cm=False):
     header.create_dataset("Npols",  dtype="<i8", data=2)
     header.create_dataset("Nspws",  dtype="<i8", data=1)
     header.create_dataset("Ntimes", dtype="<i8", data=0) # updated by receiver when file is closed
-    header.create_dataset("ant_1_array", dtype="<i8", data=bls[:,0])
-    header.create_dataset("ant_2_array", dtype="<i8", data=bls[:,1])
+    header.create_dataset("corr_bl_order", dtype="<i8", data=bls)
+    # The ant_[1|2]_arrays are added by the receiver, since they have dimensions of Nblts
+    #header.create_dataset("ant_1_array", dtype="<i8", data=bls[:,0])
+    #header.create_dataset("ant_2_array", dtype="<i8", data=bls[:,1])
     header.create_dataset("antenna_diameters", dtype="<f8", data=ANT_DIAMETER)
     header.create_dataset("channel_width",     dtype="<f8", data=250e6 / (NCHANS / 3 * 4))
     header.create_dataset("freq_array",        dtype="<f8", shape=(1, NCHANS), data=np.linspace(0, 250e6, NCHANS))
