@@ -464,51 +464,6 @@ static void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, 
     }
 }
 
-/*
-    for (chan=0; chan<N_CHAN_TOTAL; chan++) {
-        if ((chan % CATCHER_CHAN_SUM) == 0) {
-            // Start new accumulation (count to VIS_MATRIX_ENTRIES_PER_CHAN*2 for real/imag)
-            for(b=0; b<N_BL_PER_WRITE; b++) {
-                for (s=0; s<4; s++) {
-                    for (i=0; i<2; i++) {
-                        sum_even[b][s][i] = in_even[8*b + 2*s + i];
-                        sum_odd[b][s][i] = in_odd[8*b + 2*s + i];
-                    }
-                }
-            }
-        } else {
-            // Add to existing accumulation
-            for(b=0; b<N_BL_PER_WRITE; b++) {
-                for (s=0; s<4; s++) {
-                    for (i=0; i<2; i++) {
-                        sum_even[b][s][i] += in_even[8*b + 2*s + i];
-                        sum_odd[b][s][i] += in_odd[8*b + 2*s + i];
-                    }
-                }
-            }
-        }
-
-        // If this is the last channel in the sum, take the even/odd sum/diff, and write to the
-        // output buffer
-        if ((chan % CATCHER_CHAN_SUM) == (CATCHER_CHAN_SUM-1)) {
-            output_chan = chan / CATCHER_CHAN_SUM;
-            for(b=0; b<N_BL_PER_WRITE; b++) {
-                for (s=0; s<4; s++) {
-                    for (i=0; i<2; i++) {
-                        out_sum[(b*N_CHAN_PROCESSED + output_chan)*8 + 2*s + i] = sum_even[b][s][i] + sum_odd[b][s][i];
-                        out_diff[(b*N_CHAN_PROCESSED + output_chan)*8 + 2*s + i] = sum_even[b][s][i] - sum_odd[b][s][i];
-                    }
-                }
-            }
-        }
-        in_even += (VIS_MATRIX_ENTRIES_PER_CHAN << 1);
-        in_odd  += (VIS_MATRIX_ENTRIES_PER_CHAN << 1);
-
-    }
-}
-*/
-
-
 static int init(hashpipe_thread_args_t *args)
 {
     //hashpipe_status_t st = args->st;
