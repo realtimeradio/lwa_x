@@ -466,6 +466,16 @@ static void compute_integration_time_array(double integration_time, double *inte
     }
 }
 
+/* Given antenna positions and a given baseline order, compute uvw coords */
+static void compute_uvw_array(double* uvw, enu_t *ant_pos, bl_t *bl_order) {
+    int i;
+    for (i=0; i<(VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES); i++) {
+        uvw[3*i + 0] = ant_pos[bl_order[i].a].e - ant_pos[bl_order[i].b].e;
+        uvw[3*i + 1] = ant_pos[bl_order[i].a].n - ant_pos[bl_order[i].b].n;
+        uvw[3*i + 2] = ant_pos[bl_order[i].a].u - ant_pos[bl_order[i].b].u;
+    }
+}
+
 /*
 Given an entire input buffer --
 even/odd x 1 time x N_chans x N_bls x  N_stokes x 2 (real/imag)
@@ -750,6 +760,7 @@ static void *run(hashpipe_thread_args_t * args)
             
         // Write this integration's entries for lst_array, time_array, uvw_array
         // TODO: compute uvw array
+        compute_uvw_array(uvw_array_buf, ant_pos, bl_order);
         compute_time_array(julian_time, time_array_buf);
         compute_integration_time_array(acc_len * TIME_DEMUX * 2 * N_CHAN_TOTAL_GENERATED/(double)FENG_SAMPLE_RATE, integration_time_buf);
         write_extensible_headers(&sum_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf, bl_order);
