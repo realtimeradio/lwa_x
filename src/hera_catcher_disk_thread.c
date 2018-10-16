@@ -63,12 +63,16 @@ typedef struct {
     hid_t time_array_did;
     hid_t integration_time_did;
     hid_t uvw_array_did;
+    hid_t ant_1_array_did;
+    hid_t ant_2_array_did;
     hid_t visdata_fs;
     hid_t flags_fs;
     hid_t nsamples_fs;
     hid_t time_array_fs;
     hid_t integration_time_fs;
     hid_t uvw_array_fs;
+    hid_t ant_1_array_fs;
+    hid_t ant_2_array_fs;
 } hdf5_id_t;
 
 static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, uint64_t file_nblts, uint64_t file_nts) {
@@ -151,6 +155,8 @@ static void make_extensible_hdf5(hdf5_id_t *id)
  * Header/uvw_array (Nblts x 3)
  * Header/time_array (Nblts)
  * Header/integration_time (Nblts)
+ * Header/ant_1_array (Nblts)
+ * Header/ant_2_array (Nblts)
  */
 #define DIM1 1
 #define DIM2 2
@@ -177,6 +183,18 @@ static void make_extensible_headers_hdf5(hdf5_id_t *id)
     id->integration_time_did = H5Dcreate(id->header_gid, "integration_time", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
     if (id->integration_time_did < 0) {
         hashpipe_error(__FUNCTION__, "Failed to create integration_time dataset");
+        pthread_exit(NULL);
+    }
+
+    id->ant_1_array_did = H5Dcreate(id->header_gid, "ant_1_array", H5T_NATIVE_INT, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+    if (id->ant_1_array_did < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to create ant_1_array dataset");
+        pthread_exit(NULL);
+    }
+
+    id->ant_2_array_did = H5Dcreate(id->header_gid, "ant_2_array", H5T_NATIVE_INT, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+    if (id->ant_2_array_did < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to create ant_2_array dataset");
         pthread_exit(NULL);
     }
 
@@ -297,10 +315,14 @@ static void extend_header_datasets(hdf5_id_t *id, int n) {
     hsize_t dims2[DIM2] = {n * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 3};
     H5Dset_extent(id->time_array_did, dims1);
     H5Dset_extent(id->integration_time_did, dims1);
+    H5Dset_extent(id->ant_1_array_did, dims1);
+    H5Dset_extent(id->ant_2_array_did, dims1);
     H5Dset_extent(id->uvw_array_did, dims2);
     id->time_array_fs = H5Dget_space(id->time_array_did);
     id->integration_time_fs = H5Dget_space(id->integration_time_did);
     id->uvw_array_fs = H5Dget_space(id->uvw_array_did);
+    id->ant_1_array_fs = H5Dget_space(id->ant_1_array_did);
+    id->ant_2_array_fs = H5Dget_space(id->ant_2_array_did);
 }
 
 static void close_filespaces(hdf5_id_t *id) {
@@ -310,6 +332,8 @@ static void close_filespaces(hdf5_id_t *id) {
     H5Sclose(id->time_array_fs);
     H5Sclose(id->integration_time_fs);
     H5Sclose(id->uvw_array_fs);
+    H5Sclose(id->ant_1_array_fs);
+    H5Sclose(id->ant_2_array_fs);
 }
 
 
@@ -328,22 +352,51 @@ static void write_channels(hdf5_id_t *id, hsize_t t, hsize_t b, hid_t mem_space,
 /*
 Write Nbls entries into the integration_time and time_array arrays. Write Nbls x 3 entries into uvw_array
 */
-static void write_extensible_headers(hdf5_id_t *id, hsize_t t, hid_t mem_space1, hid_t mem_space2, double *integration_time_buf, double *time_array_buf, double*uvw_array_buf)
+static void write_extensible_headers(hdf5_id_t *id, hsize_t t, hid_t mem_space1, hid_t mem_space2, double *integration_time_buf, double *time_array_buf, double*uvw_array_buf, bl_t *bl_order)
 {
+    /* Output files strangely store ant1 and ant2 arrays separately. Split up bl_order here */
+    /* Kinda silly to do this every integration, but it's not much data */
+    int ant_1[VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES];
+    int ant_2[VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES];
+    int i;
+    for (i=0; i<VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES; i++){
+        ant_1[i] = bl_order[i].a;
+        ant_2[i] = bl_order[i].b;
+    }
     hsize_t start1[DIM1] = {t * (VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES)};
     hsize_t count1[DIM1] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES};
     hsize_t start2[DIM2] = {t * (VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES), 0};
     hsize_t count2[DIM2] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 3};
-    H5Sselect_hyperslab(id->integration_time_fs, H5S_SELECT_SET, start1, NULL, count1, NULL);
-    H5Dwrite(id->integration_time_did, H5T_NATIVE_DOUBLE, mem_space1, id->integration_time_fs, H5P_DEFAULT, integration_time_buf);
-    H5Sselect_hyperslab(id->time_array_fs, H5S_SELECT_SET, start1, NULL, count1, NULL);
-    H5Dwrite(id->time_array_did, H5T_NATIVE_DOUBLE, mem_space1, id->time_array_fs, H5P_DEFAULT, time_array_buf);
-    H5Sselect_hyperslab(id->ant_1_array_fs, H5S_SELECT_SET, start1, NULL, count1, NULL);
-    H5Dwrite(id->ant_1_array_did, H5T_NATIVE_INT, mem_space1, id->ant_1_array_fs, H5P_DEFAULT, ant_1);
-    H5Sselect_hyperslab(id->ant_2_array_fs, H5S_SELECT_SET, start1, NULL, count1, NULL);
-    H5Dwrite(id->ant_2_array_did, H5T_NATIVE_INT, mem_space1, id->ant_2_array_fs, H5P_DEFAULT, ant_2);
-    H5Sselect_hyperslab(id->uvw_array_fs, H5S_SELECT_SET, start2, NULL, count2, NULL);
-    H5Dwrite(id->uvw_array_did, H5T_NATIVE_DOUBLE, mem_space2, id->uvw_array_fs, H5P_DEFAULT, uvw_array_buf);
+    if (H5Sselect_hyperslab(id->integration_time_fs, H5S_SELECT_SET, start1, NULL, count1, NULL) < 0) {
+        hashpipe_error(__FUNCTION__, "Error selecting integration time hyperslab");
+    }
+    if (H5Dwrite(id->integration_time_did, H5T_NATIVE_DOUBLE, mem_space1, id->integration_time_fs, H5P_DEFAULT, integration_time_buf) < 0) {
+        hashpipe_error(__FUNCTION__, "Error writing integration time");
+    }
+    if (H5Sselect_hyperslab(id->time_array_fs, H5S_SELECT_SET, start1, NULL, count1, NULL) < 0) {
+        hashpipe_error(__FUNCTION__, "Error selecting time_array hyperslab");
+    }
+    if (H5Dwrite(id->time_array_did, H5T_NATIVE_DOUBLE, mem_space1, id->time_array_fs, H5P_DEFAULT, time_array_buf) < 0) {
+        hashpipe_error(__FUNCTION__, "Error writing time_array");
+    }
+    if (H5Sselect_hyperslab(id->ant_1_array_fs, H5S_SELECT_SET, start1, NULL, count1, NULL) < 0) {
+        hashpipe_error(__FUNCTION__, "Error selecting ant_1_array hyperslab");
+    }
+    if (H5Dwrite(id->ant_1_array_did, H5T_NATIVE_INT, mem_space1, id->ant_1_array_fs, H5P_DEFAULT, ant_1) < 0) {
+        hashpipe_error(__FUNCTION__, "Error writing ant_1_array");
+    }
+    if (H5Sselect_hyperslab(id->ant_2_array_fs, H5S_SELECT_SET, start1, NULL, count1, NULL) < 0) {
+        hashpipe_error(__FUNCTION__, "Error selecting ant_2_array hyperslab");
+    }
+    if (H5Dwrite(id->ant_2_array_did, H5T_NATIVE_INT, mem_space1, id->ant_2_array_fs, H5P_DEFAULT, ant_2) < 0) {
+        hashpipe_error(__FUNCTION__, "Error writing ant_2_array");
+    }
+    if (H5Sselect_hyperslab(id->uvw_array_fs, H5S_SELECT_SET, start2, NULL, count2, NULL) < 0) {
+        hashpipe_error(__FUNCTION__, "Error selecting uvw_array hyperslab");
+    }
+    if (H5Dwrite(id->uvw_array_did, H5T_NATIVE_DOUBLE, mem_space2, id->uvw_array_fs, H5P_DEFAULT, uvw_array_buf) < 0) {
+        hashpipe_error(__FUNCTION__, "Error writing uvw_array");
+    }
 }
 
 /* Read the baseline order from an HDF5 file via the Header/corr_bl_order dataset */
@@ -387,6 +440,7 @@ static void get_ant_pos(hdf5_id_t *id, enu_t *ant_pos) {
         pthread_exit(NULL);
     }
 }
+
 
 /*
 Turn an mcnt into a UNIX time in double-precision.
@@ -521,7 +575,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     // Variables for antenna positions and baseline orders. These should be provided
     // via the HDF5 header template.
-    bl_t bl_order[VIS_MATRIX_ENTRIES / N_STOKES];
+    bl_t bl_order[VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES];
     enu_t ant_pos[N_ANTS];
 
     // How many integrations to dump to a file before starting the next one
@@ -676,6 +730,10 @@ static void *run(hashpipe_thread_args_t * args)
             sprintf(hdf5_fname, "zen.%7.5lf.diff.uvh5", julian_time);
             fprintf(stdout, "Opening new file %s\n", hdf5_fname);
             start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t);
+            // Get the antenna positions and baseline orders
+            // These are needed for populating the ant_[1|2]_array and uvw_array
+            get_ant_pos(&sum_file, ant_pos);
+            get_bl_order(&sum_file, bl_order);
         }
 
         // Update time and sample counters
@@ -693,9 +751,9 @@ static void *run(hashpipe_thread_args_t * args)
         // Write this integration's entries for lst_array, time_array, uvw_array
         // TODO: compute uvw array
         compute_time_array(julian_time, time_array_buf);
-        compute_integration_time_array(integration_time, integration_time_buf);
-        write_extensible_headers(&sum_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf);
-        write_extensible_headers(&diff_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf);
+        compute_integration_time_array(acc_len * TIME_DEMUX * 2 * N_CHAN_TOTAL_GENERATED/(double)FENG_SAMPLE_RATE, integration_time_buf);
+        write_extensible_headers(&sum_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf, bl_order);
+        write_extensible_headers(&diff_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf, bl_order);
 
         // Sum over channels, compute even/odd sum/diffs, and get data on a per-baseline basis
         for(bl=0; bl<(VIS_MATRIX_ENTRIES_PER_CHAN/N_STOKES); bl+=N_BL_PER_WRITE) {

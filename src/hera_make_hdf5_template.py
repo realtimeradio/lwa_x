@@ -92,8 +92,8 @@ def create_header(h5, use_cm=False):
     header.create_dataset("vis_units",  data="uncalib")
     if use_cm:
         header.create_dataset("altitude",    dtype="<f8", data=cminfo['cofa_alt'])
-        ant_pos = np.zeros([NANTS,3], dtype=np.int64)
-        ant_pos_enu = np.zeros([NANTS,3], dtype=np.int64)
+        ant_pos = np.zeros([NANTS_DATA,3], dtype=np.int64)
+        ant_pos_enu = np.zeros([NANTS_DATA,3], dtype=np.int64)
         ant_names = ["NONE"]*NANTS
         ant_nums = [-1]*NANTS
         for n, i in enumerate(cminfo["antenna_numbers"]):
@@ -103,16 +103,16 @@ def create_header(h5, use_cm=False):
             ant_pos_enu[i] = cminfo["antenna_positions_enu"][n]
         header.create_dataset("antenna_names",     dtype="|S5", shape=(NANTS,), data=ant_names)
         header.create_dataset("antenna_numbers",   dtype="<i8", shape=(NANTS,), data=ant_nums)
-        header.create_dataset("antenna_positions",   dtype="<i8", shape=(NANTS,3), data=ant_pos)
-        header.create_dataset("antenna_positions_enu",   dtype="<i8", shape=(NANTS,3), data=ant_pos_enu)
+        header.create_dataset("antenna_positions",   dtype="<i8", shape=(NANTS_DATA,3), data=ant_pos)
+        header.create_dataset("antenna_positions_enu",   dtype="<i8", shape=(NANTS_DATA,3), data=ant_pos_enu)
         header.create_dataset("latitude",    dtype="<f8", data=cminfo["cofa_lat"])
         header.create_dataset("longitude",   dtype="<f8", data=cminfo["cofa_lon"])
     else:
         header.create_dataset("altitude",    dtype="<f8", data=0.0)
         header.create_dataset("antenna_names",     dtype="|S5", shape=(NANTS,), data=["NONE"]*NANTS)
         header.create_dataset("antenna_numbers",   dtype="<i8", shape=(NANTS,), data=range(NANTS))
-        header.create_dataset("antenna_positions",   dtype="<i8", shape=(NANTS,3), data=np.zeros([NANTS,3]))
-        header.create_dataset("antenna_positions_enu",   dtype="<i8", shape=(NANTS,3), data=np.zeros([NANTS,3]))
+        header.create_dataset("antenna_positions",   dtype="<i8", shape=(NANTS_DATA,3), data=np.zeros([NANTS_DATA,3]))
+        header.create_dataset("antenna_positions_enu",   dtype="<i8", shape=(NANTS_DATA,3), data=np.zeros([NANTS_DATA,3]))
         header.create_dataset("latitude",    dtype="<f8", data=0.0)
         header.create_dataset("longitude",   dtype="<f8", data=0.0)
 
