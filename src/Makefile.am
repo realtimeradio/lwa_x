@@ -55,7 +55,7 @@ dist_bin_SCRIPTS = paper_init.sh \
 		   xtor_down.sh \
 		   xtor_up.py \
                    catcher_init.sh \
-                   catcher_up.sh \
+                   catcher_up.py \
                    catcher_down.sh \
                    tweak-perf.sh \
                    hera_ctl.py \
