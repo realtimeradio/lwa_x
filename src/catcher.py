@@ -9,6 +9,7 @@ NANTS = 192
 NCHANS = 8192 / 4 * 3 / 4
 NXENG = 16
 NWORDS = 2 * NANTS * (NANTS+1) / 2 * 4 * NCHANS
+NWORDS_PER_XENG = NWORDS / NXENG
 
 PAYLOAD_LEN = 4096
 BYTES_PER_PACKET = PAYLOAD_LEN + 16
@@ -24,7 +25,7 @@ print sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
 
 sock.bind(("10.80.40.251", 10000))
 
-dout = np.zeros(2*NWORDS, dtype=np.int32)
+dout = np.ones(2*NWORDS, dtype=np.int32) * -1
 
 n = 0
 wait = True
@@ -34,8 +35,8 @@ while True:
     unpacked = struct.unpack('!QLHH', data[0:16])
     time_demux = (unpacked[0] % 4) >> 1
     timestamp = unpacked[0] - (unpacked[0] % 4)
-    offset = unpacked[1] + (time_demux * NWORDS*4)
     xeng_id = unpacked[2]
+    offset = 4*xeng_id*NWORDS_PER_XENG + unpacked[1]
     payload_len = unpacked[3]
     if wait: 
         start = time.time()
@@ -61,5 +62,5 @@ print "%d packets received in %.2f seconds" % (n, stop - start)
 
 print "Dumping packet to disk"
 with open("/tmp/packet.bin", "w") as fh:
-    fh.write(dout.tostring())
+    fh.write(dout.tostring()) #This is native (probably little) endian!!
 
