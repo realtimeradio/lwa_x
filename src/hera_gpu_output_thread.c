@@ -397,15 +397,15 @@ static void *run(hashpipe_thread_args_t * args)
             off_t idx_regtile = idx_map[baseline];
             for(sum_chan=0; sum_chan<XENG_CHAN_SUM; sum_chan++) {
               if (sum_chan == 0) {
-                re = CONVERT(pf_re[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile]);
-                im = CONVERT(pf_im[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile]);
+                re = pf_re[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile];
+                im = pf_im[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile];
               } else {
-                re += CONVERT(pf_re[(gpu_chan+sum_chan)*REGTILE_CHAN_LENGTH+idx_regtile]);
-                im += CONVERT(pf_im[(gpu_chan+sum_chan)*REGTILE_CHAN_LENGTH+idx_regtile]);
+                re += pf_re[(gpu_chan+sum_chan)*REGTILE_CHAN_LENGTH+idx_regtile];
+                im += pf_im[(gpu_chan+sum_chan)*REGTILE_CHAN_LENGTH+idx_regtile];
               }
             }
-            *p_out++ = re;
-            *p_out++ = -im; // Conjugate data to match downstream expectations
+            *p_out++ = CONVERT(re);
+            *p_out++ = CONVERT(-im); // Conjugate to match downstream expectations.
             nbytes += 2*sizeof(pktdata_t);
             if(nbytes % OUTPUT_BYTES_PER_PACKET == 0) {
               int bytes_sent = send(sockfd, &pkt, sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET, 0);
