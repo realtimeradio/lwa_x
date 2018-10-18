@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from __future__ import print_function, division, absolute_import
 import h5py
 import sys
 import numpy as np
@@ -15,7 +16,7 @@ def get_bl_order(n_ants):
     """
     order1, order2 = [], []
     for i in range(n_ants):
-        for j in range(int(n_ants/2),-1,-1):
+        for j in range(int(n_ants//2),-1,-1):
             k = (i-j) % n_ants
             if i >= k: order1.append((k, i))
             else: order2.append((i, k))
@@ -35,9 +36,9 @@ def get_cm_info():
     return h.get_cminfo_correlator()
 
 def get_antpos_enu(antpos, lat, lon, alt):
-    import pyuvdata
-    ecef = pyuvdata.ECEF_from_rotECEF(antpos, lon)
-    enu  = pyuvdata.ENU_from_ECEF(ecef, lat, lon, alt)
+    import pyuvdata.utils as uvutils
+    ecef = uvutils.ECEF_from_rotECEF(antpos, lon)
+    enu  = uvutils.ENU_from_ECEF(ecef, lat, lon, alt)
     return enu
 
 def create_header(h5, use_cm=False):
@@ -59,7 +60,7 @@ def create_header(h5, use_cm=False):
     INSTRUMENT = "HERA"
     NANTS_DATA = 192
     NANTS = 352
-    NCHANS = 2048 / 4. * 3
+    NCHANS = int(2048 // 4 * 3)
     ANT_DIAMETER = 14.0
     INT_TIME = 10.0
     bls = np.array(get_bl_order(NANTS_DATA))
@@ -71,7 +72,7 @@ def create_header(h5, use_cm=False):
     header.create_dataset("Nbls",   dtype="<i8", data=n_bls)
     header.create_dataset("Nblts",  dtype="<i8", data=0) # updated by receiver when file is closed
     header.create_dataset("Nfreqs", dtype="<i8", data=NCHANS)
-    header.create_dataset("Npols",  dtype="<i8", data=2)
+    header.create_dataset("Npols",  dtype="<i8", data=4)
     header.create_dataset("Nspws",  dtype="<i8", data=1)
     header.create_dataset("Ntimes", dtype="<i8", data=0) # updated by receiver when file is closed
     header.create_dataset("corr_bl_order", dtype="<i8", data=bls)
@@ -103,8 +104,8 @@ def create_header(h5, use_cm=False):
             ant_pos_enu[i] = cminfo["antenna_positions_enu"][n]
         header.create_dataset("antenna_names",     dtype="|S5", shape=(NANTS,), data=ant_names)
         header.create_dataset("antenna_numbers",   dtype="<i8", shape=(NANTS,), data=ant_nums)
-        header.create_dataset("antenna_positions",   dtype="<i8", shape=(NANTS_DATA,3), data=ant_pos)
-        header.create_dataset("antenna_positions_enu",   dtype="<i8", shape=(NANTS_DATA,3), data=ant_pos_enu)
+        header.create_dataset("antenna_positions",   dtype="<f8", shape=(NANTS_DATA,3), data=ant_pos)
+        header.create_dataset("antenna_positions_enu",   dtype="<f8", shape=(NANTS_DATA,3), data=ant_pos_enu)
         header.create_dataset("latitude",    dtype="<f8", data=cminfo["cofa_lat"])
         header.create_dataset("longitude",   dtype="<f8", data=cminfo["cofa_lon"])
     else:
