@@ -16,7 +16,7 @@
 void fluff_check_random()
 {
   /*
-  The in-buffer order is time[Nm] x antenna x pol x channel x time[Nt] x complexity
+  The in-buffer order is time[Nm] x antenna x channel x time[Nt] x pol x complexity
   Each real+imag sample is 8-bits
   Make a test input vector to test each of these elements:
   complexity-test : all real parts 1, all imag parts 2
@@ -93,7 +93,7 @@ void fluff_check_random()
 void fluff_check_complexity()
 {
   /*
-  The in-buffer order is time[Nm] x antenna x pol x channel x time[Nt] x complexity
+  The in-buffer order is time[Nm] x antenna x channel x time[Nt] x pol x complexity
   Each real+imag sample is 8-bits
   Make a test input vector to test each of these elements:
   complexity-test : all real parts 1, all imag parts 2
@@ -150,7 +150,7 @@ void fluff_check_complexity()
 void fluff_check_pol()
 {
   /*
-  The in-buffer order is time[Nm] x antenna x pol x channel x time[Nt] x complexity
+  The in-buffer order is time[Nm] x antenna x channel x time[Nt] x pol x complexity
   Each real+imag sample is 8-bits
   Make a test input vector to test each of these elements:
   complexity-test : all real parts 1, all imag parts 2
@@ -206,7 +206,7 @@ void fluff_check_pol()
 void fluff_check_time()
 {
   /*
-  The in-buffer order is time[Nm] x antenna x pol x channel x time[Nt] x complexity
+  The in-buffer order is time[Nm] x antenna x channel x time[Nt] x pol x complexity
   Each real+imag sample is 8-bits
   Make a test input vector to test each of these elements:
   complexity-test : all real parts 1, all imag parts 2
@@ -261,7 +261,7 @@ void fluff_check_time()
 void fluff_check_ant()
 {
   /*
-  The in-buffer order is time[Nm] x antenna x pol x channel x time[Nt] x complexity
+  The in-buffer order is time[Nm] x antenna x channel x time[Nt] x pol x complexity
   Each real+imag sample is 8-bits
   Make a test input vector to test each of these elements:
   complexity-test : all real parts 1, all imag parts 2
@@ -329,7 +329,7 @@ void fluff_check_ant()
 void fluff_check_chan()
 {
   /*
-  The in-buffer order is time[Nm] x antenna x pol x channel x time[Nt] x complexity
+  The in-buffer order is time[Nm] x antenna x channel x time[Nt] x pol x complexity
   Each real+imag sample is 8-bits
   Make a test input vector to test each of these elements:
   complexity-test : all real parts 1, all imag parts 2

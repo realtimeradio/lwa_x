@@ -145,18 +145,14 @@ typedef uint8_t paper_input_header_cache_alignment[
 // Computes paper_input_databuf_t data word (uint64_t) offset for complex data
 // word corresponding to the given parameters for HERA F engine packets.
 
-//#define paper_input_databuf_data_idx(m,a,c,t) \ //foo
-//  (((((m * Na + a) * (Nc) + c)*Nt + t) * 2) / sizeof(uint64_t))
 #define paper_input_databuf_data_idx(m,a,c,t) \
   ((((m) * Na*Nc*Nt*Np) + ((a) * Nc*Nt*Np) + ((c)*Nt*Np) + ((t)*Np)) / sizeof(uint64_t))
 
 #define paper_input_databuf_data_idx8(m,a,p,c,t) \
-  (((m) * Na*Nc*Nt*Np) + ((a) * Nc*Nt*Np) + ((c)*Nt*Np) + ((t)*Np) + (p))
+  ((((((m) * Na) + (a))*Nc + (c))*Nt + (t))*Np + p)
 
 #define paper_input_databuf_data_idx256(m,a,c,t) \
   ((((((m) * Na) + (a))*Nc + (c))*Nt + (t))*Np / sizeof(__m256i))
-  //((((m) * Na*Nc*Nt*Np) + ((a) * Nc*Nt*Np) + ((c)*Nt*Np) + ((t)*Np)) / sizeof(__m256i))
-//TODO  (((((m * Na + a) * (Nc) + c)*Nt + t) * N_INPUTS_PER_PACKET) / sizeof(uint64_t))
 
 typedef struct paper_input_block {
   paper_input_header_t header;
