@@ -14,6 +14,10 @@ def start_capture(starttime, duration, acclen, flags):
     proc = Popen(["hera_ctl.py", "start", "-n", "%d" % acclen, "-t", "%f" % starttime])
     proc.wait()
 
+def stop_capture():
+    proc = Popen(["hera_ctl.py", "stop"])
+    proc.wait()
+
 def cmd_handler(r, message, testmode=False):
     d = json.loads(message)
     command = d["command"]
@@ -27,6 +31,9 @@ def cmd_handler(r, message, testmode=False):
         start_capture(args["starttime"], args["duration"], args["acclen"], args["tag"])
         starttime = float(r["corr:trig_time"])
         send_response(r, command, time, starttime=starttime)
+    elif command == "stop":
+        stop_capture()
+        send_response(r, command, time)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process commands from the corr:message redis channel.',
