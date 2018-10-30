@@ -111,9 +111,9 @@ see https://gist.github.com/simleb/5205083/
 # define FILTER_H5_BITSHUFFLE 32008
 static void make_extensible_hdf5(hdf5_id_t *id)
 {
-    hsize_t dims[N_DATA_DIMS] = {0, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, N_CHAN_PROCESSED, N_STOKES};
-    hsize_t max_dims[N_DATA_DIMS] = {16, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, N_CHAN_PROCESSED, N_STOKES};
-    hsize_t chunk_dims[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
+    hsize_t dims[N_DATA_DIMS] = {0 * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 1,  N_CHAN_PROCESSED, N_STOKES};
+    hsize_t max_dims[N_DATA_DIMS] = {16 * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 1, N_CHAN_PROCESSED, N_STOKES};
+    hsize_t chunk_dims[N_DATA_DIMS] = {N_BL_PER_WRITE, 1, N_CHAN_PROCESSED, N_STOKES};
 
     hid_t file_space = H5Screate_simple(N_DATA_DIMS, dims, max_dims);
     hid_t plist = H5Pcreate(H5P_DATASET_CREATE);
@@ -300,8 +300,12 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     H5Dclose(dataset_id);
 }
 
+/* Extend the datasets with data-like dimensions,
+ * i.e. Nblts x 1 x N_CHANS x N_STOKES.
+ * Extend by VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES
+ */
 static void extend_datasets(hdf5_id_t *id, int n) {
-    hsize_t dims[N_DATA_DIMS] = {n, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, N_CHAN_PROCESSED, N_STOKES};
+    hsize_t dims[N_DATA_DIMS] = {n * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 1, N_CHAN_PROCESSED, N_STOKES};
     H5Dset_extent(id->visdata_did, dims);
     H5Dset_extent(id->flags_did, dims);
     H5Dset_extent(id->nsamples_did, dims);
@@ -339,12 +343,13 @@ static void close_filespaces(hdf5_id_t *id) {
 
 
 /*
-Write an n_baselines x n_stokes data block to dataset `id` at time position `t`, channel number `c`
+ * Write an n_baselines x N_CHAN_PROCESSED x N_STOKES
+ * data block to dataset `id` at time position `txn_baselines`
 */
 static void write_channels(hdf5_id_t *id, hsize_t t, hsize_t b, hid_t mem_space, uint64_t *visdata_buf)
 {
-    hsize_t start[N_DATA_DIMS] = {t, b, 0, 0};
-    hsize_t count[N_DATA_DIMS] = {1, N_BL_PER_WRITE, N_CHAN_PROCESSED, N_STOKES};
+    hsize_t start[N_DATA_DIMS] = {t*VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES + b, 0, 0, 0};
+    hsize_t count[N_DATA_DIMS] = {N_BL_PER_WRITE, 1, N_CHAN_PROCESSED, N_STOKES};
     H5Sselect_hyperslab(id->visdata_fs, H5S_SELECT_SET, start, NULL, count, NULL);
     H5Dwrite(id->visdata_did, complex_id, mem_space, id->visdata_fs, H5P_DEFAULT, visdata_buf);
 }
@@ -618,11 +623,13 @@ static void *run(hashpipe_thread_args_t * args)
 
     // Allocate an array of bools for flags and n_samples
     hbool_t *flags = (hbool_t *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED * sizeof(hbool_t));
+    //TODO flags never get written
     uint64_t *nsamples = (uint64_t *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED* sizeof(uint64_t));
+    //TODO nsamples never gets written
 
     // Define the memory space used by these buffers for HDF5 access
-    // We write 1 baseline-time at a time
-    hsize_t dims[N_DATA_DIMS] = {1, N_BL_PER_WRITE, N_CHAN_PROCESSED, N_STOKES};
+    // We write N_BL_PER_WRITE x 1[spw] x N_CHAN_PROCESSED x N_STOKES at a time
+    hsize_t dims[N_DATA_DIMS] = {N_BL_PER_WRITE, 1, N_CHAN_PROCESSED, N_STOKES};
     hid_t mem_space = H5Screate_simple(N_DATA_DIMS, dims, NULL);
     // Memory spaces to Nblts-element header vectors
     hsize_t dims1[DIM1] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES};
