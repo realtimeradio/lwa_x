@@ -81,7 +81,7 @@ def create_header(h5, use_cm=False):
     #header.create_dataset("ant_2_array", dtype="<i8", data=bls[:,1])
     header.create_dataset("antenna_diameters", dtype="<f8", data=ANT_DIAMETER)
     header.create_dataset("channel_width",     dtype="<f8", data=250e6 / (NCHANS / 3 * 4))
-    header.create_dataset("freq_array",        dtype="<f8", shape=(1, NCHANS), data=np.linspace(0, 250e6, NCHANS))
+    header.create_dataset("freq_array",        dtype="<f8", shape=(1, NCHANS), data=np.linspace(0, 187.5e6, NCHANS)) #TODO Get from config
     header.create_dataset("history",   data="%s: Template file created\n" % time.ctime())
     header.create_dataset("instrument", data=INSTRUMENT)
     #header.create_dataset("integration_time", dtype="<f8", data=INT_TIME)
