@@ -65,6 +65,8 @@ def create_header(h5, use_cm=False):
     INT_TIME = 10.0
     bls = np.array(get_bl_order(NANTS_DATA))
     n_bls = len(bls)
+    channel_width = 250e6 / (NCHANS / 3 * 4)
+    freqs = np.linspace(0, 187.5e6, NCHANS) + channel_width / 2
 
     header = h5.create_group("Header")
     header.create_dataset("Nants_data", dtype="<i8", data=NANTS_DATA)
@@ -79,41 +81,41 @@ def create_header(h5, use_cm=False):
     # The ant_[1|2]_arrays are added by the receiver, since they have dimensions of Nblts
     #header.create_dataset("ant_1_array", dtype="<i8", data=bls[:,0])
     #header.create_dataset("ant_2_array", dtype="<i8", data=bls[:,1])
-    header.create_dataset("antenna_diameters", dtype="<f8", data=ANT_DIAMETER)
-    header.create_dataset("channel_width",     dtype="<f8", data=250e6 / (NCHANS / 3 * 4))
-    header.create_dataset("freq_array",        dtype="<f8", shape=(1, NCHANS), data=np.linspace(0, 187.5e6, NCHANS)) #TODO Get from config
-    header.create_dataset("history",   data="%s: Template file created\n" % time.ctime())
-    header.create_dataset("instrument", data=INSTRUMENT)
+    header.create_dataset("antenna_diameters", dtype="<f8", data=[ANT_DIAMETER] * NANTS)
+    header.create_dataset("channel_width",     dtype="<f8", data=channel_width)
+    header.create_dataset("freq_array",        dtype="<f8", shape=(1, NCHANS), data=freqs) #TODO Get from config
+    header.create_dataset("history",   data=np.string_("%s: Template file created\n" % time.ctime()))
+    header.create_dataset("instrument", data=np.string_(INSTRUMENT))
     #header.create_dataset("integration_time", dtype="<f8", data=INT_TIME)
-    header.create_dataset("object_name", data="zenith")
-    header.create_dataset("phase_type",  data="drift")
+    header.create_dataset("object_name", data=np.string_("zenith"))
+    header.create_dataset("phase_type",  data=np.string_("drift"))
     header.create_dataset("polarization_array", dtype="<i8", data=[-5, -6, -7, -8])
-    header.create_dataset("spw_array",      dtype="<i8", data=0)
-    header.create_dataset("telescope_name", data="HERA")
-    header.create_dataset("vis_units",  data="uncalib")
+    header.create_dataset("spw_array",      dtype="<i8", data=[0])
+    header.create_dataset("telescope_name", data=np.string_("HERA"))
+    header.create_dataset("vis_units",  data=np.string_("UNCALIB"))
     if use_cm:
         header.create_dataset("altitude",    dtype="<f8", data=cminfo['cofa_alt'])
-        ant_pos = np.zeros([NANTS_DATA,3], dtype=np.int64)
-        ant_pos_enu = np.zeros([NANTS_DATA,3], dtype=np.int64)
+        ant_pos = np.zeros([NANTS,3], dtype=np.int64)
+        ant_pos_enu = np.zeros([NANTS,3], dtype=np.int64)
         ant_names = ["NONE"]*NANTS
         ant_nums = [-1]*NANTS
         for n, i in enumerate(cminfo["antenna_numbers"]):
             ant_pos[i]     = cminfo["antenna_positions"][n]
-            ant_names[i]   = cminfo["antenna_names"][n].encode()
+            ant_names[i]   = np.string_(cminfo["antenna_names"][n])
             ant_nums[i]    = cminfo["antenna_numbers"][n]
             ant_pos_enu[i] = cminfo["antenna_positions_enu"][n]
         header.create_dataset("antenna_names",     dtype="|S5", shape=(NANTS,), data=ant_names)
         header.create_dataset("antenna_numbers",   dtype="<i8", shape=(NANTS,), data=ant_nums)
-        header.create_dataset("antenna_positions",   dtype="<f8", shape=(NANTS_DATA,3), data=ant_pos)
-        header.create_dataset("antenna_positions_enu",   dtype="<f8", shape=(NANTS_DATA,3), data=ant_pos_enu)
+        header.create_dataset("antenna_positions",   dtype="<f8", shape=(NANTS,3), data=ant_pos)
+        header.create_dataset("antenna_positions_enu",   dtype="<f8", shape=(NANTS,3), data=ant_pos_enu)
         header.create_dataset("latitude",    dtype="<f8", data=cminfo["cofa_lat"])
         header.create_dataset("longitude",   dtype="<f8", data=cminfo["cofa_lon"])
     else:
         header.create_dataset("altitude",    dtype="<f8", data=0.0)
         header.create_dataset("antenna_names",     dtype="|S5", shape=(NANTS,), data=["NONE"]*NANTS)
         header.create_dataset("antenna_numbers",   dtype="<i8", shape=(NANTS,), data=range(NANTS))
-        header.create_dataset("antenna_positions",   dtype="<i8", shape=(NANTS_DATA,3), data=np.zeros([NANTS_DATA,3]))
-        header.create_dataset("antenna_positions_enu",   dtype="<i8", shape=(NANTS_DATA,3), data=np.zeros([NANTS_DATA,3]))
+        header.create_dataset("antenna_positions",   dtype="<f8", shape=(NANTS,3), data=np.zeros([NANTS,3]))
+        header.create_dataset("antenna_positions_enu",   dtype="<f8", shape=(NANTS,3), data=np.zeros([NANTS,3]))
         header.create_dataset("latitude",    dtype="<f8", data=0.0)
         header.create_dataset("longitude",   dtype="<f8", data=0.0)
 

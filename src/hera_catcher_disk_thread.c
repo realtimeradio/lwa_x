@@ -39,7 +39,15 @@
 #define N_CHAN_PROCESSED (N_CHAN_TOTAL / (CATCHER_CHAN_SUM * XENG_CHAN_SUM))
 #define N_BL_PER_WRITE (193)
 
+#define CPTR(VAR,CONST) ((VAR)=(CONST),&(VAR))
+
 static hid_t complex_id;
+static hid_t boolean_id, boolenumtype;
+
+typedef enum {
+    FALSE = 0,
+    TRUE
+} bool;
 
 typedef struct {
     double e;
@@ -134,13 +142,13 @@ static void make_extensible_hdf5(hdf5_id_t *id)
         pthread_exit(NULL);
     }
 
-    id->nsamples_did = H5Dcreate(id->data_gid, "nsamples", H5T_STD_I64LE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+    id->nsamples_did = H5Dcreate(id->data_gid, "nsamples", H5T_IEEE_F32LE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
     if (id->nsamples_did < 0) {
         hashpipe_error(__FUNCTION__, "Failed to create nsamples dataset");
         pthread_exit(NULL);
     }
 
-    id->flags_did = H5Dcreate(id->data_gid, "flags", H5T_NATIVE_HBOOL, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+    id->flags_did = H5Dcreate(id->data_gid, "flags", boolean_id, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
     if (id->flags_did < 0) {
         hashpipe_error(__FUNCTION__, "Failed to create flags dataset");
         pthread_exit(NULL);
@@ -546,6 +554,12 @@ static int init(hashpipe_thread_args_t *args)
     complex_id = H5Tcreate(H5T_COMPOUND, 8);
     H5Tinsert(complex_id, "r", 0, H5T_STD_I32LE);
     H5Tinsert(complex_id, "i", 4, H5T_STD_I32LE);
+
+    // generate the boolean data type
+    boolenumtype = H5Tcreate(H5T_ENUM, sizeof(bool));
+    H5Tenum_insert(boolenumtype, "FALSE", CPTR(val, FALSE ));
+    H5Tenum_insert(boolenumtype, "TRUE",  CPTR(val, TRUE  ));
+    H5Tinsert(boolean_id, "FLAG", 0, boolenumtype);
     return 0;
 }
 
