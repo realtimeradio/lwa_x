@@ -50,16 +50,16 @@ paper_gpu_la_LDFLAGS += -lhdf5_hl -lhdf5
 
 
 # Installed scripts
-dist_bin_SCRIPTS = paper_init.sh \
-		   paper_crc_init.sh \
-		   xtor_down.sh \
-		   xtor_up.py \
-                   catcher_init.sh \
-                   catcher_up.py \
-                   catcher_down.sh \
-                   tweak-perf.sh \
-                   hera_ctl.py \
-                   hera_make_hdf5_template.py
+dist_bin_SCRIPTS = ../scripts/paper_init.sh \
+		   ../scripts/paper_crc_init.sh \
+		   ../scripts/xtor_down.sh \
+		   ../scripts/xtor_up.py \
+                   ../scripts/catcher_init.sh \
+                   ../scripts/catcher_up.py \
+                   ../scripts/catcher_down.sh \
+                   ../scripts/tweak-perf.sh \
+                   ../scripts/hera_ctl.py \
+                   ../scripts/hera_make_hdf5_template.py
 
 # Non-installed test programs
 noinst_PROGRAMS = paper_fluff_test hera_write_hdf5
