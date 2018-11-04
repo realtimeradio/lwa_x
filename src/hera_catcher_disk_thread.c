@@ -560,6 +560,7 @@ static int init(hashpipe_thread_args_t *args)
     H5Tinsert(complex_id, "i", 4, H5T_STD_I32LE);
 
     // generate the boolean data type
+    bool val;
     boolenumtype = H5Tcreate(H5T_ENUM, sizeof(bool));
     H5Tenum_insert(boolenumtype, "FALSE", CPTR(val, FALSE ));
     H5Tenum_insert(boolenumtype, "TRUE",  CPTR(val, TRUE  ));
