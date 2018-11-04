@@ -263,6 +263,7 @@ static hid_t open_hdf5_from_template(char * sourcename, char * destname)
 
 static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, uint64_t file_obs_id, double file_start_t) {
     hid_t dataset_id;
+    char ver[32] = GIT_VERSION;
 
     id->file_id = open_hdf5_from_template(template_fname, hdf5_fname);
     // Open HDF5 header groups and create data group
@@ -294,6 +295,9 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     // Write meta-data values we know at file-open
     dataset_id = H5Dopen(id->extra_keywords_gid, "obs_id", H5P_DEFAULT);
     H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_obs_id);
+    H5Dclose(dataset_id);
+    dataset_id = H5Dopen(id->extra_keywords_gid, "paper_gpu_version", H5P_DEFAULT);
+    H5Dwrite(dataset_id, H5T_C_S1, H5S_ALL, H5S_ALL, H5P_DEFAULT, ver);
     H5Dclose(dataset_id);
     dataset_id = H5Dopen(id->extra_keywords_gid, "startt", H5P_DEFAULT);
     H5Dwrite(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_start_t);
