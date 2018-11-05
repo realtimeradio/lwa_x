@@ -1,3 +1,8 @@
+BUILD_USER = $(shell whoami)
+BUILD_HOST = $(shell hostname)
+BUILD_DATE = $(shell date +%Y/%m/%d-%H:%M%z)
+GIT_VERSION = $(shell git describe --abbrev=10 --dirty --always --tags)
+
 ACLOCAL_AMFLAGS = -I m4
 AM_CPPFLAGS     =
 
@@ -7,7 +12,9 @@ AM_CPPFLAGS += -I/usr/include/hdf5/serial/
 
 # AM_CFLAGS is used for all C compiles
 #AM_CFLAGS = -ggdb -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx2
-AM_CFLAGS = -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx2 -march=native -funroll-loops
+AM_CFLAGS = -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx2 -march=native -funroll-loops \
+            -DGIT_VERSION=\"$(GIT_VERSION)\" -DBUILD_USER=\"$(BUILD_USER)\" \
+            -DBUILD_HOST=\"$(BUILD_HOST)\" -DBUILD_DATE=\"$(BUILD_DATE)\"
 
 # Convenience variables to group source files
 paper_databuf = paper_databuf.h \
@@ -50,16 +57,16 @@ paper_gpu_la_LDFLAGS += -lhdf5_hl -lhdf5
 
 
 # Installed scripts
-dist_bin_SCRIPTS = ../scripts/paper_init.sh \
-		   ../scripts/paper_crc_init.sh \
-		   ../scripts/xtor_down.sh \
-		   ../scripts/xtor_up.py \
-                   ../scripts/catcher_init.sh \
-                   ../scripts/catcher_up.py \
-                   ../scripts/catcher_down.sh \
-                   ../scripts/tweak-perf.sh \
-                   ../scripts/hera_ctl.py \
-                   ../scripts/hera_make_hdf5_template.py
+dist_bin_SCRIPTS = scripts/paper_init.sh \
+		   scripts/paper_crc_init.sh \
+		   scripts/xtor_down.sh \
+		   scripts/xtor_up.py \
+                   scripts/catcher_init.sh \
+                   scripts/catcher_up.py \
+                   scripts/catcher_down.sh \
+                   scripts/tweak-perf.sh \
+                   scripts/hera_ctl.py \
+                   scripts/hera_make_hdf5_template.py
 
 # Non-installed test programs
 noinst_PROGRAMS = paper_fluff_test hera_write_hdf5

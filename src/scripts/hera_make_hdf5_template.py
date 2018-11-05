@@ -6,6 +6,7 @@ import sys
 import numpy as np
 import time
 import pickle
+import redis
 
 def get_bl_order(n_ants):
     """
@@ -41,7 +42,7 @@ def get_antpos_enu(antpos, lat, lon, alt):
     enu  = uvutils.ENU_from_ECEF(ecef, lat, lon, alt)
     return enu
 
-def create_header(h5, use_cm=False):
+def create_header(h5, use_cm=False, use_redis=False):
     """
     Create an HDF5 file with appropriate datasets in a "Header"
     data group.
@@ -56,6 +57,14 @@ def create_header(h5, use_cm=False):
         # add the enu co-ords
         cminfo["antenna_positions_enu"] = get_antpos_enu(cminfo["antenna_positions"], cminfo["cofa_lat"],
                                                              cminfo["cofa_lon"], cminfo["cofa_alt"])
+    else:
+        cminfo = None
+    
+    if use_redis:
+        r = redis.Redis("redishost")
+        fenginfo = r.hgetall("init_configuration")
+    else:
+        fenginfo = None
 
     INSTRUMENT = "HERA"
     NANTS_DATA = 192
@@ -126,13 +135,10 @@ def create_header(h5, use_cm=False):
     # uvw_needs populating by receiver: uvw = xyz(ant2) - xyz(ant1). Units, metres.
     #header.create_dataset("uvw_array",  dtype="<f8", data=np.zeros([n_bls * NTIMES, 3]))
     # !Some! extra_keywords need to be computed for each file
-    if use_cm:
-        add_extra_keywords(header, cminfo)
-    else:
-        add_extra_keywords(header)
+    add_extra_keywords(header, cminfo, fenginfo)
 
 
-def add_extra_keywords(obj, cminfo=None):
+def add_extra_keywords(obj, cminfo=None, fenginfo=None):
     extras = obj.create_group("extra_keywords")
     if cminfo is not None:
         extras.create_dataset("cmver", data=cminfo["cm_version"])
@@ -140,12 +146,16 @@ def add_extra_keywords(obj, cminfo=None):
     else:
         extras.create_dataset("cmver", data="generated-without-cminfo")
         extras.create_dataset("cminfo", data="generated-without-cminfo")
-        
+    if fenginfo is not None:    
+        extras.create_dataset("fengine_info", data=pickle.dumps(fenginfo))
+    else:
+        extras.create_dataset("fengine_info", data="generated-without-redis")
     extras.create_dataset("st_type", data="???")
     extras.create_dataset("duration", dtype="<f8", data=0.0) # filled in by receiver
     extras.create_dataset("obs_id", dtype="<i8", data=0)     # filled in by receiver
     extras.create_dataset("startt", dtype="<f8", data=0.0)   # filled in by receiver
     extras.create_dataset("stopt",  dtype="<f8", data=0.0)   # filled in by receiver
+    extras.create_dataset("paper_gpu_version",  dtype="|S32", data=np.string_("unknown"))# filled in by receiver
 
 if __name__ == "__main__":
     import argparse
@@ -156,7 +166,9 @@ if __name__ == "__main__":
     parser.add_argument('output',type=str, help = 'Path to which the template header file should be output')
     parser.add_argument('-c', dest='use_cminfo', action='store_true', default=False,
                         help ='Use this flag to get up-to-date (hopefully) array meta-data from the C+M system')
+    parser.add_argument('-r', dest='use_redis', action='store_true', default=False,
+                        help ='Use this flag to get up-to-date (hopefully) f-engine meta-data from a redis server at `redishost`')
     args = parser.parse_args()
 
     with h5py.File(args.output, "w") as h5:
-        create_header(h5, args.use_cminfo)
+        create_header(h5, use_cm=args.use_cminfo, use_redis=args.use_redis)

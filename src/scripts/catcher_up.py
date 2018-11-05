@@ -54,7 +54,7 @@ run_on_hosts([args.host], ['taskset', cpu_mask, 'hashpipe_redis_gateway.rb', '-g
 time.sleep(5)
 
 # Generate the meta-data template
-run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', args.hdf5template], wait=True)
+run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
 
 #Configure runtime parameters
 catcher_dict = {

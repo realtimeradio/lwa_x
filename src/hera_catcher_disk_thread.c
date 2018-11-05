@@ -42,12 +42,13 @@
 #define CPTR(VAR,CONST) ((VAR)=(CONST),&(VAR))
 
 static hid_t complex_id;
-static hid_t boolean_id, boolenumtype;
+static hid_t boolenumtype;
+//static hid_t boolean_id;
 
 typedef enum {
-    FALSE = 0,
+    FALSE,
     TRUE
-} bool;
+} bool_t;
 
 typedef struct {
     double e;
@@ -148,7 +149,7 @@ static void make_extensible_hdf5(hdf5_id_t *id)
         pthread_exit(NULL);
     }
 
-    id->flags_did = H5Dcreate(id->data_gid, "flags", boolean_id, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+    id->flags_did = H5Dcreate(id->data_gid, "flags", boolenumtype, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
     if (id->flags_did < 0) {
         hashpipe_error(__FUNCTION__, "Failed to create flags dataset");
         pthread_exit(NULL);
@@ -269,9 +270,12 @@ static hid_t open_hdf5_from_template(char * sourcename, char * destname)
 }
 
 
+#define VERSION_BYTES 32
 static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, uint64_t file_obs_id, double file_start_t) {
     hid_t dataset_id;
-    char ver[32] = GIT_VERSION;
+    hid_t memtype;
+    hid_t stat;
+    char ver[VERSION_BYTES] = GIT_VERSION; // defined at compile time
 
     id->file_id = open_hdf5_from_template(template_fname, hdf5_fname);
     // Open HDF5 header groups and create data group
@@ -302,14 +306,46 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     
     // Write meta-data values we know at file-open
     dataset_id = H5Dopen(id->extra_keywords_gid, "obs_id", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/obs_id");
+    }
     H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_obs_id);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to write Header/extra_keywords/obs_id");
+    }
     H5Dclose(dataset_id);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/obs_id");
+    }
     dataset_id = H5Dopen(id->extra_keywords_gid, "paper_gpu_version", H5P_DEFAULT);
-    H5Dwrite(dataset_id, H5T_C_S1, H5S_ALL, H5S_ALL, H5P_DEFAULT, ver);
-    H5Dclose(dataset_id);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/paper_gpu_version");
+    }
+    memtype = H5Tcopy(H5T_C_S1);
+    stat = H5Tset_size(memtype, VERSION_BYTES);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to set size of paper_gpu_version memtype");
+    }
+    stat = H5Dwrite(dataset_id, memtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, ver);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to write Header/extra_keywords/paper_gpu_version");
+    }
+    stat = H5Dclose(dataset_id);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/paper_gpu_version");
+    }
     dataset_id = H5Dopen(id->extra_keywords_gid, "startt", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/startt");
+    }
     H5Dwrite(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_start_t);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to write Header/extra_keywords/startt");
+    }
     H5Dclose(dataset_id);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/startt");
+    }
 }
 
 /* Extend the datasets with data-like dimensions,
@@ -560,11 +596,11 @@ static int init(hashpipe_thread_args_t *args)
     H5Tinsert(complex_id, "i", 4, H5T_STD_I32LE);
 
     // generate the boolean data type
-    bool val;
-    boolenumtype = H5Tcreate(H5T_ENUM, sizeof(bool));
+    bool_t val;
+    boolenumtype = H5Tcreate(H5T_ENUM, sizeof(bool_t));
     H5Tenum_insert(boolenumtype, "FALSE", CPTR(val, FALSE ));
     H5Tenum_insert(boolenumtype, "TRUE",  CPTR(val, TRUE  ));
-    H5Tinsert(boolean_id, "FLAG", 0, boolenumtype);
+    //H5Tinsert(boolean_id, "FLAG", 0, boolenumtype);
     return 0;
 }
 

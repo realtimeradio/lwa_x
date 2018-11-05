@@ -414,6 +414,9 @@ int main(int argc, char *argv[])
 
   setbuf(stdout, NULL); // send printf-s to screen immediately
 
+  fprintf(stdout, "Built %s %s@%s\n", BUILD_DATE, BUILD_USER, BUILD_HOST);
+  fprintf(stdout, "%s\n\n", GIT_VERSION);
+
   if(posix_memalign((void **)&in,  CACHE_ALIGNMENT,   N_BYTES_PER_BLOCK)
   || posix_memalign((void **)&out, CACHE_ALIGNMENT, 2*N_BYTES_PER_BLOCK)) {
     printf("cannot allocate memory\n");
