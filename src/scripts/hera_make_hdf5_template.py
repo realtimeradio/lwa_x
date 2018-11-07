@@ -3,10 +3,43 @@
 from __future__ import print_function, division, absolute_import
 import h5py
 import sys
+import json
+import logging
 import numpy as np
 import time
 import pickle
 import redis
+from hera_corr_f import helpers
+
+logger = helpers.add_default_log_handlers(logging.getLogger(__file__))
+
+def get_corr_to_hera_map(r, nants_data=192, nants=352):
+    """
+    Given a redis.Redis instance, r, containing
+    appropriate metadata - figure out the mapping
+    of correlator index (0 - Nants_data -1) to
+    hera antenna number (0 - Nants).
+    """
+    out_map = np.arange(nants, nants + nants_data) # use default values outside the range of real antennas
+
+    # A dictionary with keys which are antenna numbers
+    # of the for {<ant> :{<pol>: {'host':SNAPHOSTNAME, 'channel':INTEGER}}}
+    ant_to_snap = json.loads(r.hgetall("corr:map")['ant_to_snap'])
+    #host_to_index = r.hgetall("corr:snap_ants")
+    for ant, pol in ant_to_snap.iteritems():
+        hera_ant_number = int(ant)
+        host = pol["n"]["host"]
+        chan = pol["n"]["channel"] # runs 0-5
+        snap_ant_chans = r.hget("corr:snap_ants", host)
+        if snap_ant_chans is None:
+            logger.warning("Couldn't find antenna indices for %s" % host)
+            continue
+        corr_ant_number = json.loads(snap_ant_chans)[chan//2] #Indexes from 0-3 (ignores pol)
+        print(corr_ant_number)
+        out_map[corr_ant_number] = hera_ant_number
+        logger.info("HERA antenna %d maps to correlator input %d" % (hera_ant_number, corr_ant_number))
+
+    return out_map
 
 def get_bl_order(n_ants):
     """
@@ -52,19 +85,6 @@ def create_header(h5, use_cm=False, use_redis=False):
                       system. If False, just stuff the header with fake
                       data.
     """
-    if use_cm:
-        cminfo = get_cm_info()
-        # add the enu co-ords
-        cminfo["antenna_positions_enu"] = get_antpos_enu(cminfo["antenna_positions"], cminfo["cofa_lat"],
-                                                             cminfo["cofa_lon"], cminfo["cofa_alt"])
-    else:
-        cminfo = None
-    
-    if use_redis:
-        r = redis.Redis("redishost")
-        fenginfo = r.hgetall("init_configuration")
-    else:
-        fenginfo = None
 
     INSTRUMENT = "HERA"
     NANTS_DATA = 192
@@ -76,6 +96,25 @@ def create_header(h5, use_cm=False, use_redis=False):
     n_bls = len(bls)
     channel_width = 250e6 / (NCHANS / 3 * 4)
     freqs = np.linspace(0, 187.5e6, NCHANS) + channel_width / 2
+
+    if use_cm:
+        cminfo = get_cm_info()
+        # add the enu co-ords
+        cminfo["antenna_positions_enu"] = get_antpos_enu(cminfo["antenna_positions"], cminfo["cofa_lat"],
+                                                             cminfo["cofa_lon"], cminfo["cofa_alt"])
+    else:
+        cminfo = None
+    
+    if use_redis:
+        r = redis.Redis("redishost")
+        fenginfo = r.hgetall("init_configuration")
+        corr_to_hera_map = get_corr_to_hera_map(r, nants_data=NANTS_DATA, nants=NANTS)
+        for n in range(bls.shape[0]):
+            bls[n] = [corr_to_hera_map[bls[n,0]], corr_to_hera_map[bls[n,1]]]
+    else:
+        fenginfo = None
+        # Use impossible antenna numbers to indicate they're not really valid
+        corr_to_hera_map = np.arange(NANTS, NANTS+NANTS_DATA)
 
     header = h5.create_group("Header")
     header.create_dataset("Nants_data", dtype="<i8", data=NANTS_DATA)
