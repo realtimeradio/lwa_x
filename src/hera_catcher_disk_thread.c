@@ -317,22 +317,22 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/obs_id");
     }
-    dataset_id = H5Dopen(id->extra_keywords_gid, "paper_gpu_version", H5P_DEFAULT);
+    dataset_id = H5Dopen(id->extra_keywords_gid, "corr_ver", H5P_DEFAULT);
     if (dataset_id < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/paper_gpu_version");
+        hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/corr_ver");
     }
     memtype = H5Tcopy(H5T_C_S1);
     stat = H5Tset_size(memtype, VERSION_BYTES);
     if (stat < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to set size of paper_gpu_version memtype");
+        hashpipe_error(__FUNCTION__, "Failed to set size of corr_ver memtype");
     }
     stat = H5Dwrite(dataset_id, memtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, ver);
     if (stat < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to write Header/extra_keywords/paper_gpu_version");
+        hashpipe_error(__FUNCTION__, "Failed to write Header/extra_keywords/corr_ver");
     }
     stat = H5Dclose(dataset_id);
     if (stat < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/paper_gpu_version");
+        hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/corr_ver");
     }
     dataset_id = H5Dopen(id->extra_keywords_gid, "startt", H5P_DEFAULT);
     if (dataset_id < 0) {

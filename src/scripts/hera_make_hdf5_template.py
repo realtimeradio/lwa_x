@@ -141,21 +141,21 @@ def create_header(h5, use_cm=False, use_redis=False):
 def add_extra_keywords(obj, cminfo=None, fenginfo=None):
     extras = obj.create_group("extra_keywords")
     if cminfo is not None:
-        extras.create_dataset("cmver", data=cminfo["cm_version"])
-        extras.create_dataset("cminfo", data=pickle.dumps(cminfo))
+        extras.create_dataset("cmver", data=np.string_(cminfo["cm_version"]))
+        extras.create_dataset("cminfo", data=np.string_(pickle.dumps(cminfo)))
     else:
-        extras.create_dataset("cmver", data="generated-without-cminfo")
-        extras.create_dataset("cminfo", data="generated-without-cminfo")
+        extras.create_dataset("cmver", data=np.string_("generated-without-cminfo"))
+        extras.create_dataset("cminfo", data=np.string_("generated-without-cminfo"))
     if fenginfo is not None:    
-        extras.create_dataset("fengine_info", data=pickle.dumps(fenginfo))
+        extras.create_dataset("finfo", data=np.string_(pickle.dumps(fenginfo)))
     else:
-        extras.create_dataset("fengine_info", data="generated-without-redis")
-    extras.create_dataset("st_type", data="???")
+        extras.create_dataset("finfo", data=np.string_("generated-without-redis"))
+    #extras.create_dataset("st_type", data=np.string_("???"))
     extras.create_dataset("duration", dtype="<f8", data=0.0) # filled in by receiver
     extras.create_dataset("obs_id", dtype="<i8", data=0)     # filled in by receiver
     extras.create_dataset("startt", dtype="<f8", data=0.0)   # filled in by receiver
     extras.create_dataset("stopt",  dtype="<f8", data=0.0)   # filled in by receiver
-    extras.create_dataset("paper_gpu_version",  dtype="|S32", data=np.string_("unknown"))# filled in by receiver
+    extras.create_dataset("corr_ver",  dtype="|S32", data=np.string_("unknown"))# filled in by receiver
 
 if __name__ == "__main__":
     import argparse
