@@ -9,6 +9,7 @@ AM_CPPFLAGS     =
 AM_CPPFLAGS += -I"@HASHPIPE_INCDIR@"
 AM_CPPFLAGS += -I"@XGPU_INCDIR@"
 AM_CPPFLAGS += -I/usr/include/hdf5/serial/
+AM_CPPFLAGS += -I/usr/include/hiredis/
 
 # AM_CFLAGS is used for all C compiles
 #AM_CFLAGS = -ggdb -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx2
@@ -50,7 +51,7 @@ paper_gpu_la_LDFLAGS += -L"@XGPU_LIBDIR@" -Wl,-rpath,"@XGPU_LIBDIR@"
 paper_gpu_la_LDFLAGS += -L"@HASHPIPE_LIBDIR@" -Wl,-rpath,"@HASHPIPE_LIBDIR@"
 # Include HDF5 Libraries
 paper_gpu_la_LDFLAGS += -L/usr/lib/x86_64-linux-gnu/hdf5/serial
-paper_gpu_la_LDFLAGS += -lhdf5_hl -lhdf5
+paper_gpu_la_LDFLAGS += -lhdf5_hl -lhdf5 -lhiredis
 # Include HDF5 compression libraries
 #paper_gpu_la_LDFLAGS += -L/usr/local/lib/python2.7/dist-packages/bitshuffle/plugin
 #paper_gpu_la_LDFLAGS += -lh5LZF -lh5bshuf
