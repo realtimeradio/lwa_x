@@ -56,7 +56,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
     /* Loop */
     int rv;
     char integ_status[17];
-    uint64_t start_mcount, last_mcount=0;
+    uint64_t start_mcount, last_mcount=0, middle_mcount;
     uint64_t gpu_dumps=0;
     int int_count; // Number of blocks to integrate per dump
     int xgpu_error = 0;
@@ -145,6 +145,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
               hashpipe_status_unlock_safe(&st);
               // Compute last mcount
               last_mcount = start_mcount + TIME_DEMUX*(int_count-N_TIME_PER_BLOCK);// * N_SUB_BLOCKS_PER_INPUT_BLOCK;
+              middle_mcount = (last_mcount - start_mcount + N_TIME_PER_BLOCK) >> 2;
               fprintf(stdout, "Accumulating %d spectra to mcount: %lu\n", int_count, last_mcount);
             // Else (missed starting mcount)
             } else {
@@ -214,9 +215,8 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
           clock_gettime(CLOCK_MONOTONIC, &stop);
           elapsed_gpu_ns += ELAPSED_NS(start, stop);
 
-          // TODO Maybe need to subtract all or half the integration time here
-          // depending on recevier's expectations.
-          db_out->block[curblock_out].header.mcnt = last_mcount;
+          // Use the middle_mcount, which marks the center of the integration
+          db_out->block[curblock_out].header.mcnt = middle_mcount;
           // If integration status if "stop"
           if(!strcmp(integ_status, "stop")) {
             // Set integration status to "off"
@@ -227,6 +227,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
           } else {
             // Advance last_mcount for end of next integration
             last_mcount += TIME_DEMUX*int_count;// * N_SUB_BLOCKS_PER_INPUT_BLOCK;
+            middle_mcount += TIME_DEMUX*int_count;
           }
 
           // Mark output block as full and advance
