@@ -19,6 +19,7 @@
 #include <hdf5.h>
 #include <smmintrin.h>
 #include <immintrin.h>
+#include <hiredis.h>
 
 #include "hashpipe.h"
 #include "paper_databuf.h"
@@ -452,6 +453,21 @@ static void write_extensible_headers(hdf5_id_t *id, hsize_t t, hid_t mem_space1,
     }
 }
 
+/* Given an array of baseline pairs, figure out the indices of the autocorrs */
+static void get_auto_indices(bl_t *bl_order, int32_t *auto_indices, uint32_t n_bls) {
+    int32_t i = 0;
+    for (i=0; i<N_ANTS; i++) {
+        auto_indices[i] = -1;
+    }
+    for (i=0; i<n_bls; i+=1) {
+        if (bl_order[i].a == bl_order[i].b) {
+            if (bl_order[i].a < N_ANTS) {
+                auto_indices[bl_order[i].a] = i;
+            }
+        }
+    }
+}
+
 /* Read the baseline order from an HDF5 file via the Header/corr_bl_order dataset */
 static void get_bl_order(hdf5_id_t *id, bl_t *bl_order) {
     hid_t dataset_id;
@@ -646,7 +662,12 @@ static void *run(hashpipe_thread_args_t * args)
     // Variables for antenna positions and baseline orders. These should be provided
     // via the HDF5 header template.
     bl_t bl_order[VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES];
+    int32_t auto_indices[N_ANTS];
     enu_t ant_pos[N_ANTS];
+
+    // A buffer for the real parts of a single auto-corr. Used for writing to redis
+    float auto_corr_n[N_CHAN_PROCESSED];
+    float auto_corr_e[N_CHAN_PROCESSED];
 
     // How many integrations to dump to a file before starting the next one
     // This is read from shared memory
@@ -657,12 +678,34 @@ static void *run(hashpipe_thread_args_t * args)
     hputi8(st.buf, "DISKMCNT", 0);
     hputu4(st.buf, "TRIGGER", 0);
     hashpipe_status_unlock_safe(&st);
-    
-    /* Loop */
+
+    // Redis connection
+    redisContext *c;
+    redisReply *reply;
+    const char *hostname = "redishost";
+    int redisport = 6379;
+    int use_redis = 1;
+    use_redis = use_redis;
+
+    struct timeval redistimeout = { 0, 100000 }; // 0.1 seconds
+    c = redisConnectWithTimeout(hostname, redisport, redistimeout);
+    if (c == NULL || c->err) {
+        if (c) {
+            fprintf(stderr, "Redis connection error: %s\n", c->errstr);
+            redisFree(c);
+            use_redis = 0;
+        } else {
+            fprintf(stderr, "Connection error: can't allocate redis context\n");
+            use_redis = 0;
+        }
+    }
+
+    /* Loop(s) */
     int32_t *db_in32;
     int rv;
     int curblock_in=0;
     int bl;
+    int a, chan;
     double curr_file_time = -1.0;
     double file_start_t, file_stop_t, file_duration;
     int64_t file_obs_id, file_nblts=0, file_nts=0;
@@ -806,6 +849,7 @@ static void *run(hashpipe_thread_args_t * args)
             // These are needed for populating the ant_[1|2]_array and uvw_array
             get_ant_pos(&sum_file, ant_pos);
             get_bl_order(&sum_file, bl_order);
+            get_auto_indices(bl_order, auto_indices, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES);
         }
 
         // Update time and sample counters
@@ -850,6 +894,34 @@ static void *run(hashpipe_thread_args_t * args)
             max_w_ns = MAX(w_ns, min_w_ns);
         }
 
+
+        // Write autocorrs to redis
+        if(use_redis) {
+            for (a=0; a<N_ANTS; a++) {
+                // auto_indices default to -1. Use this test to delete
+                // redis keys for invalid antennas
+                if (auto_indices[a] >= 0) {
+                    for (chan=0; chan<N_CHAN_PROCESSED; chan++) {
+                        // Divide out accumulation length.
+                        // Don't divide out integration over frequency channels (if any)
+                        auto_corr_n[chan] = (float) db_in32[corr_databuf_data_idx(chan, auto_indices[a])] / acc_len;
+                        auto_corr_e[chan] = (float) db_in32[corr_databuf_data_idx(chan, auto_indices[a]) + 2] / acc_len;
+                    }
+                    reply = redisCommand(c, "SET auto:%dn %b", a, auto_corr_n, (size_t) (sizeof(float) * N_CHAN_PROCESSED));
+                    freeReplyObject(reply);
+                    reply = redisCommand(c, "SET auto:%de %b", a, auto_corr_e, (size_t) (sizeof(float) * N_CHAN_PROCESSED));
+                    freeReplyObject(reply);
+                } else {
+                    reply = redisCommand(c, "DEL auto:%dn", a);
+                    freeReplyObject(reply);
+                    reply = redisCommand(c, "DEL auto:%de", a);
+                    freeReplyObject(reply);
+                }
+            }
+            //reply = redisCommand(c, "SET auto:timestamp %lf", julian_time);
+            reply = redisCommand(c, "SET auto:timestamp  %b", &julian_time, (size_t) (sizeof(double)));
+            freeReplyObject(reply);
+        }
 
         // Close the filespaces - leave the datasets open. We'll close those when the file is done
         close_filespaces(&sum_file);
