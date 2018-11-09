@@ -90,12 +90,17 @@ def create_header(h5, use_cm=False, use_redis=False):
     NANTS_DATA = 192
     NANTS = 352
     NCHANS = int(2048 // 4 * 3)
+    NCHANS_F = 8192
+    NCHAN_SUM = 4
     ANT_DIAMETER = 14.0
     INT_TIME = 10.0
     bls = np.array(get_bl_order(NANTS_DATA))
     n_bls = len(bls)
-    channel_width = 250e6 / (NCHANS / 3 * 4)
-    freqs = np.linspace(0, 187.5e6, NCHANS) + channel_width / 2
+    channel_width = 250e6 / NCHANS_F * NCHAN_SUM
+    freqs = np.linspace(0, 250e6, NCHANS_F + 1)[1536 : 1536 + (8192 // 4 * 3)]
+    # average over channels
+    freqs = freqs.reshape(NCHANS, NCHAN_SUM).sum(axis=1) / NCHAN_SUM
+    
 
     if use_cm:
         cminfo = get_cm_info()
