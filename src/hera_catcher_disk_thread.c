@@ -38,7 +38,8 @@
 
 #define N_DATA_DIMS (4)
 #define N_CHAN_PROCESSED (N_CHAN_TOTAL / (CATCHER_CHAN_SUM * XENG_CHAN_SUM))
-#define N_BL_PER_WRITE (193)
+#define N_CHAN_RECEIVED (N_CHAN_TOTAL / XENG_CHAN_SUM)
+#define N_BL_PER_WRITE (32)
 
 #define CPTR(VAR,CONST) ((VAR)=(CONST),&(VAR))
 
@@ -563,7 +564,7 @@ static void compute_uvw_array(double* uvw, enu_t *ant_pos, bl_t *bl_order) {
 
 /*
 Given an entire input buffer --
-even/odd x 1 time x N_chans x N_bls x  N_stokes x 2 (real/imag)
+1 time x N_bls x N_chans x 2(even/odd samples) x N_stokes x 2(real/imag)
 Write --
 even/odd-sum x 1 bl x N_chans x N_stokes x 2 (real/imag) into `out_sum`.
 even/odd-diff dx 1 bl x N_chans x N_stokes x 2 (real/imag) into `out_diff`.
@@ -571,45 +572,47 @@ Choose the baseline with the index `b`
 This function sums over CATCHER_SUM_CHANS as it transposes, and computes even/odd sum/diff.
 
 */
-#define corr_databuf_data_idx(c, b) (2*((c*VIS_MATRIX_ENTRIES_PER_CHAN) + (N_STOKES*b)))
+// Get the even-sample / first-pol / first-complexity of the correlatoion buffer for chan `c` baseline `b`
+#define corr_databuf_data_idx(c, b) (2*2*N_STOKES*(c + (b*N_CHAN_RECEIVED)))
 static void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, int bl) {
     
     int c, b, s, i, chan;
-    int sum_even[N_BL_PER_WRITE][4][2], sum_odd[N_BL_PER_WRITE][4][2];
+    // Buffers for a single full-stokes baseline
+    int sum_even[N_STOKES][2], sum_odd[N_STOKES][2];
 
     int32_t *in_even = in + corr_databuf_data_idx(0,bl);
-    int32_t *in_odd = in_even + 2*VIS_MATRIX_ENTRIES;
+    int32_t *in_odd = in_even + N_STOKES*2;
+    //__m256i sum_even = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
+    //__m256i sum_odd  = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
 
-    for (chan=0; chan<N_CHAN_PROCESSED; chan++) {
-        // Load all the values for an accumulation
-        for(c=0; c<CATCHER_CHAN_SUM; c++) {
-            for(b=0; b<N_BL_PER_WRITE; b++) {
-                for (s=0; s<4; s++) {
+    for(b=0; b<N_BL_PER_WRITE; b++) {
+        for (chan=0; chan<N_CHAN_PROCESSED; chan+=4) {
+            // Load all the values for an accumulation
+            for(c=0; c<CATCHER_CHAN_SUM; c++) {
+                for (s=0; s<N_STOKES; s++) {
                     for (i=0; i<2; i++) {
                         if(c==0) {
-                            sum_even[b][s][i] = in_even[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
-                            sum_odd[b][s][i]  =  in_odd[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
+                            sum_even[s][i] = in_even[2*2*c*N_STOKES + 2*s + i];
+                            sum_odd[s][i]  =  in_odd[2*2*c*N_STOKES + 2*s + i];
                         } else {
-                            sum_even[b][s][i] += in_even[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
-                            sum_odd[b][s][i]  +=  in_odd[VIS_MATRIX_ENTRIES_PER_CHAN*2*c + 8*b + 2*s + i];
+                            sum_even[s][i] += in_even[2*2*c*N_STOKES + 2*s + i];
+                            sum_odd[s][i]  +=  in_odd[2*2*c*N_STOKES + 2*s + i];
                         }
                     }
                 }
             }
-        }
 
-        // Write to output and clear accumulators
-        for(b=0; b<N_BL_PER_WRITE; b++) {
-            for (s=0; s<4; s++) {
+            // Write to output and clear accumulators
+            for (s=0; s<N_STOKES; s++) {
                 for (i=0; i<2; i++) {
-                    out_sum[(b*N_CHAN_PROCESSED + chan)*8 + 2*s + i] = sum_even[b][s][i] + sum_odd[b][s][i];
-                    out_diff[(b*N_CHAN_PROCESSED + chan)*8 + 2*s + i] = sum_even[b][s][i] - sum_odd[b][s][i];
+                    out_sum[(b*N_CHAN_PROCESSED + chan)*N_STOKES*2 + 2*s + i] = sum_even[s][i] + sum_odd[s][i];
+                    out_diff[(b*N_CHAN_PROCESSED + chan)*N_STOKES*2 + 2*s + i] = sum_even[s][i] - sum_odd[s][i];
                 }
             }
-        }
 
-        in_even += (VIS_MATRIX_ENTRIES_PER_CHAN*2*CATCHER_CHAN_SUM);
-        in_odd  += (VIS_MATRIX_ENTRIES_PER_CHAN*2*CATCHER_CHAN_SUM);
+            in_even += (CATCHER_CHAN_SUM * 2 * N_STOKES * 2);
+            in_odd  = in_even + N_STOKES*2;
+        }
     }
 }
 
@@ -881,7 +884,6 @@ static void *run(hashpipe_thread_args_t * args)
         extend_header_datasets(&diff_file, file_nts);
             
         // Write this integration's entries for lst_array, time_array, uvw_array
-        // TODO: compute uvw array
         compute_uvw_array(uvw_array_buf, ant_pos, bl_order);
         compute_time_array(julian_time, time_array_buf);
         compute_integration_time_array(acc_len * TIME_DEMUX * 2L * N_CHAN_TOTAL_GENERATED/(double)FENG_SAMPLE_RATE, integration_time_buf);
