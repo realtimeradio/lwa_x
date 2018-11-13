@@ -100,16 +100,32 @@ static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, 
     H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_nts);
     H5Dclose(dataset_id);
     // Close datasets
-    H5Dclose(id->visdata_did);
-    H5Dclose(id->flags_did);
-    H5Dclose(id->nsamples_did);
+    if (H5Dclose(id->visdata_did) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close visdata dataset");
+    }
+    if (H5Dclose(id->flags_did) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close flags dataset");
+    }
+    if (H5Dclose(id->nsamples_did) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close nsamples dataset");
+    }
     // Close groups
-    H5Gclose(id->extra_keywords_gid);
-    H5Gclose(id->header_gid);
-    H5Gclose(id->data_gid);
+    if (H5Gclose(id->extra_keywords_gid) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close extra_keywords group");
+    }
+    if (H5Gclose(id->header_gid) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close header group");
+    }
+    if (H5Gclose(id->data_gid) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close data group");
+    }
     // Close file
-    H5Fflush(id->file_id, H5F_SCOPE_GLOBAL);
-    H5Fclose(id->file_id);
+    if (H5Fflush(id->file_id, H5F_SCOPE_GLOBAL) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to flush file");
+    }
+    if (H5Fclose(id->file_id) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close file");
+    }
 }
 
 /*
