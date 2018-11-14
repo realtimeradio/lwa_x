@@ -2,7 +2,7 @@
 //
 // Sends integrated GPU output to "catcher" machine for assimilation into a
 // dataset. Unlike the original PAPER output thread, this code integrates
-// over XENG_CHAN_SUM channels, TODO: and performs a channel x baseline transpose
+// over XENG_CHAN_SUM channels, and performs a channel x baseline transpose
 
 #include <stdio.h>
 #include <string.h>
@@ -341,7 +341,7 @@ static void *run(hashpipe_thread_args_t * args)
     /* Main loop */
     int rv;
     int casper_chan, gpu_chan, sum_chan;
-    int baseline;
+    int baseline, pol;
     unsigned int dumps = 0;
     int block_idx = 0;
     struct timespec start, stop;
@@ -383,64 +383,68 @@ static void *run(hashpipe_thread_args_t * args)
         uint32_t nbytes = 0;
 
         // Unpack and convert in packet sized chunks
+        // output data in order: baseline x chan x stokes (slowest to fastest varying)
         pktdata_t * pf_re  = db->block[block_idx].data;
         pktdata_t * pf_im  = db->block[block_idx].data + xgpu_info.matLength;
         pktdata_t * p_out = pkt.data;
         clock_gettime(CLOCK_MONOTONIC, &pkt_start);
-        // Iterate over blocks of XENG_CHAN_SUM channels. An inner loop will sum these
-        for(baseline=0; baseline<N_CASPER_COMPLEX_PER_CHAN; baseline++) {
+        // Iterate over blocks of N_STOKES baselines. All stokes are sent in adjacent words
+        for(baseline=0; baseline<N_CASPER_COMPLEX_PER_CHAN; baseline+=N_STOKES) {
+          // Iterate over blocks of XENG_CHAN_SUM channels. An inner loop will sum these
           for(casper_chan=0; casper_chan<N_CHAN_PER_X; casper_chan=casper_chan+XENG_CHAN_SUM) {
-            // This used to de-interleave channels.  De-interleaving is no longer
-            // needed, but we choose to continue maintaining the distinction
-            // between casper_chan and gpu_chan.
-            gpu_chan = casper_chan;
-            off_t idx_regtile = idx_map[baseline];
-            for(sum_chan=0; sum_chan<XENG_CHAN_SUM; sum_chan++) {
-              if (sum_chan == 0) {
-                re = pf_re[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile];
-                im = pf_im[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile];
-              } else {
-                re += pf_re[(gpu_chan+sum_chan)*REGTILE_CHAN_LENGTH+idx_regtile];
-                im += pf_im[(gpu_chan+sum_chan)*REGTILE_CHAN_LENGTH+idx_regtile];
-              }
-            }
-            *p_out++ = CONVERT(re);
-            *p_out++ = CONVERT(-im); // Conjugate to match downstream expectations.
-            nbytes += 2*sizeof(pktdata_t);
-            if(nbytes % OUTPUT_BYTES_PER_PACKET == 0) {
-              int bytes_sent = send(sockfd, &pkt, sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET, 0);
-              if(bytes_sent == -1) {
-                // Send all packets even if cactcher is not listening (i.e. we
-                // we get a connection refused error), but abort sending this
-                // dump if we get any other error.
-                if(errno != ECONNREFUSED) {
-                  perror("send");
-                  // Update stats
-                  hashpipe_status_lock_safe(&st);
-                  hgetu4(st.buf, "OUTDUMPS", &dumps);
-                  hputu4(st.buf, "OUTDUMPS", ++dumps);
-                  hputr4(st.buf, "OUTSECS", 0.0);
-                  hputr4(st.buf, "OUTMBPS", 0.0);
-                  hashpipe_status_unlock_safe(&st);
-                  // Break out of both for loops
-                  goto done_sending;
+            for(pol=0; pol<N_STOKES; pol++) {
+              // This used to de-interleave channels.  De-interleaving is no longer
+              // needed, but we choose to continue maintaining the distinction
+              // between casper_chan and gpu_chan.
+              gpu_chan = casper_chan;
+              off_t idx_regtile = idx_map[baseline + pol];
+              for(sum_chan=0; sum_chan<XENG_CHAN_SUM; sum_chan++) {
+                if (sum_chan == 0) {
+                  re = pf_re[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile];
+                  im = pf_im[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile];
+                } else {
+                  re += pf_re[(gpu_chan+sum_chan)*REGTILE_CHAN_LENGTH+idx_regtile];
+                  im += pf_im[(gpu_chan+sum_chan)*REGTILE_CHAN_LENGTH+idx_regtile];
                 }
-              } else if(bytes_sent != sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET) {
-                printf("only sent %d of %lu bytes!!!\n", bytes_sent, sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET);
               }
+              *p_out++ = CONVERT(re);
+              *p_out++ = CONVERT(-im); // Conjugate to match downstream expectations.
+              nbytes += 2*sizeof(pktdata_t);
+              if(nbytes % OUTPUT_BYTES_PER_PACKET == 0) {
+                int bytes_sent = send(sockfd, &pkt, sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET, 0);
+                if(bytes_sent == -1) {
+                  // Send all packets even if cactcher is not listening (i.e. we
+                  // we get a connection refused error), but abort sending this
+                  // dump if we get any other error.
+                  if(errno != ECONNREFUSED) {
+                    perror("send");
+                    // Update stats
+                    hashpipe_status_lock_safe(&st);
+                    hgetu4(st.buf, "OUTDUMPS", &dumps);
+                    hputu4(st.buf, "OUTDUMPS", ++dumps);
+                    hputr4(st.buf, "OUTSECS", 0.0);
+                    hputr4(st.buf, "OUTMBPS", 0.0);
+                    hashpipe_status_unlock_safe(&st);
+                    // Break out of both for loops
+                    goto done_sending;
+                  }
+                } else if(bytes_sent != sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET) {
+                  printf("only sent %d of %lu bytes!!!\n", bytes_sent, sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET);
+                }
 
-              // Delay to prevent overflowing network TX queue
-              clock_gettime(CLOCK_MONOTONIC, &pkt_stop);
-              packet_delay.tv_nsec = PACKET_DELAY_NS - ELAPSED_NS(pkt_start, pkt_stop);
-              if(packet_delay.tv_nsec > 0 && packet_delay.tv_nsec < 1000*1000*1000) {
-                nanosleep(&packet_delay, NULL);
+                // Delay to prevent overflowing network TX queue
+                clock_gettime(CLOCK_MONOTONIC, &pkt_stop);
+                packet_delay.tv_nsec = PACKET_DELAY_NS - ELAPSED_NS(pkt_start, pkt_stop);
+                if(packet_delay.tv_nsec > 0 && packet_delay.tv_nsec < 1000*1000*1000) {
+                  nanosleep(&packet_delay, NULL);
+                }
+
+                // Setup for next packet
+                p_out = pkt.data;
+                pkt_start = pkt_stop;
+                // Update header's byte_offset for this chunk
+                pkt.hdr.offset = OFFSET(nbytes);
               }
-
-              // Setup for next packet
-              p_out = pkt.data;
-              pkt_start = pkt_stop;
-              // Update header's byte_offset for this chunk
-              pkt.hdr.offset = OFFSET(nbytes);
             }
           }
         }
