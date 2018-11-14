@@ -246,14 +246,14 @@ static inline uint64_t process_packet(
     binfo.block_packet_counter[binfo.block_i]++;
 
     // Copy data into buffer
-    dest_p = (uint32_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id / TIME_DEMUX, offset));
+    dest_p = (uint32_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (hera_catcher_input_databuf_idx32(time_demux_block, (xeng_id % N_XENGINES_PER_TIME), offset));
     payload_p = (uint32_t *)(PKT_UDP_DATA(p_frame) + sizeof(packet_header_t));
     if (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id / TIME_DEMUX, offset) >= 455344128L) {
         fprintf(stderr, "databuf offset outside allowed range!\n");
         fprintf(stderr, "offset is %lu\n", (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id/TIME_DEMUX, offset)));
         fprintf(stderr, "mcnt: %lu, t-demux: %d, offset: %d, xeng: %d\n", mcnt, time_demux_block, offset, xeng_id/TIME_DEMUX);
     }
-    //fprintf(stdout, "mcnt: %lu, t-demux: %d, offset: %d, xeng: %d (%d,%d), payload:%d, block:%d\n", mcnt, time_demux_block, offset, xeng_id, ((int32_t *)payload_p)[0], ((int32_t*)payload_p)[1], payload_len, binfo.block_i);
+    //fprintf(stdout, "mcnt: %lu, t-demux: %d, offset: %d, xeng: %d pointer: %lu\n", mcnt, time_demux_block, offset, xeng_id, hera_catcher_input_databuf_idx32(time_demux_block, (xeng_id % N_XENGINES_PER_TIME), offset));
     //fprintf(stdout, "offset is %lu\n", (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id/TIME_DEMUX, offset)));
     //fprintf(stdout, "offset: %d\n", hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset));
     

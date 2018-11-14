@@ -937,6 +937,7 @@ static void *run(hashpipe_thread_args_t * args)
                 // auto_indices default to -1. Use this test to delete
                 // redis keys for invalid antennas
                 if (auto_indices[a] >= 0) {
+                    //fprintf(stdout, "Reporting autocorrs for ant %d (bl %d) to redis\n", a, auto_indices[a]);
                     for (xeng=0; xeng<N_XENGINES_PER_TIME; xeng++) {
                         for (xchan=0; xchan<N_CHAN_PROCESSED/N_XENGINES_PER_TIME; xchan++) {
                             chan = xeng*N_CHAN_PROCESSED/N_XENGINES_PER_TIME + xchan;
@@ -944,6 +945,7 @@ static void *run(hashpipe_thread_args_t * args)
                             // Don't divide out integration over frequency channels (if any)
                             auto_corr_n[chan] = (float) db_in32[hera_catcher_input_databuf_by_bl_idx32(xeng, auto_indices[a]) + (N_STOKES*2*TIME_DEMUX*xchan)] / acc_len;
                             auto_corr_e[chan] = (float) db_in32[hera_catcher_input_databuf_by_bl_idx32(xeng, auto_indices[a]) + (N_STOKES*2*TIME_DEMUX*xchan) + 2] / acc_len;
+                            fprintf(stdout, "ant %d: chan %d, xeng: %d, xchan: %d, val: %f\n", a, chan, xeng, xchan, auto_corr_n[chan]);
                         }
                     }
                     reply = redisCommand(c, "SET auto:%dn %b", a, auto_corr_n, (size_t) (sizeof(float) * N_CHAN_PROCESSED));

@@ -36,7 +36,7 @@
 #define N_BYTES_PER_BLOCK            (N_TIME_PER_BLOCK * N_CHAN_PER_X * N_INPUTS)
 #define N_PACKETS_PER_BLOCK          (N_BYTES_PER_BLOCK / N_BYTES_PER_PACKET)
 #define N_PACKETS_PER_BLOCK_PER_F    (N_PACKETS_PER_BLOCK * N_INPUTS_PER_PACKET / 2 / N_FENGINES)
-// Number of X-engines per time slice. E.g. for HERA: 8.
+// Number of X-engines per time slice. E.g. for HERA: 16.
 #define N_XENGINES_PER_TIME (N_CHAN_TOTAL / N_CHAN_PER_X)
 
 // Validate packet dimensions
@@ -294,7 +294,7 @@ typedef struct hera_catcher_input_databuf {
 #define hera_catcher_input_databuf_idx32(t, x, o) \
   (2L*TIME_DEMUX*(VIS_MATRIX_ENTRIES_PER_CHAN * (N_CHAN_PER_X/XENG_CHAN_SUM)*(x)) + (TIME_DEMUX*((o)>>2)) + (2*N_STOKES*(t)))
 #define hera_catcher_input_databuf_by_bl_idx32(x, b) \
-  (2L*TIME_DEMUX*(N_CHAN_PER_X/XENG_CHAN_SUM)*((VIS_MATRIX_ENTRIES_PER_CHAN * (x)) + (b)))
+  (2L*TIME_DEMUX*(N_CHAN_PER_X/XENG_CHAN_SUM)*((VIS_MATRIX_ENTRIES_PER_CHAN * (x)) + (N_STOKES*b)))
 
 /*
  * INPUT BUFFER FUNCTIONS
