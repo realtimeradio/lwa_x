@@ -40,6 +40,7 @@
 #define N_CHAN_PROCESSED (N_CHAN_TOTAL / (CATCHER_CHAN_SUM * XENG_CHAN_SUM))
 #define N_CHAN_RECEIVED (N_CHAN_TOTAL / XENG_CHAN_SUM)
 #define N_BL_PER_WRITE (32)
+//#define SKIP_DIFF
 
 #define CPTR(VAR,CONST) ((VAR)=(CONST),&(VAR))
 
@@ -576,42 +577,48 @@ This function sums over CATCHER_SUM_CHANS as it transposes, and computes even/od
 #define corr_databuf_data_idx(c, b) (2*2*N_STOKES*(c + (b*N_CHAN_RECEIVED)))
 static void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, int bl) {
     
-    int c, b, s, i, chan;
+    int b, chan;
     // Buffers for a single full-stokes baseline
-    int sum_even[N_STOKES][2], sum_odd[N_STOKES][2];
+#if CATCHER_CHAN_SUM != 1
+    int c;
+    __m256i sum_even = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
+    __m256i sum_odd  = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
+#endif
+    __m256i val_even = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
+    __m256i val_odd  = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
 
-    int32_t *in_even = in + corr_databuf_data_idx(0,bl);
-    int32_t *in_odd = in_even + N_STOKES*2;
-    //__m256i sum_even = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
-    //__m256i sum_odd  = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
+    __m256i *in_even256  = (__m256i *)(in + corr_databuf_data_idx(0,bl));
+    __m256i *out_sum256  = (__m256i *)out_sum;
+    __m256i *out_diff256 = (__m256i *)out_diff;
 
     for(b=0; b<N_BL_PER_WRITE; b++) {
-        for (chan=0; chan<N_CHAN_PROCESSED; chan+=4) {
+        for (chan=0; chan<N_CHAN_PROCESSED; chan++) {
             // Load all the values for an accumulation
+#if CATCHER_CHAN_SUM != 1
             for(c=0; c<CATCHER_CHAN_SUM; c++) {
-                for (s=0; s<N_STOKES; s++) {
-                    for (i=0; i<2; i++) {
-                        if(c==0) {
-                            sum_even[s][i] = in_even[2*2*c*N_STOKES + 2*s + i];
-                            sum_odd[s][i]  =  in_odd[2*2*c*N_STOKES + 2*s + i];
-                        } else {
-                            sum_even[s][i] += in_even[2*2*c*N_STOKES + 2*s + i];
-                            sum_odd[s][i]  +=  in_odd[2*2*c*N_STOKES + 2*s + i];
-                        }
-                    }
+                val_even = _mm256_load_si256(in_even256 + c);
+                val_odd  = _mm256_load_si256(in_even256 + 1 + c);
+                if(c==0) {
+                    sum_even = val_even;
+                    sum_odd = val_odd;
+                } else {
+                    sum_even = _mm256_add_epi32(sum_even, val_even);
+                    sum_odd = _mm256_add_epi32(sum_even, val_odd);
                 }
-            }
 
-            // Write to output and clear accumulators
-            for (s=0; s<N_STOKES; s++) {
-                for (i=0; i<2; i++) {
-                    out_sum[(b*N_CHAN_PROCESSED + chan)*N_STOKES*2 + 2*s + i] = sum_even[s][i] + sum_odd[s][i];
-                    out_diff[(b*N_CHAN_PROCESSED + chan)*N_STOKES*2 + 2*s + i] = sum_even[s][i] - sum_odd[s][i];
-                }
             }
+            // Write to output
+            _mm256_store_si256(out_sum256  + (b*N_CHAN_PROCESSED + chan), _mm256_add_epi32(sum_even, sum_odd));
+            _mm256_store_si256(out_diff256 + (b*N_CHAN_PROCESSED + chan), _mm256_sub_epi32(sum_even, sum_odd));
+#else
+            // Load and write sum/diff
+            val_even = _mm256_load_si256(in_even256);
+            val_odd  = _mm256_load_si256(in_even256 + 1);
+            _mm256_store_si256(out_sum256  + (b*N_CHAN_PROCESSED + chan), _mm256_add_epi32(val_even, val_odd));
+            _mm256_store_si256(out_diff256 + (b*N_CHAN_PROCESSED + chan), _mm256_sub_epi32(val_even, val_odd));
+#endif
 
-            in_even += (CATCHER_CHAN_SUM * 2 * N_STOKES * 2);
-            in_odd  = in_even + N_STOKES*2;
+            in_even256 += (CATCHER_CHAN_SUM * 2);
         }
     }
 }
@@ -777,6 +784,10 @@ static void *run(hashpipe_thread_args_t * args)
             }
         }
 
+        // reset elapsed time counters
+        elapsed_w_ns = 0;
+        elapsed_t_ns = 0.0;
+
         // Get template filename from redis
         hashpipe_status_lock_safe(&st);
         hgets(st.buf, "HDF5TPLT", 128, template_fname);
@@ -897,7 +908,9 @@ static void *run(hashpipe_thread_args_t * args)
             //write data to file
 	    clock_gettime(CLOCK_MONOTONIC, &w_start);
             write_channels(&sum_file, file_nts-1, bl, mem_space, (uint64_t *)bl_buf_sum); 
+#ifndef SKIP_DIFF
             write_channels(&diff_file, file_nts-1, bl, mem_space, (uint64_t *)bl_buf_diff); 
+#endif
 	    clock_gettime(CLOCK_MONOTONIC, &w_stop);
             flags = flags;
             nsamples = nsamples;
