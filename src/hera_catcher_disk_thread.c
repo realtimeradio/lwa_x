@@ -565,7 +565,7 @@ static void compute_uvw_array(double* uvw, enu_t *ant_pos, bl_t *bl_order) {
 
 /*
 Given an entire input buffer --
-1 time x N_bls x N_chans x 2(even/odd samples) x N_stokes x 2(real/imag)
+1 time x n-xengines x N_bls x N_chans-per-x x 2(even/odd samples) x N_stokes x 2(real/imag)
 Write --
 even/odd-sum x 1 bl x N_chans x N_stokes x 2 (real/imag) into `out_sum`.
 even/odd-diff dx 1 bl x N_chans x N_stokes x 2 (real/imag) into `out_diff`.
@@ -574,10 +574,9 @@ This function sums over CATCHER_SUM_CHANS as it transposes, and computes even/od
 
 */
 // Get the even-sample / first-pol / first-complexity of the correlatoion buffer for chan `c` baseline `b`
-#define corr_databuf_data_idx(c, b) (2*2*N_STOKES*(c + (b*N_CHAN_RECEIVED)))
 static void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, int bl) {
     
-    int b, chan;
+    int b, chan, xeng, xchan;
     // Buffers for a single full-stokes baseline
 #if CATCHER_CHAN_SUM != 1
     int c;
@@ -587,38 +586,43 @@ static void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, 
     __m256i val_even = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
     __m256i val_odd  = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
 
-    __m256i *in_even256  = (__m256i *)(in + corr_databuf_data_idx(0,bl));
+    __m256i *in_even256;
     __m256i *out_sum256  = (__m256i *)out_sum;
     __m256i *out_diff256 = (__m256i *)out_diff;
 
     for(b=0; b<N_BL_PER_WRITE; b++) {
-        for (chan=0; chan<N_CHAN_PROCESSED; chan++) {
-            // Load all the values for an accumulation
+        for (xeng=0; xeng<N_XENGINES_PER_TIME; xeng++) {
+            in_even256  = (__m256i *)(in + hera_catcher_input_databuf_by_bl_idx32(xeng,bl));
+            //FIXME: The following only works if N_CHAN_PROCESSED/N_XENGINES_PER_TIME is divisible by CATCHER_CHAN_SUM
+            for (xchan=0; xchan<N_CHAN_PROCESSED/N_XENGINES_PER_TIME; xchan++) {
+                chan = xeng*N_CHAN_PROCESSED/N_XENGINES_PER_TIME + xchan;
+                // Load all the values for an accumulation
 #if CATCHER_CHAN_SUM != 1
-            for(c=0; c<CATCHER_CHAN_SUM; c++) {
-                val_even = _mm256_load_si256(in_even256 + c);
-                val_odd  = _mm256_load_si256(in_even256 + 1 + c);
-                if(c==0) {
-                    sum_even = val_even;
-                    sum_odd = val_odd;
-                } else {
-                    sum_even = _mm256_add_epi32(sum_even, val_even);
-                    sum_odd = _mm256_add_epi32(sum_even, val_odd);
-                }
+                for(c=0; c<CATCHER_CHAN_SUM; c++) {
+                    val_even = _mm256_load_si256(in_even256 + 2*c);
+                    val_odd  = _mm256_load_si256(in_even256 + 2*c + 1);
+                    if(c==0) {
+                        sum_even = val_even;
+                        sum_odd = val_odd;
+                    } else {
+                        sum_even = _mm256_add_epi32(sum_even, val_even);
+                        sum_odd = _mm256_add_epi32(sum_even, val_odd);
+                    }
 
-            }
-            // Write to output
-            _mm256_store_si256(out_sum256  + (b*N_CHAN_PROCESSED + chan), _mm256_add_epi32(sum_even, sum_odd));
-            _mm256_store_si256(out_diff256 + (b*N_CHAN_PROCESSED + chan), _mm256_sub_epi32(sum_even, sum_odd));
+                }
+                // Write to output
+                _mm256_store_si256(out_sum256  + (b*N_CHAN_PROCESSED + chan), _mm256_add_epi32(sum_even, sum_odd));
+                _mm256_store_si256(out_diff256 + (b*N_CHAN_PROCESSED + chan), _mm256_sub_epi32(sum_even, sum_odd));
 #else
-            // Load and write sum/diff
-            val_even = _mm256_load_si256(in_even256);
-            val_odd  = _mm256_load_si256(in_even256 + 1);
-            _mm256_store_si256(out_sum256  + (b*N_CHAN_PROCESSED + chan), _mm256_add_epi32(val_even, val_odd));
-            _mm256_store_si256(out_diff256 + (b*N_CHAN_PROCESSED + chan), _mm256_sub_epi32(val_even, val_odd));
+                // Load and write sum/diff
+                val_even = _mm256_load_si256(in_even256);
+                val_odd  = _mm256_load_si256(in_even256 + 1);
+                _mm256_store_si256(out_sum256  + (b*N_CHAN_PROCESSED + chan), _mm256_add_epi32(val_even, val_odd));
+                _mm256_store_si256(out_diff256 + (b*N_CHAN_PROCESSED + chan), _mm256_sub_epi32(val_even, val_odd));
 #endif
 
-            in_even256 += (CATCHER_CHAN_SUM * 2);
+                in_even256 += (CATCHER_CHAN_SUM * TIME_DEMUX);
+            }
         }
     }
 }
@@ -731,13 +735,14 @@ static void *run(hashpipe_thread_args_t * args)
     int rv;
     int curblock_in=0;
     int bl;
-    int a, chan;
+    int a, xeng, xchan, chan;
     double curr_file_time = -1.0;
     double file_start_t, file_stop_t, file_duration;
     int64_t file_obs_id, file_nblts=0, file_nts=0;
 
     hdf5_id_t sum_file, diff_file;
     
+    // aligned_alloc because we're going to use 256-bit AVX instructions
     int32_t *bl_buf_sum  = (int32_t *)aligned_alloc(32, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
     int32_t *bl_buf_diff = (int32_t *)aligned_alloc(32, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
 
@@ -932,11 +937,14 @@ static void *run(hashpipe_thread_args_t * args)
                 // auto_indices default to -1. Use this test to delete
                 // redis keys for invalid antennas
                 if (auto_indices[a] >= 0) {
-                    for (chan=0; chan<N_CHAN_PROCESSED; chan++) {
-                        // Divide out accumulation length.
-                        // Don't divide out integration over frequency channels (if any)
-                        auto_corr_n[chan] = (float) db_in32[corr_databuf_data_idx(chan, auto_indices[a])] / acc_len;
-                        auto_corr_e[chan] = (float) db_in32[corr_databuf_data_idx(chan, auto_indices[a]) + 2] / acc_len;
+                    for (xeng=0; xeng<N_XENGINES_PER_TIME; xeng++) {
+                        for (xchan=0; xchan<N_CHAN_PROCESSED/N_XENGINES_PER_TIME; xchan++) {
+                            chan = xeng*N_CHAN_PROCESSED/N_XENGINES_PER_TIME + xchan;
+                            // Divide out accumulation length.
+                            // Don't divide out integration over frequency channels (if any)
+                            auto_corr_n[chan] = (float) db_in32[hera_catcher_input_databuf_by_bl_idx32(xeng, auto_indices[a]) + (N_STOKES*2*TIME_DEMUX*xchan)] / acc_len;
+                            auto_corr_e[chan] = (float) db_in32[hera_catcher_input_databuf_by_bl_idx32(xeng, auto_indices[a]) + (N_STOKES*2*TIME_DEMUX*xchan) + 2] / acc_len;
+                        }
                     }
                     reply = redisCommand(c, "SET auto:%dn %b", a, auto_corr_n, (size_t) (sizeof(float) * N_CHAN_PROCESSED));
                     freeReplyObject(reply);

@@ -155,7 +155,7 @@ static inline uint64_t process_packet(
 	hera_catcher_input_databuf_t *hera_catcher_input_databuf_p, unsigned char*p_frame)
 {
 
-    int i;
+    int i, j;
     int rv;
     static block_info_t binfo;
     packet_header_t *packet_header_p;
@@ -246,16 +246,23 @@ static inline uint64_t process_packet(
     binfo.block_packet_counter[binfo.block_i]++;
 
     // Copy data into buffer
-    dest_p = (uint32_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (hera_catcher_input_databuf_idx32(xeng_id, offset));
+    dest_p = (uint32_t *)(hera_catcher_input_databuf_p->block[binfo.block_i].data) + (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id / TIME_DEMUX, offset));
     payload_p = (uint32_t *)(PKT_UDP_DATA(p_frame) + sizeof(packet_header_t));
+    if (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id / TIME_DEMUX, offset) >= 455344128L) {
+        fprintf(stderr, "databuf offset outside allowed range!\n");
+        fprintf(stderr, "offset is %lu\n", (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id/TIME_DEMUX, offset)));
+        fprintf(stderr, "mcnt: %lu, t-demux: %d, offset: %d, xeng: %d\n", mcnt, time_demux_block, offset, xeng_id/TIME_DEMUX);
+    }
     //fprintf(stdout, "mcnt: %lu, t-demux: %d, offset: %d, xeng: %d (%d,%d), payload:%d, block:%d\n", mcnt, time_demux_block, offset, xeng_id, ((int32_t *)payload_p)[0], ((int32_t*)payload_p)[1], payload_len, binfo.block_i);
-    //fprintf(stdout, "offset is %u\n", (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id, offset)));
+    //fprintf(stdout, "offset is %lu\n", (hera_catcher_input_databuf_idx32(time_demux_block, xeng_id/TIME_DEMUX, offset)));
     //fprintf(stdout, "offset: %d\n", hera_catcher_input_databuf_idx64(time_demux_block, packet_header_p->xeng_id, packet_header_p->offset));
     
-    //memcpy(dest_p, payload_p, payload_len);
     // Copy with byte swap
-    for(i=0; i<(payload_len >> 2); i++){
-        dest_p[i] = be32toh(payload_p[i]);
+    for(i=0; i<(payload_len >> 2); i+=8){
+        for (j=0; j<8; j++) {
+            dest_p[TIME_DEMUX*i + j] = be32toh(payload_p[i + j]);
+            //dest_p[i + j] = be32toh(payload_p[i + j]);
+        }
     }
     
     return netmcnt;

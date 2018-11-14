@@ -388,12 +388,12 @@ static void *run(hashpipe_thread_args_t * args)
         pktdata_t * p_out = pkt.data;
         clock_gettime(CLOCK_MONOTONIC, &pkt_start);
         // Iterate over blocks of XENG_CHAN_SUM channels. An inner loop will sum these
-        for(casper_chan=0; casper_chan<N_CHAN_PER_X; casper_chan=casper_chan+XENG_CHAN_SUM) {
-          // This used to de-interleave channels.  De-interleaving is no longer
-          // needed, but we choose to continue maintaining the distinction
-          // between casper_chan and gpu_chan.
-          gpu_chan = casper_chan;
-          for(baseline=0; baseline<N_CASPER_COMPLEX_PER_CHAN; baseline++) {
+        for(baseline=0; baseline<N_CASPER_COMPLEX_PER_CHAN; baseline++) {
+          for(casper_chan=0; casper_chan<N_CHAN_PER_X; casper_chan=casper_chan+XENG_CHAN_SUM) {
+            // This used to de-interleave channels.  De-interleaving is no longer
+            // needed, but we choose to continue maintaining the distinction
+            // between casper_chan and gpu_chan.
+            gpu_chan = casper_chan;
             off_t idx_regtile = idx_map[baseline];
             for(sum_chan=0; sum_chan<XENG_CHAN_SUM; sum_chan++) {
               if (sum_chan == 0) {
