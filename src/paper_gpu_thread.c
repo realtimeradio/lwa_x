@@ -145,7 +145,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
               hashpipe_status_unlock_safe(&st);
               // Compute last mcount
               last_mcount = start_mcount + TIME_DEMUX*(int_count-N_TIME_PER_BLOCK);// * N_SUB_BLOCKS_PER_INPUT_BLOCK;
-              middle_mcount = (last_mcount - start_mcount + N_TIME_PER_BLOCK) >> 2;
+              middle_mcount = (last_mcount + start_mcount + TIME_DEMUX*N_TIME_PER_BLOCK) >> 1;
               fprintf(stdout, "Accumulating %d spectra to mcount: %lu\n", int_count, last_mcount);
             // Else (missed starting mcount)
             } else {
