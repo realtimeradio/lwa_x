@@ -51,7 +51,7 @@ cpu_mask = '0x0004'
 run_on_hosts([args.host], ['taskset', cpu_mask, 'hashpipe_redis_gateway.rb', '-g', args.host, '-i', '0'])
 
 # Wait for the gateways to come up
-time.sleep(5)
+time.sleep(10)
 
 # Generate the meta-data template
 run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
