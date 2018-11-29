@@ -294,7 +294,7 @@ typedef struct hera_catcher_input_databuf {
 #define hera_catcher_input_databuf_idx32(t, x, o) \
   (2L*TIME_DEMUX*(VIS_MATRIX_ENTRIES_PER_CHAN * (N_CHAN_PER_X/XENG_CHAN_SUM)*(x)) + (TIME_DEMUX*((o)>>2)) + (2*N_STOKES*(t)))
 #define hera_catcher_input_databuf_by_bl_idx32(x, b) \
-  (2L*TIME_DEMUX*(N_CHAN_PER_X/XENG_CHAN_SUM)*((VIS_MATRIX_ENTRIES_PER_CHAN * (x)) + (N_STOKES*b)))
+  (2L*TIME_DEMUX*(N_CHAN_PER_X/XENG_CHAN_SUM)*((VIS_MATRIX_ENTRIES_PER_CHAN * (x)) + (N_STOKES*(b))))
 
 /*
  * INPUT BUFFER FUNCTIONS

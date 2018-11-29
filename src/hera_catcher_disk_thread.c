@@ -592,7 +592,7 @@ static void transpose_bl_chan(int32_t *in, int32_t *out_sum, int32_t *out_diff, 
 
     for(b=0; b<N_BL_PER_WRITE; b++) {
         for (xeng=0; xeng<N_XENGINES_PER_TIME; xeng++) {
-            in_even256  = (__m256i *)(in + hera_catcher_input_databuf_by_bl_idx32(xeng,bl));
+            in_even256  = (__m256i *)(in + hera_catcher_input_databuf_by_bl_idx32(xeng, bl+b));
             //FIXME: The following only works if N_CHAN_PROCESSED/N_XENGINES_PER_TIME is divisible by CATCHER_CHAN_SUM
             for (xchan=0; xchan<N_CHAN_PROCESSED/N_XENGINES_PER_TIME; xchan++) {
                 chan = xeng*N_CHAN_PROCESSED/N_XENGINES_PER_TIME + xchan;
