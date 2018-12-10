@@ -44,6 +44,8 @@
 
 #define CPTR(VAR,CONST) ((VAR)=(CONST),&(VAR))
 
+#define MAXTIMES 64
+
 static hid_t complex_id;
 static hid_t boolenumtype;
 //static hid_t boolean_id;
@@ -140,7 +142,7 @@ see https://gist.github.com/simleb/5205083/
 static void make_extensible_hdf5(hdf5_id_t *id)
 {
     hsize_t dims[N_DATA_DIMS] = {0 * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 1,  N_CHAN_PROCESSED, N_STOKES};
-    hsize_t max_dims[N_DATA_DIMS] = {16 * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 1, N_CHAN_PROCESSED, N_STOKES};
+    hsize_t max_dims[N_DATA_DIMS] = {MAXTIMES * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 1, N_CHAN_PROCESSED, N_STOKES};
     hsize_t chunk_dims[N_DATA_DIMS] = {N_BL_PER_WRITE, 1, N_CHAN_PROCESSED, N_STOKES};
 
     hid_t file_space = H5Screate_simple(N_DATA_DIMS, dims, max_dims);
@@ -191,7 +193,7 @@ static void make_extensible_hdf5(hdf5_id_t *id)
 static void make_extensible_headers_hdf5(hdf5_id_t *id)
 {
     hsize_t dims1[DIM1] = {0};
-    hsize_t max_dims1[DIM1]   = {16 * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES};
+    hsize_t max_dims1[DIM1]   = {MAXTIMES * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES};
     hsize_t chunk_dims1[DIM1] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES};
 
     hid_t file_space = H5Screate_simple(DIM1, dims1, max_dims1);
@@ -231,7 +233,7 @@ static void make_extensible_headers_hdf5(hdf5_id_t *id)
 
     /* And now uvw_array, which has shape Nblts x 3 */
     hsize_t dims2[DIM2] = {0, 3};
-    hsize_t max_dims2[DIM2]   = {16 * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 3};
+    hsize_t max_dims2[DIM2]   = {MAXTIMES * VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 3};
     hsize_t chunk_dims2[DIM2] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 3};
 
     file_space = H5Screate_simple(DIM2, dims2, max_dims2);
@@ -892,6 +894,10 @@ static void *run(hashpipe_thread_args_t * args)
         file_duration = file_stop_t - file_start_t; //really want a +1 * acc_len here
         file_nblts += VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES;
         file_nts += 1;
+
+        if (file_nts > MAXTIMES) {
+            hashpipe_error(__FUNCTION__, "Writing time sample %d but maximum hardcoded limit is %d\n", file_nts, MAXTIMES);
+        }
 
         // extend the datasets with time axes and update filespace IDs
         extend_datasets(&sum_file, file_nts);
