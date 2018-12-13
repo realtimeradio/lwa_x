@@ -23,7 +23,7 @@
 
 #include "hashpipe.h"
 #include "paper_databuf.h"
-//#include "lzf_filter.h"
+#include "lzf_filter.h"
 
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
@@ -146,15 +146,22 @@ static void make_extensible_hdf5(hdf5_id_t *id)
     hsize_t chunk_dims[N_DATA_DIMS] = {N_BL_PER_WRITE, 1, N_CHAN_PROCESSED, N_STOKES};
 
     hid_t file_space = H5Screate_simple(N_DATA_DIMS, dims, max_dims);
+
+    // make plist for LZF datasets
+    int r;
+    r = register_lzf();
+    if (r<0) {
+      hashpipe_error(__FUNCTION__, "Failed to register LZF filter");
+      pthread_exit(NULL);
+    }
+    hid_t plist_lzf = H5Pcreate(H5P_DATASET_CREATE);
+    H5Pset_chunk(plist_lzf, N_DATA_DIMS, chunk_dims);
+    H5Pset_shuffle(plist_lzf);
+    H5Pset_filter(plist_lzf, H5PY_FILTER_LZF, H5Z_FLAG_OPTIONAL, 0, NULL);
+
+    // make plist for non-compressed datasets
     hid_t plist = H5Pcreate(H5P_DATASET_CREATE);
-
-    //hid_t plist_lzf = H5Pcreate(H5P_DATASET_CREATE);
-    //H5Pset_chunk(plist_lzf, N_DATA_DIMS, chunk_dims);
-    //H5Pset_shuffle(plist_lzf);
-    //H5Pset_filter(plist_lzf, H5PY_FILTER_LZF, H5Z_FLAG_OPTIONAL, 0, NULL);
-
     H5Pset_layout(plist, H5D_CHUNKED);
-
     H5Pset_chunk(plist, N_DATA_DIMS, chunk_dims);
 
     // Now we have the dataspace properties, create the datasets
@@ -164,19 +171,20 @@ static void make_extensible_hdf5(hdf5_id_t *id)
         pthread_exit(NULL);
     }
 
-    id->nsamples_did = H5Dcreate(id->data_gid, "nsamples", H5T_IEEE_F32LE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+    id->nsamples_did = H5Dcreate(id->data_gid, "nsamples", H5T_IEEE_F32LE, file_space, H5P_DEFAULT, plist_lzf, H5P_DEFAULT);
     if (id->nsamples_did < 0) {
         hashpipe_error(__FUNCTION__, "Failed to create nsamples dataset");
         pthread_exit(NULL);
     }
 
-    id->flags_did = H5Dcreate(id->data_gid, "flags", boolenumtype, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+    id->flags_did = H5Dcreate(id->data_gid, "flags", boolenumtype, file_space, H5P_DEFAULT, plist_lzf, H5P_DEFAULT);
     if (id->flags_did < 0) {
         hashpipe_error(__FUNCTION__, "Failed to create flags dataset");
         pthread_exit(NULL);
     }
 
     H5Pclose(plist);
+    H5Pclose(plist_lzf);
     H5Sclose(file_space);
 }
 
