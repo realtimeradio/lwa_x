@@ -70,16 +70,39 @@ def get_cm_info():
     return h.get_cminfo_correlator()
 
 def get_antpos_enu(antpos, lat, lon, alt):
+    """
+    Compute the antenna positions in ENU coordinates from rotECEF.
+
+    Args:
+      antpos -- array of antenna positions. Should have shape (Nants, 3).
+      lat (float) -- telescope latitude, in radians
+      lon (float) -- telescope longitude, in radians
+      alt (float) -- telescope altitude, in meters
+
+    Returns:
+      enu -- array of antenna positions in ENU frame. Has shape (Nants, 3).
+    """
     import pyuvdata.utils as uvutils
     ecef = uvutils.ECEF_from_rotECEF(antpos, lon)
     enu  = uvutils.ENU_from_ECEF(ecef, lat, lon, alt)
     return enu
 
 def get_telescope_location_ecef(lat, lon, alt):
+    """
+    Compute the telescope location in ECEF coordinates from lat/lon/alt.
+
+    Args:
+      lat (float) -- telescope latitude, in radians
+      lon (float) -- telescope longitude, in radians
+      alt (float) -- telescope altitude, in meters
+
+    Returns:
+       ecef -- len(3) array of x,y,z values of telescope location in ECEF
+           coordinates, in meters.
+    """
     import pyuvdata.utils as uvutils
-    xyz = uvutils.XYZ_from_LatLonAlt(lat, lon, alt)
-    ecef = uvutils.ECEF_from_ENU(xyz, lat, lon, alt)
-    return ecef
+    return uvutils.XYZ_from_LatLonAlt(lat, lon, alt)
+
 
 def create_header(h5, use_cm=False, use_redis=False):
     """
@@ -106,16 +129,18 @@ def create_header(h5, use_cm=False, use_redis=False):
     freqs = np.linspace(0, 250e6, NCHANS_F + 1)[1536 : 1536 + (8192 // 4 * 3)]
     # average over channels
     freqs = freqs.reshape(NCHANS, NCHAN_SUM).sum(axis=1) / NCHAN_SUM
-    
+
 
     if use_cm:
         cminfo = get_cm_info()
         # add the enu co-ords
-        cminfo["antenna_positions_enu"] = get_antpos_enu(cminfo["antenna_positions"], cminfo["cofa_lat"],
-                                                             cminfo["cofa_lon"], cminfo["cofa_alt"])
+        lat = cminfo["cofa_lat"] * np.pi / 180.
+        lon = cminfo["cofa_lat"] * np.pi / 180.
+        cminfo["antenna_positions_enu"] = get_antpos_enu(cminfo["antenna_positions"], lat, lon,
+                                                         cminfo["cofa_alt"])
     else:
         cminfo = None
-    
+
     if use_redis:
         r = redis.Redis("redishost")
         fenginfo = r.hgetall("init_configuration")
