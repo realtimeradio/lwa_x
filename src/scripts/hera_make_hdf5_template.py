@@ -87,6 +87,21 @@ def get_antpos_enu(antpos, lat, lon, alt):
     enu  = uvutils.ENU_from_ECEF(ecef, lat, lon, alt)
     return enu
 
+def get_antpos_ecef(antpos, lon):
+    """
+    Compute the antenna positions in ECEF coordinates from rotECEF
+
+    Args:
+      antpos -- array of antenna positions. Should have shape (Nants, 3).
+      lon (float) -- telescope longitude, in radians
+
+    Returns:
+      ecef -- array of antenna positions in ECEF frame. Has shape (Nants, 3)
+    """
+    import pyuvdata.utils as uvutils
+    ecef = uvutils.ECEF_from_rotECEF(antpos, lon)
+    return ecef
+
 def get_telescope_location_ecef(lat, lon, alt):
     """
     Compute the telescope location in ECEF coordinates from lat/lon/alt.
@@ -183,13 +198,14 @@ def create_header(h5, use_cm=False, use_redis=False):
         lon = cminfo['cofa_lon'] * np.pi / 180.
         alt = cminfo['cofa_alt']
         telescope_location_ecef = get_telescope_location_ecef(lat, lon, alt)
+        antpos_ecef = get_antpos_ecef(cminfo["antenna_positions"], lon)
         header.create_dataset("altitude",    dtype="<f8", data=cminfo['cofa_alt'])
         ant_pos = -1 * np.ones([NANTS,3], dtype=np.int64) * telescope_location_ecef
         ant_pos_enu = -1 * np.ones([NANTS,3], dtype=np.int64) * telescope_location_ecef
         ant_names = ["NONE"]*NANTS
         ant_nums = [-1]*NANTS
         for n, i in enumerate(cminfo["antenna_numbers"]):
-            ant_pos[i]     = cminfo["antenna_positions"][n] - telescope_location_ecef
+            ant_pos[i]     = antpos_ecef[n] - telescope_location_ecef
             ant_names[i]   = np.string_(cminfo["antenna_names"][n])
             ant_nums[i]    = cminfo["antenna_numbers"][n]
             ant_pos_enu[i] = cminfo["antenna_positions_enu"][n]
