@@ -32,7 +32,6 @@ parser.add_argument('-t', dest='hdf5template', type=str, default='/tmp/template.
                     help='Place to put HDF5 header template file')
 parser.add_argument('-n', dest='nfiles', type=int, default=10, help='Number of files of data to capture')
 parser.add_argument('-m', dest='msperfile', type=int, default=60000, help='Number of ms of data per file')
-parser.add_argument('--tag', dest='tag', type=str, default='None', help='User-supplied tag for this data run')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
 
@@ -56,7 +55,7 @@ run_on_hosts([args.host], ['taskset', cpu_mask, 'hashpipe_redis_gateway.rb', '-g
 time.sleep(15)
 
 # Generate the meta-data template
-run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-t', args.tag, '-c', '-r', args.hdf5template], wait=True)
+run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
 
 #Configure runtime parameters
 catcher_dict = {

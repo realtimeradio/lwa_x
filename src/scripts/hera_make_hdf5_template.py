@@ -119,7 +119,7 @@ def get_telescope_location_ecef(lat, lon, alt):
     return uvutils.XYZ_from_LatLonAlt(lat, lon, alt)
 
 
-def create_header(h5, use_cm=False, use_redis=False, tag=None):
+def create_header(h5, use_cm=False, use_redis=False):
     """
     Create an HDF5 file with appropriate datasets in a "Header"
     data group.
@@ -183,8 +183,7 @@ def create_header(h5, use_cm=False, use_redis=False, tag=None):
     header.create_dataset("antenna_diameters", dtype="<f8", data=[ANT_DIAMETER] * NANTS)
     header.create_dataset("channel_width",     dtype="<f8", data=channel_width)
     header.create_dataset("freq_array",        dtype="<f8", shape=(1, NCHANS), data=freqs) #TODO Get from config
-    header.create_dataset("history", data=np.string_("%s: Template file created\n" % time.ctime()))
-    header.create_dataset("tag", data=np.string_(tag))
+    header.create_dataset("history",   data=np.string_("%s: Template file created\n" % time.ctime()))
     header.create_dataset("instrument", data=np.string_(INSTRUMENT))
     #header.create_dataset("integration_time", dtype="<f8", data=INT_TIME)
     header.create_dataset("object_name", data=np.string_("zenith"))
@@ -265,8 +264,7 @@ if __name__ == "__main__":
                         help ='Use this flag to get up-to-date (hopefully) array meta-data from the C+M system')
     parser.add_argument('-r', dest='use_redis', action='store_true', default=False,
                         help ='Use this flag to get up-to-date (hopefully) f-engine meta-data from a redis server at `redishost`')
-    parser.add_argument('-t', dest='tag', type=str, default='None', help='User-supplied tag for this header')
     args = parser.parse_args()
 
     with h5py.File(args.output, "w") as h5:
-        create_header(h5, use_cm=args.use_cminfo, use_redis=args.use_redis, tag=args.tag)
+        create_header(h5, use_cm=args.use_cminfo, use_redis=args.use_redis)
