@@ -300,7 +300,7 @@ static hid_t open_hdf5_from_template(char * sourcename, char * destname)
 
 
 #define VERSION_BYTES 32
-static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, uint64_t file_obs_id, double file_start_t) {
+static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, uint64_t file_obs_id, double file_start_t, char* tag) {
     hid_t dataset_id;
     hid_t memtype;
     hid_t stat;
@@ -334,6 +334,25 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     make_extensible_headers_hdf5(id);
     
     // Write meta-data values we know at file-open
+    // Write data tag
+    memtype = H5Tcopy(H5T_C_S1);
+    stat = H5Tset_size(memtype, 128);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to set size of tag memtype");
+    }
+    dataset_id = H5Dopen(id->header_gid, "tag", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/tag");
+    }
+    stat = H5Dwrite(dataset_id, memtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, tag);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to write Header/tag");
+    }
+    stat = H5Dclose(dataset_id);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/tag");
+    }
+
     dataset_id = H5Dopen(id->extra_keywords_gid, "obs_id", H5P_DEFAULT);
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/obs_id");
@@ -694,10 +713,12 @@ static void *run(hashpipe_thread_args_t * args)
     uint32_t sync_time = 0;
     double gps_time;
     double julian_time;
+    // Variables for data collection parameters
     uint32_t acc_len;
     uint32_t nfiles;
     uint32_t file_cnt = 0;
     uint32_t trigger = 0;
+    char tag[128];
 
     // Variables for antenna positions and baseline orders. These should be provided
     // via the HDF5 header template.
@@ -779,8 +800,6 @@ static void *run(hashpipe_thread_args_t * args)
 
     while (run_threads()) {
         // Note waiting status,
-        // query integrating status
-        // and, if armed, start count
         hashpipe_status_lock_safe(&st);
         hputs(st.buf, status_key, "waiting");
         hashpipe_status_unlock_safe(&st);
@@ -817,6 +836,11 @@ static void *run(hashpipe_thread_args_t * args)
 
         // Get the number of files to write
         hgetu4(st.buf, "NFILES", &nfiles);
+        // Update the status with how many files we've already written
+        hputu4(st.buf, "NDONEFIL", file_cnt);
+
+        // Data tag
+        hgets(st.buf, "TAG", 128, tag);
 
         // Get the number of files to write
         hgetu4(st.buf, "TRIGGER", &trigger);
@@ -825,22 +849,20 @@ static void *run(hashpipe_thread_args_t * args)
         // If we have written all the files we were commanded to
         // start marking blocks as done and idling until a new
         // trigger is received
-        if (file_cnt >= nfiles) {
-            if (trigger) {
-                fprintf(stdout, "Catcher got a new trigger and will write %d files\n", nfiles);
-                file_cnt = 0;
-                hashpipe_status_lock_safe(&st);
-                hputu4(st.buf, "TRIGGER", 0);
-                hashpipe_status_unlock_safe(&st);
-            } else {
-                // Mark input block as free and advance
-                if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
-                    hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
-                    pthread_exit(NULL);
-                }
-                curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
-                continue;
+        if (trigger) {
+            fprintf(stdout, "Catcher got a new trigger and will write %d files\n", nfiles);
+            file_cnt = 0;
+            hashpipe_status_lock_safe(&st);
+            hputu4(st.buf, "TRIGGER", 0);
+            hashpipe_status_unlock_safe(&st);
+        } else if (file_cnt >= nfiles) {
+            // Mark input block as free and advance
+            if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+                hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
+                pthread_exit(NULL);
             }
+            curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
+            continue;
         }
 
         // Got a new data block, update status
@@ -886,10 +908,10 @@ static void *run(hashpipe_thread_args_t * args)
             file_obs_id = (int64_t)gps_time;
             sprintf(hdf5_fname, "zen.%7.5lf.uvh5", julian_time);
             fprintf(stdout, "Opening new file %s\n", hdf5_fname);
-            start_file(&sum_file, template_fname, hdf5_fname, file_obs_id, file_start_t);
+            start_file(&sum_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
             sprintf(hdf5_fname, "zen.%7.5lf.diff.uvh5", julian_time);
             fprintf(stdout, "Opening new file %s\n", hdf5_fname);
-            start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t);
+            start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
             // Get the antenna positions and baseline orders
             // These are needed for populating the ant_[1|2]_array and uvw_array
             get_ant_pos(&sum_file, ant_pos);
@@ -959,7 +981,7 @@ static void *run(hashpipe_thread_args_t * args)
                             // Don't divide out integration over frequency channels (if any)
                             auto_corr_n[chan] = (float) db_in32[hera_catcher_input_databuf_by_bl_idx32(xeng, auto_indices[a]) + (N_STOKES*2*TIME_DEMUX*xchan)] / acc_len;
                             auto_corr_e[chan] = (float) db_in32[hera_catcher_input_databuf_by_bl_idx32(xeng, auto_indices[a]) + (N_STOKES*2*TIME_DEMUX*xchan) + 2] / acc_len;
-                            fprintf(stdout, "ant %d: chan %d, xeng: %d, xchan: %d, val: %f\n", a, chan, xeng, xchan, auto_corr_n[chan]);
+                            //fprintf(stdout, "ant %d: chan %d, xeng: %d, xchan: %d, val: %f\n", a, chan, xeng, xchan, auto_corr_n[chan]);
                         }
                     }
                     reply = redisCommand(c, "SET auto:%dn %b", a, auto_corr_n, (size_t) (sizeof(float) * N_CHAN_PROCESSED));
