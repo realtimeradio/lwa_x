@@ -340,7 +340,7 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     if (stat < 0) {
         hashpipe_error(__FUNCTION__, "Failed to set size of tag memtype");
     }
-    dataset_id = H5Dopen(id->header_gid, "tag", H5P_DEFAULT);
+    dataset_id = H5Dopen(id->extra_keywords_gid, "tag", H5P_DEFAULT);
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to open Header/tag");
     }

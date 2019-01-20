@@ -252,6 +252,7 @@ def add_extra_keywords(obj, cminfo=None, fenginfo=None):
     extras.create_dataset("startt", dtype="<f8", data=0.0)   # filled in by receiver
     extras.create_dataset("stopt",  dtype="<f8", data=0.0)   # filled in by receiver
     extras.create_dataset("corr_ver",  dtype="|S32", data=np.string_("unknown"))# filled in by receiver
+    extras.create_dataset("tag",  dtype="|S128", data=np.string_("unknown"))# filled in by receiver
 
 if __name__ == "__main__":
     import argparse
