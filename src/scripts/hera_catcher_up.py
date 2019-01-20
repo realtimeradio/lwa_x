@@ -6,7 +6,7 @@ import argparse
 import subprocess
 
 perf_tweaker = 'tweak-perf-sn.sh'
-init = 'catcher_init.sh'
+init = 'hera_catcher_init.sh'
 python_source_cmd = ['source', '~/hera-venv/bin/activate']
 template_cmd = ['hera_make_hdf5_template.py']
 
@@ -30,8 +30,6 @@ parser.add_argument('host', type=str, help='Host to intialize')
 parser.add_argument('-r', dest='redishost', type=str, default='redishost', help='Host serving redis database')
 parser.add_argument('-t', dest='hdf5template', type=str, default='/tmp/template.h5', 
                     help='Place to put HDF5 header template file')
-parser.add_argument('-n', dest='nfiles', type=int, default=10, help='Number of files of data to capture')
-parser.add_argument('-m', dest='msperfile', type=int, default=60000, help='Number of ms of data per file')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
 
@@ -60,8 +58,7 @@ run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', '-r'
 #Configure runtime parameters
 catcher_dict = {
   'HDF5TPLT' : args.hdf5template,
-  'MSPERFIL' : args.msperfile,
-  'NFILES'   : args.nfiles,
+  'NFILES'   : 0,
   'SYNCTIME' : r['corr:feng_sync_time'],
   'INTTIME'  : r['corr:acc_len'],
   'TRIGGER'  : 0,

@@ -569,6 +569,8 @@ static int init(hashpipe_thread_args_t *args)
     hashpipe_status_t st = args->st;
 
     hashpipe_status_lock_safe(&st);
+    // Record version
+    hputs(st.buf, "GIT_VER", GIT_VERSION);
     // Get info from status buffer if present (no change if not present)
     hgets(st.buf, "BINDHOST", 80, bindhost);
     hgeti4(st.buf, "BINDPORT", &bindport);
