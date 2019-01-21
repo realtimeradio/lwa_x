@@ -746,6 +746,7 @@ static void *run(hashpipe_thread_args_t * args)
     const char *hostname = "redishost";
     int redisport = 6379;
     int use_redis = 1;
+    int idle = 0;
     use_redis = use_redis;
 
     struct timeval redistimeout = { 0, 100000 }; // 0.1 seconds
@@ -760,6 +761,10 @@ static void *run(hashpipe_thread_args_t * args)
             use_redis = 0;
         }
     }
+
+    // Indicate via redis that we're started but not taking data
+    redisCommand(c, "HMSET corr:is_taking_data state False time %d", (int)time(NULL));
+    redisCommand(c, "EXPIRE corr:is_taking_data 60");
 
     /* Loop(s) */
     int32_t *db_in32;
@@ -801,8 +806,16 @@ static void *run(hashpipe_thread_args_t * args)
     while (run_threads()) {
         // Note waiting status,
         hashpipe_status_lock_safe(&st);
-        hputs(st.buf, status_key, "waiting");
+        if (idle) {
+            hputs(st.buf, status_key, "idle");
+        } else {
+            hputs(st.buf, status_key, "waiting");
+        }
         hashpipe_status_unlock_safe(&st);
+
+        // Expire the "corr:is_taking_data" key after 60 seconds.
+        // If this pipeline goes down, we will know because the key will disappear
+        redisCommand(c, "EXPIRE corr:is_taking_data 60");
 
         // Wait for new input block to be filled
         while ((rv=hera_catcher_input_databuf_busywait_filled(db_in, curblock_in)) != HASHPIPE_OK) {
@@ -855,7 +868,19 @@ static void *run(hashpipe_thread_args_t * args)
             hashpipe_status_lock_safe(&st);
             hputu4(st.buf, "TRIGGER", 0);
             hashpipe_status_unlock_safe(&st);
+            idle = 0;
+            if (use_redis) {
+                // Create the "corr:is_taking_data" hash. This will be set to state=False
+                // when data taking is complete. Or if this pipeline exits the key will expire.
+                redisCommand(c, "HMSET corr:is_taking_data state True time %d", (int)time(NULL));
+            }
         } else if (file_cnt >= nfiles) {
+            // If we're transitioning to idle state
+            // Indicate via redis that we're no longer taking data
+            if (!idle) {
+                redisCommand(c, "HMSET corr:is_taking_data state False time %d", (int)time(NULL));
+            }
+            idle = 1;
             // Mark input block as free and advance
             if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
                 hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
@@ -864,6 +889,12 @@ static void *run(hashpipe_thread_args_t * args)
             curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
             continue;
         }
+
+        // If we make it to here we're not idle any more.
+        // Usually this would mean there has been another trigger but
+        // it could be some weirdness where someone tried to take more
+        // data by incrementing NFILES without retriggering.
+        idle = 0;
 
         // Got a new data block, update status
         hashpipe_status_lock_safe(&st);
