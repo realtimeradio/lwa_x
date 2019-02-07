@@ -7,7 +7,7 @@ import json
 import logging
 import numpy as np
 import time
-import pickle
+import copy
 import redis
 from hera_corr_f import helpers
 
@@ -238,12 +238,16 @@ def add_extra_keywords(obj, cminfo=None, fenginfo=None):
     extras = obj.create_group("extra_keywords")
     if cminfo is not None:
         extras.create_dataset("cmver", data=np.string_(cminfo["cm_version"]))
-        extras.create_dataset("cminfo", data=np.string_(pickle.dumps(cminfo)))
+        # we need to convert antenna_positions to a list for json to play nicely
+        cminfo_copy = copy.deepcopy(cminfo)
+        cminfo_copy["antenna_positions"] = cminfo_copy["antenna_positions"].tolist()
+        extras.create_dataset("cminfo", data=np.string_(json.dumps(cminfo_copy)))
+        del(cminfo_copy)
     else:
         extras.create_dataset("cmver", data=np.string_("generated-without-cminfo"))
         extras.create_dataset("cminfo", data=np.string_("generated-without-cminfo"))
-    if fenginfo is not None:    
-        extras.create_dataset("finfo", data=np.string_(pickle.dumps(fenginfo)))
+    if fenginfo is not None:
+        extras.create_dataset("finfo", data=np.string_(json.dumps(fenginfo)))
     else:
         extras.create_dataset("finfo", data=np.string_("generated-without-redis"))
     #extras.create_dataset("st_type", data=np.string_("???"))
