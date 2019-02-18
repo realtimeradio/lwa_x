@@ -439,8 +439,8 @@ static void close_filespaces(hdf5_id_t *id) {
 
 
 /*
- * Write an n_baselines x N_CHAN_PROCESSED x N_STOKES
- * data block to dataset `id` at time position `txn_baselines`
+ * Write a N_BL_PER_WRITE x N_CHAN_PROCESSED x N_STOKES
+ * data block to dataset `id` at time position `t` and baseline offset `b`
 */
 static void write_channels(hdf5_id_t *id, hsize_t t, hsize_t b, hid_t mem_space, uint64_t *visdata_buf)
 {
@@ -448,6 +448,18 @@ static void write_channels(hdf5_id_t *id, hsize_t t, hsize_t b, hid_t mem_space,
     hsize_t count[N_DATA_DIMS] = {N_BL_PER_WRITE, 1, N_CHAN_PROCESSED, N_STOKES};
     H5Sselect_hyperslab(id->visdata_fs, H5S_SELECT_SET, start, NULL, count, NULL);
     H5Dwrite(id->visdata_did, complex_id, mem_space, id->visdata_fs, H5P_DEFAULT, visdata_buf);
+}
+
+/*
+ * Write an N_BL_PER_WRITE x N_CHAN_PROCESSED x N_STOKES
+ * data block to dataset `id` at time position `t` and baseline offset `b`.
+*/
+static void write_nsamples(hdf5_id_t *id, hsize_t t, hsize_t b, hid_t mem_space, float *nsamples_buf)
+{
+    hsize_t start[N_DATA_DIMS] = {t*VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES + b, 0, 0, 0};
+    hsize_t count[N_DATA_DIMS] = {N_BL_PER_WRITE, 1, N_CHAN_PROCESSED, N_STOKES};
+    H5Sselect_hyperslab(id->nsamples_fs, H5S_SELECT_SET, start, NULL, count, NULL);
+    H5Dwrite(id->nsamples_did, H5T_IEEE_F32LE, mem_space, id->nsamples_fs, H5P_DEFAULT, nsamples_buf);
 }
 
 /*
@@ -571,6 +583,16 @@ static void compute_time_array(double time, double *time_buf)
     int i;
     for (i=0; i<(VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES); i++) {
         time_buf[i] = time;
+    }
+}
+
+/* Copy a single value into N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES elements
+ * of an array.
+*/
+static void compute_nsamples_array(float nsamples, float *nsamples_array){
+    int i;
+    for (i=0; i<(N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES); i++) {
+        nsamples_array[i] = nsamples;
     }
 }
 
@@ -789,8 +811,7 @@ static void *run(hashpipe_thread_args_t * args)
     // Allocate an array of bools for flags and n_samples
     hbool_t *flags = (hbool_t *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED * sizeof(hbool_t));
     //TODO flags never get written
-    uint64_t *nsamples = (uint64_t *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED* sizeof(uint64_t));
-    //TODO nsamples never gets written
+    float *nsamples = (float *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * sizeof(float));
 
     // Define the memory space used by these buffers for HDF5 access
     // We write N_BL_PER_WRITE x 1[spw] x N_CHAN_PROCESSED x N_STOKES at a time
@@ -952,7 +973,7 @@ static void *run(hashpipe_thread_args_t * args)
 
         // Update time and sample counters
         file_stop_t = gps_time;
-        file_duration = file_stop_t - file_start_t; //really want a +1 * acc_len here
+        file_duration = file_stop_t - file_start_t; //TODO: really want a +1 * acc_len here
         file_nblts += VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES;
         file_nts += 1;
 
@@ -970,6 +991,10 @@ static void *run(hashpipe_thread_args_t * args)
         compute_uvw_array(uvw_array_buf, ant_pos, bl_order);
         compute_time_array(julian_time, time_array_buf);
         compute_integration_time_array(acc_len * TIME_DEMUX * 2L * N_CHAN_TOTAL_GENERATED/(double)FENG_SAMPLE_RATE, integration_time_buf);
+        // TODO We calculate nsamples once per integration, and assume that all baseline blocks have the same nsample values.
+        // This will not be true once BDA is implemented.
+        // Values of nsamples should be populated only in the baseline write loop, below.
+        compute_nsamples_array(1.0, nsamples);
         write_extensible_headers(&sum_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf, bl_order);
         write_extensible_headers(&diff_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf, bl_order);
 
@@ -980,12 +1005,13 @@ static void *run(hashpipe_thread_args_t * args)
             //write data to file
 	    clock_gettime(CLOCK_MONOTONIC, &w_start);
             write_channels(&sum_file, file_nts-1, bl, mem_space, (uint64_t *)bl_buf_sum); 
+            write_nsamples(&sum_file, file_nts-1, bl, mem_space, nsamples);
 #ifndef SKIP_DIFF
             write_channels(&diff_file, file_nts-1, bl, mem_space, (uint64_t *)bl_buf_diff); 
+            write_nsamples(&diff_file, file_nts-1, bl, mem_space, nsamples);
 #endif
 	    clock_gettime(CLOCK_MONOTONIC, &w_stop);
             flags = flags;
-            nsamples = nsamples;
 
 	    t_ns = ELAPSED_NS(t_start, w_start);
 	    w_ns = ELAPSED_NS(w_start, w_stop);
