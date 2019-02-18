@@ -994,7 +994,7 @@ static void *run(hashpipe_thread_args_t * args)
         // TODO We calculate nsamples once per integration, and assume that all baseline blocks have the same nsample values.
         // This will not be true once BDA is implemented.
         // Values of nsamples should be populated only in the baseline write loop, below.
-        compute_nsamples_array((float)(acc_len * TIME_DEMUX), nsamples);
+        compute_nsamples_array(1.0, nsamples);
         write_extensible_headers(&sum_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf, bl_order);
         write_extensible_headers(&diff_file, file_nts-1, mem_space1, mem_space2, integration_time_buf, time_array_buf, uvw_array_buf, bl_order);
 
