@@ -263,6 +263,28 @@ typedef struct paper_output_databuf {
   paper_output_block_t block[N_OUTPUT_BLOCKS];
 } paper_output_databuf_t;
 
+/* 
+ * BASELINE DEPENDENT AVERAGING STRUCTURES
+ */
+
+typedef struct hera_bda_output_header{
+  uint64_t mcnt;            // mcnt of the first time sample in the data
+  char send;                // 0 - don't packetize, 1 - ready for sending
+  uint8_t size;             // size of buffer (from config file)
+  uint8_t fcount;           // number of time samples to be added (from config file)
+} hera_bda_output_header_t;
+
+typedef uint8_t hera_bda_output_header_cache_alignment[
+  CACHE_ALIGNMENT - (sizeof(hera_bda_output_header_t)%CACHE_ALIGNMENT)
+];
+
+typedef struct hera_bda_output_buffer{
+  hera_bda_output_header_t header;
+  hera_bda_output_header_cache_alignment padding;
+  uint64_t *data;
+} hera_bda_output_buffer_t ;
+
+
 /*
  * CATCHER BUFFER STRUCTURES
  */
