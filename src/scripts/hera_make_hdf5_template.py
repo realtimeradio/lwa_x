@@ -192,6 +192,7 @@ def create_header(h5, use_cm=False, use_redis=False):
     header.create_dataset("spw_array",      dtype="<i8", data=[0])
     header.create_dataset("telescope_name", data=np.string_("HERA"))
     header.create_dataset("vis_units",  data=np.string_("UNCALIB"))
+    header.create_dataset("x_orientation", data=np.string_("N"))
     if use_cm:
         # convert lat and lon from degrees -> radians
         lat = cminfo['cofa_lat'] * np.pi / 180.
