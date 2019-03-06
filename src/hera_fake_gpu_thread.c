@@ -21,6 +21,8 @@
 #include "hashpipe.h"
 #include "paper_databuf.h"
 
+#define REGTILE_CHAN_LENGTH (4 * 4 * N_INPUTS/4 * (N_INPUTS/4+1) / 2)
+
 static XGPUInfo xgpu_info;
 
 // Computes the triangular index of an (i,j) pair as shown here...
@@ -47,7 +49,8 @@ static inline off_t tri_index(const int i, const int j)
 // and pol_idx are also 0 based).  Return value is valid if in1 >= in0.  The
 // corresponding imaginary component is located xgpu_info.matLength words after
 // the real component.
-static off_t regtile_index(const int in0, const int in1){
+static off_t regtile_index(const int in0, const int in1)
+{
   const int a0 = in0 >> 1;
   const int a1 = in1 >> 1;
   const int p0 = in0 & 1;
@@ -78,19 +81,22 @@ static void *fake_gpu_thread_run(hashpipe_thread_args_t * args){
     /* Main loop */
     int rv;              // store return of buffer status calls
     uint64_t mcnt = 0;   // mcnt of each block
-    uint32_t *data;
-    int in0, in1;
+    int ant0, ant1, chan, pol;
     int block_idx = 0;
-    uint32_t fakedata = 0x0101;
+    off_t idx_regtile;
+    int32_t fakereal = 0x00000001;
+    int32_t fakeimag = 0x00000002;
 
     xgpuInfo(&xgpu_info);
     
     /* Test statements */
     printf("N_OUTPUT_MATRIX: %d\n",N_OUTPUT_MATRIX);
     printf("N_INPUTS: %d\n",N_INPUTS);
+    printf("N_ANTS: %d\n",N_ANTS);
     printf("N_CHAN_PER_X: %d\n",N_CHAN_PER_X);
     printf("Largest index: %ld\n",regtile_index(N_INPUTS-1,N_INPUTS-1));
     printf("xgpu.n_station: %d\n",xgpu_info.nstation);
+    printf("xgpu.matLength: %lld\n",xgpu_info.matLength);
 
     while (run_threads()) {
 
@@ -126,14 +132,22 @@ static void *fake_gpu_thread_run(hashpipe_thread_args_t * args){
         mcnt+=Nm;
 
         // Set all block data to zero
-        data = (uint32_t *)db->block[block_idx].data;
-        memset(data, 0, N_OUTPUT_MATRIX);
+        int32_t *data_re = db->block[block_idx].data;
+        int32_t *data_im = db->block[block_idx].data + xgpu_info.matLength;
+        memset(data_re, 5, N_OUTPUT_MATRIX*sizeof(int32_t));
 
         // Populate block with fake data
-        for(in0 = 0; in0 < N_INPUTS; in0++){
-           for(in1 = in0; in1 < N_INPUTS; in1++){
-              //printf("%d\t %d\t %ld\n",in0,in1,regtile_index(in0,in1));
-              memcpy(data+regtile_index(in0,in1), &fakedata, 4); 
+        for(ant0 = 0; ant0 < N_INPUTS/2; ant0++){
+           for(ant1 = ant0; ant1 < N_INPUTS/2; ant1++){
+             idx_regtile = regtile_index(2*ant0, 2*ant1);
+             //printf("%d\t %d\t %ld\n", ant0, ant1, idx_regtile);
+             for(chan=0; chan<N_CHAN_PER_X; chan++){
+               for(pol=0; pol<N_STOKES; pol++){
+                 data_re[idx_regtile+(chan*REGTILE_CHAN_LENGTH)+pol] = fakereal;
+                 data_im[idx_regtile+(chan*REGTILE_CHAN_LENGTH)+pol] = fakeimag;
+                 //memcpy((data_im+idx_regtile+(chan*REGTILE_CHAN_LENGTH)), &fakeimag, sizeof(int32_t));
+               }
+             }
            }
         } 
         // Mark block as full
