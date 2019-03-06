@@ -267,23 +267,40 @@ typedef struct paper_output_databuf {
  * BASELINE DEPENDENT AVERAGING STRUCTURES
  */
 
-typedef struct hera_bda_output_header{
-  uint64_t mcnt;            // mcnt of the first time sample in the data
-  char send;                // 0 - don't packetize, 1 - ready for sending
-  uint8_t size;             // size of buffer (from config file)
-  uint8_t fcount;           // number of time samples to be added (from config file)
-} hera_bda_output_header_t;
+#define N_BASELINES               (N_ANTS * (N_ANTS + 1)/2)
+#define N_CROSSPRODS              (N_ANTS * (N_ANTS - 1)/2)
+#define N_COMPLEX_PER_BASELINE    (N_STOKES * N_CHAN_PER_X)
+#define N_BDA_BINS                       5        
 
-typedef uint8_t hera_bda_output_header_cache_alignment[
-  CACHE_ALIGNMENT - (sizeof(hera_bda_output_header_t)%CACHE_ALIGNMENT)
+// integration bin indexing
+#define hera_int_bin_buf_data_idx(b, c, p) \
+  ((((b) * N_CHAN_PER_X * N_STOKES) + ((c) * N_STOKES) + (p)) * 2)
+
+
+typedef struct hera_bda_header{
+  uint64_t mcnt;            // mcnt of the first time sample in the data
+  int sam;
+  int totsam;           // number of time samples to be added (from config file)
+  unsigned long long datsize;             // size of buffer (from no. baselines)
+} hera_bda_header_t;
+
+typedef uint8_t hera_bda_header_cache_alignment[
+  CACHE_ALIGNMENT - (sizeof(hera_bda_header_t)%CACHE_ALIGNMENT)
 ];
 
-typedef struct hera_bda_output_buffer{
-  hera_bda_output_header_t header;
-  hera_bda_output_header_cache_alignment padding;
-  uint64_t *data;
-} hera_bda_output_buffer_t ;
+typedef struct hera_int_bin_buf{
+  hera_bda_header_t header;
+  hera_bda_header_cache_alignment padding;
+  uint32_t *data;
+} hera_int_bin_buf_t;
 
+typedef struct hera_bda_buf{
+  int *ant_pair_0[N_BDA_BINS];
+  int *ant_pair_1[N_BDA_BINS];
+  unsigned long int baselines_per_bin[N_BDA_BINS];
+  char send[N_BDA_BINS];                          // 0 - don't packetize, 1 - ready for sending
+  hera_int_bin_buf_t buf[N_BDA_BINS];
+} hera_bda_buf_t;
 
 /*
  * CATCHER BUFFER STRUCTURES
