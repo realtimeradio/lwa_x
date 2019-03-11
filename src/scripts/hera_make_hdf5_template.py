@@ -239,9 +239,11 @@ def add_extra_keywords(obj, cminfo=None, fenginfo=None):
     extras = obj.create_group("extra_keywords")
     if cminfo is not None:
         extras.create_dataset("cmver", data=np.string_(cminfo["cm_version"]))
-        # we need to convert antenna_positions to a list for json to play nicely
+        # Convert any numpy arrays to lists so they can be JSON encoded
         cminfo_copy = copy.deepcopy(cminfo)
-        cminfo_copy["antenna_positions"] = cminfo_copy["antenna_positions"].tolist()
+        for key in cminfo_copy.keys():
+            if isinstance(cminfo_copy[key], np.ndarray):
+                cminfo_copy[key] = cminfo_copy[key].tolist()
         extras.create_dataset("cminfo", data=np.string_(json.dumps(cminfo_copy)))
         del(cminfo_copy)
     else:
