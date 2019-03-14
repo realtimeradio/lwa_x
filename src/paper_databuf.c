@@ -197,8 +197,10 @@ hashpipe_databuf_t *hera_catcher_input_databuf_create(int instance_id, int datab
                        + sizeof(hashpipe_databuf_cache_alignment);
     size_t block_size  = sizeof(hera_catcher_input_block_t);
     int    n_block = CATCHER_N_BLOCKS;
-    fprintf(stderr, "size_t: %u, block size: %lu, nblocks size: %u\n", (uint32_t)sizeof(size_t),(uint64_t)block_size, (uint32_t)n_block);
-    fprintf(stderr, "header size: %u, words: %lu\n", (uint32_t)header_size, (uint64_t)(VIS_MATRIX_ENTRIES *TIME_DEMUX));
+    //fprintf(stderr, "size_t: %u, block size: %lu, nblocks size: %u\n", 
+    //        (uint32_t)sizeof(size_t),(uint64_t)block_size, (uint32_t)n_block);
+    //fprintf(stderr, "header size: %u, words: %lu\n", (uint32_t)header_size, 
+    //        (uint64_t)(PACKETS_PER_BLOCK*OUTPUT_BYTES_PER_PACKET));
 
     return hashpipe_databuf_create(
         instance_id, databuf_id, header_size, block_size, n_block);

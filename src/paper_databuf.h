@@ -53,18 +53,6 @@
 #define PAGE_SIZE (4096)
 #define CACHE_ALIGNMENT (128)
 
-// Correlator Output parameters
-#define CATCHER_PORT 10000
-#define OUTPUT_BYTES_PER_PACKET (4096)
-#define CATCHER_N_BLOCKS 2
-#define CATCHER_CHAN_SUM 1
-#define XENG_CHAN_SUM 4
-#define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL/XENG_CHAN_SUM * (N_INPUTS * ((N_INPUTS>>1) + 1)))
-#define VIS_MATRIX_ENTRIES_PER_CHAN (N_INPUTS * ((N_INPUTS>>1) + 1))
-#define PACKETS_PER_VIS_MATRIX ((8L*TIME_DEMUX*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
-#define N_STOKES 4
-
-
 // The HERA correlator is based largely on the PAPER correlator.  The main 
 // difference will be in the F engines.  The ROACH2 based F engines are being
 // replaced by SNAP based F engines.  Because SNAPs have a different number of
@@ -278,10 +266,10 @@ typedef struct paper_output_databuf {
 
 
 typedef struct hera_bda_header{
-  uint64_t mcnt;            // mcnt of the first time sample in the data
+  uint64_t mcnt;        // mcnt of the first time sample in the data
   int sam;
   int totsam;           // number of time samples to be added (from config file)
-  unsigned long long datsize;             // size of buffer (from no. baselines)
+  unsigned long long datsize;     // size of buffer (from no. baselines)
 } hera_bda_header_t;
 
 typedef uint8_t hera_bda_header_cache_alignment[
@@ -298,7 +286,7 @@ typedef struct hera_bda_buf{
   int *ant_pair_0[N_BDA_BINS];
   int *ant_pair_1[N_BDA_BINS];
   unsigned long int baselines_per_bin[N_BDA_BINS];
-  char send[N_BDA_BINS];                          // 0 - don't packetize, 1 - ready for sending
+  char send[N_BDA_BINS];         // 0 - don't packetize, 1 - ready for sending
   hera_int_bin_buf_t buf[N_BDA_BINS];
 } hera_bda_buf_t;
 
@@ -306,10 +294,51 @@ typedef struct hera_bda_buf{
  * CATCHER BUFFER STRUCTURES
  */
 
+#define CATCHER_N_BLOCKS        4
+// Correlator Output parameters
+#define CATCHER_PORT            10000
+#define OUTPUT_BYTES_PER_PACKET (4096)
+#define CATCHER_CHAN_SUM        1
+#define N_STOKES                4
+#define BASELINES_PER_BLOCK     4096
+
+#define CHAN_PER_CATCHER_PKT   (OUTPUT_BYTES_PER_PACKET/(N_STOKES * 8L))
+#define PACKETS_PER_BASELINE   (N_CHAN_TOTAL/CHAN_PER_CATCHER_PKT)
+#define PACKETS_PER_BL_PER_X   (PACKETS_PER_BASELINE/N_XENGINES_PER_TIME)
+#define PACKETS_PER_BLOCK      (BASELINES_PER_BLOCK * TIME_DEMUX * PACKETS_PER_BASELINE)
+
+#define BYTES_PER_BLOCK        (PACKETS_PER_BLOCK * OUTPUT_BYTES_PER_PACKET)        
+
+//entries_per_block = (BASELINES_PER_BLOCK * N_CHAN_TOTAL * TIME_DEMUX * N_STOKES)
+
+
+// == hera_catcher_input_databuf_t ==
+//
+// * catcher net thread output
+// * catcher disk thread input
+// Offset determined by baseline_id, time_demux, xend_id, offset
+// * Data field is structured as:
+//
+//  +-- baseline  +-- (even/odd)  +-- freq          +-- stokes  
+//  |             |               |                 |
+//  V             V               V                 V
+//  baseline_id   time_demux     (xeng_id+offset)   
+//  -----------   ----------     ----------------
+//  b0 }--------> even }-------> f0 }-------------> s0
+//                odd            f1                 s1
+//                                                  s2
+//                                                  s3
+
+#define  hera_catcher_input_databuf_pkt_offset(b, t, x, o) \
+     (((b)*TIME_DEMUX*PACKETS_PER_BASELINE) + ((t)*PACKETS_PER_BASELINE) + ((x)*PACKETS_PER_BL_PER_X) + (o))
+
 typedef struct hera_catcher_input_header{
-  uint64_t mcnt;
   uint64_t good_data;
-  //uint8_t flags[VIS_MATRIX_ENTRIES*TIME_DEMUX];
+  uint64_t bcnt;                             // starting value of baseline_id for this block
+  uint64_t mcnt[BASELINES_PER_BLOCK];        // times are diff for each baseline 
+  uint32_t ant_pair_0[BASELINES_PER_BLOCK];  // list of antennas in this block
+  uint32_t ant_pair_1[BASELINES_PER_BLOCK]; 
+  //uint8_t flags[BASELINES_PER_BLOCK];
 } hera_catcher_input_header_t;
 
 typedef uint8_t hera_catcher_input_header_cache_alignment[
@@ -319,7 +348,7 @@ typedef uint8_t hera_catcher_input_header_cache_alignment[
 typedef struct hera_catcher_input_block {
   hera_catcher_input_header_t header;
   hera_catcher_input_header_cache_alignment padding; // Maintain cache alignment
-  uint64_t data[VIS_MATRIX_ENTRIES*TIME_DEMUX];
+  uint32_t data[BYTES_PER_BLOCK/sizeof(uint32_t)];
 } hera_catcher_input_block_t;
 
 typedef struct hera_catcher_input_databuf {
@@ -328,12 +357,10 @@ typedef struct hera_catcher_input_databuf {
   hera_catcher_input_block_t block[CATCHER_N_BLOCKS];
 } hera_catcher_input_databuf_t;
 
-// Catcher input buffer has dimensions:
-// n-xengines x n-baselines x nchans-per-x x time-demux x stokes x real/imag
-#define hera_catcher_input_databuf_idx32(t, x, o) \
-  (2L*TIME_DEMUX*(VIS_MATRIX_ENTRIES_PER_CHAN * (N_CHAN_PER_X/XENG_CHAN_SUM)*(x)) + (TIME_DEMUX*((o)>>2)) + (2*N_STOKES*(t)))
-#define hera_catcher_input_databuf_by_bl_idx32(x, b) \
-  (2L*TIME_DEMUX*(N_CHAN_PER_X/XENG_CHAN_SUM)*((VIS_MATRIX_ENTRIES_PER_CHAN * (x)) + (N_STOKES*(b))))
+//#define XENG_CHAN_SUM 4
+//#define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL/XENG_CHAN_SUM * (N_INPUTS * ((N_INPUTS>>1) + 1)))
+//#define VIS_MATRIX_ENTRIES_PER_CHAN (N_INPUTS * ((N_INPUTS>>1) + 1))
+//#define PACKETS_PER_VIS_MATRIX ((8L*TIME_DEMUX*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
 
 /*
  * INPUT BUFFER FUNCTIONS

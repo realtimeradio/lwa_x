@@ -47,11 +47,12 @@ def baseline_index(n):
           idx_map[cell_index] = (a0,a1)
    return idx_map
 
+# mcnt, bcnt, offset, ant0, ant1, xeng_id, payload_len
 def decode_packet(packet):
    p = struct.unpack('>1Q2I2H1025i', packet)
-   time, baseline_id, offset, xeng_id, payload_len = p[0], p[1], p[2], p[3], p[4]
-   data = np.asarray(p[6:])
-   return time, baseline_id, offset, xeng_id, payload_len, data
+   time, bcnt, offset, ant0, ant1, xeng_id, payload_len = p[0:7]
+   data = np.asarray(p[7:])
+   return time, bcnt, offset, ant0, ant1, xeng_id, payload_len, data
 
 
 idx_map = baseline_index(args.n_inputs)
@@ -66,14 +67,14 @@ while True:
     try:
         pkt, addr = sock.recvfrom(4120) # buffer size is 1024 bytes
         packets += 1
-        t,b,o,x,l,data = decode_packet(pkt)
+        t,b,o,a0,a1,x,l,data = decode_packet(pkt)
         if args.verbose:
-           print t, idx_map[b], o, data[:8], data[-8:]
+           print t, b//4096, b%4096, o, a0, a1, data[:8], data[-8:]
         if args.check:
            if not (np.all(data[::2] == 1)):
               print "Error! Real", idx_map[b], o, data[::2]
               errors += 1
-           if not (np.all(data[1::2] == -2)):
+           if not (np.all(data[1::2] == -1)):
               print "Error! Imag", idx_map[b], o, data[1::2]
               errors += 1
     except(KeyboardInterrupt):
