@@ -26,11 +26,12 @@
 #define CHECK_PWR2(x)    (!((x)&((x)-1)))
 
 // Macros for generating values for the pkthdr_t fields
-#define TIMESTAMP(x)      (htobe64((uint64_t)x))
-#define BASELINE_ID(x)    (htobe32((uint32_t)x))
-#define OFFSET(x)         (htobe32((uint32_t)x))
-#define XENG_ID(x)        (htobe16((uint16_t)x))
-#define PAYLOAD_LEN(x)    (htobe16((uint16_t)x))
+#define TIMESTAMP(x)      (htobe64((uint64_t)(x)))
+#define BASELINE_ID(x)    (htobe32((uint32_t)(x)))
+#define OFFSET(x)         (htobe32((uint32_t)(x)))
+#define XENG_ID(x)        (htobe16((uint16_t)(x)))
+#define PAYLOAD_LEN(x)    (htobe16((uint16_t)(x)))
+#define ANTENNA(x)        (htobe16((uint16_t)(x)))
 
 #define CONVERT(x)        (htobe32((x)))
 
@@ -42,6 +43,8 @@ typedef struct pkthdr {
   uint64_t timestamp;
   uint32_t baseline_id;
   uint32_t offset;
+  uint16_t ant0;
+  uint16_t ant1;
   uint16_t xeng_id;
   uint16_t payload_len;
 } pkthdr_t;
@@ -432,6 +435,7 @@ static void *run(hashpipe_thread_args_t * args)
    int offset = 0;
    unsigned long long datoffset = 0;
    int ant0, ant1;
+   int catcher_bl_id = 0;
    unsigned long long idx_baseline; 
    off_t idx_regtile;
    hera_int_bin_buf_t *intbuf;
@@ -500,14 +504,16 @@ static void *run(hashpipe_thread_args_t * args)
          clock_gettime(CLOCK_MONOTONIC, &pkt_start);
  
          for(bl=0; bl<bdabuf.baselines_per_bin[j]; bl++){
-           ant0 = bdabuf.ant_pair_0[j][bl];
-           ant1 = bdabuf.ant_pair_1[j][bl];
+           ant0 = bdabuf.ant_pair_0[j][bl];    // ordering set by config file 
+           ant1 = bdabuf.ant_pair_1[j][bl]; 
+           pkt.hdr.ant1 = ant1;
+           pkt.hdr.ant0 = ant0;
            idx_baseline = baseline_index(2*ant0, 2*ant1, N_INPUTS); 
            idx_regtile = regtile_idx_map[idx_baseline];
            //idx_regtile = regtile_index(2*ant0, 2*ant1);
            pkt.hdr.offset = OFFSET(0);
            offset = 0;
-           pkt.hdr.baseline_id = BASELINE_ID(idx_baseline);
+           pkt.hdr.baseline_id = BASELINE_ID(baseline_id++);//BASELINE_ID(idx_baseline);
            
            for(casper_chan=0; casper_chan<N_CHAN_PER_X; casper_chan++){
              // This used to de-interleave channels.  De-interleaving is no longer
