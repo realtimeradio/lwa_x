@@ -66,6 +66,7 @@ dist_bin_SCRIPTS = scripts/paper_init.sh \
 	           scripts/hera_catcher_up.py \
 	           scripts/hera_catcher_down.sh \
 	           scripts/hera_catcher_take_data.py \
+	           scripts/hera_catcher_stop_data.py \
 	           scripts/tweak-perf.sh \
 	           scripts/hera_ctl.py \
 	           scripts/hera_make_hdf5_template.py
