@@ -28,7 +28,7 @@ parser.add_argument('host', type=str, help='Host on which to capture data')
 parser.add_argument('-r', dest='redishost', type=str, default='redishost', help='Host serving redis database')
 parser.add_argument('-n', dest='nfiles', type=int, default=10, help='Number of files of data to capture')
 parser.add_argument('-m', dest='msperfile', type=int, default=60000, help='Number of ms of data per file')
-parser.add_argument('-t', dest='tag', type=str, default='none', help='A descriptive tag to go into data files')
+parser.add_argument('--tag', dest='tag', type=str, default='none', help='A descriptive tag to go into data files')
 parser.add_argument('-t', dest='hdf5template', type=str, default='/tmp/template.h5', help='Place to put HDF5 header template file')
 
 args = parser.parse_args()
