@@ -71,12 +71,17 @@ if args.action == 'start':
     print 'Trigger MCNT: %d' % trig_mcnt
     print 'Trigger time is %.1f seconds in the future (%s)' % (trig_time - time.time(), time.ctime(trig_time))
 
+    # round acc_len
+    acclen = int(args.acclen / MCNT_XGPU_BLOCK_SIZE) * MCNT_XGPU_BLOCK_SIZE
+    print 'Requested accumulation length: %d' % args.acclen
+    print 'Actual accumulation length: %d' % acclen
+
     # Use the hashpipe publish channel to update keys in all status buffers.
     # See the docstring at https://github.com/david-macmahon/rb-hashpipe/blob/master/bin/hashpipe_redis_gateway.rb
     # for details about formatting
     
     for slice in range(args.slices):
-        msg = 'INTSYNC=%d\nINTCOUNT=%d\nINTSTAT=start\nOUTDUMPS=0' % (trig_mcnt + slice*MCNT_STEP_SIZE, args.acclen)
+        msg = 'INTSYNC=%d\nINTCOUNT=%d\nINTSTAT=start\nOUTDUMPS=0' % (trig_mcnt + slice*MCNT_STEP_SIZE, acclen)
         for host in range(args.xhosts):
             hostname = 'px%d' % (slice * args.xhosts + host + 1)
             rdb.publish('hashpipe://%s/0/set' % hostname, msg)
@@ -85,5 +90,5 @@ if args.action == 'start':
 
     rdb['corr:trig_mcnt'] = trig_mcnt
     rdb['corr:trig_time'] = trig_time
-    rdb['corr:acc_len'] = args.acclen
-    rdb['corr:int_time'] = args.acclen * args.slices * mcnts_per_second()
+    rdb['corr:acc_len'] = acclen
+    rdb['corr:int_time'] = acclen * args.slices * mcnts_per_second()
