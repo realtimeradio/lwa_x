@@ -89,15 +89,6 @@ static void *fake_gpu_thread_run(hashpipe_thread_args_t * args){
 
     xgpuInfo(&xgpu_info);
     
-    /* Test statements */
-    printf("N_OUTPUT_MATRIX: %d\n",N_OUTPUT_MATRIX);
-    printf("N_INPUTS: %d\n",N_INPUTS);
-    printf("N_ANTS: %d\n",N_ANTS);
-    printf("N_CHAN_PER_X: %d\n",N_CHAN_PER_X);
-    printf("Largest index: %ld\n",regtile_index(N_INPUTS-1,N_INPUTS-1));
-    printf("xgpu.n_station: %d\n",xgpu_info.nstation);
-    printf("xgpu.matLength: %lld\n",xgpu_info.matLength);
-
     while (run_threads()) {
 
         hashpipe_status_lock_safe(&st);
@@ -155,8 +146,6 @@ static void *fake_gpu_thread_run(hashpipe_thread_args_t * args){
     
         // Setup for next block
         block_idx = (block_idx + 1)%db->header.n_block;
-
-        fprintf(stderr,"Block_id: %d\n",block_idx);
 
         /* Will exit if thread has been cancelled */
         pthread_testcancel();
