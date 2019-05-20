@@ -22,20 +22,21 @@ paper_databuf = paper_databuf.h \
 	            paper_databuf.c
 
 paper_threads = paper_fake_net_thread.c          \
-		        paper_gpu_cpu_output_thread.c    \
-		        paper_gpu_output_thread.c        \
-		        paper_gpu_thread.c               \
-		        paper_fluff_thread.c             \
-		        hera_pktsock_thread.c            \
+                paper_gpu_cpu_output_thread.c    \
+                paper_gpu_output_thread.c        \
+                paper_gpu_thread.c               \
+                paper_fluff_thread.c             \
+                hera_pktsock_thread.c            \
                 hera_fake_gpu_thread.c           \
-		        paper_crc_thread.c               \
+	        paper_crc_thread.c               \
                 hera_catcher_net_thread_bda_v2.c \
-                #hera_catcher_disk_thread.c    \
                 hera_gpu_output_thread.c         \
                 lzf/lzf_c.c                      \
                 lzf/lzf_d.c                      \
                 lzf_filter.c                     \
                 lzf_filter.h
+
+#hera_catcher_disk_thread.c  
 
 paper_fluff = paper_fluff.h \
 	          paper_fluff.c

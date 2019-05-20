@@ -85,7 +85,7 @@ static inline void initialize_block(hera_catcher_input_databuf_t * hera_catcher_
 /* Initialize block_info */
 // This function must be called once and only once per block_info structure!
 // Subsequent calls are no-ops.
-static inline void initialize_block_info(block_info_t * binfo){
+static inline void initialize_block_info(block_info_t * binfo, int pkt_block_id){
     int i;
 
     // If this block_info structure has already been initialized
@@ -94,14 +94,14 @@ static inline void initialize_block_info(block_info_t * binfo){
     }
 
     for(i = 0; i < CATCHER_N_BLOCKS; i++) {
-	  binfo->block_packet_counter[i] = 0;
+      binfo->block_packet_counter[i] = 0;
       memset(binfo->flags[i], 0, PACKETS_PER_BLOCK*sizeof(char));
       memset(binfo->baselines[i], 0, BASELINES_PER_BLOCK*sizeof(char));
     }
 
-    // On startup the first two blocks will be processed 
-    binfo->block_curr     = 0;
-    binfo->block_next     = 1;
+    // The number of the current block is set by the first packet received
+    binfo->block_curr     = pkt_block_id;
+    binfo->block_next     = (pkt_block_id+1) % CATCHER_N_BLOCKS;
     binfo->thresh         = PACKETS_PER_BLOCK/8;
     binfo->out_of_seq_cnt = 0;
     binfo->initialized    = 1;
@@ -120,11 +120,10 @@ static inline void get_header(unsigned char *p_frame, packet_header_t *pkt_heade
 }
 
 /* Set hashpipe block to filled */
-// This sets the "current" block to be marked as filled.  The current block is
-// the block corresponding to binfo->block_i.  Returns bcnt of the block
-// being marked filled.
+// This sets the "current" block to be marked as filled.
+// Returns bcnt of the block being marked filled.
 static uint64_t set_block_filled(hera_catcher_input_databuf_t *hera_catcher_input_databuf_p, block_info_t *binfo){
-  static int last_filled = -1;
+  static int last_filled = -1; //(binfo->block_curr-1)% CATCHER_N_BLOCKS;
 
   uint64_t block_missed_pkt_cnt;
   uint32_t missed_pkt_cnt;
@@ -151,7 +150,7 @@ static uint64_t set_block_filled(hera_catcher_input_databuf_t *hera_catcher_inpu
   hashpipe_status_lock_busywait_safe(st_p);
   hputu4(st_p->buf, "NETBKOUT", block_i);
   if(block_missed_pkt_cnt){
-    fprintf(stdout, "Expected %lu packets, Got %lu\n", PACKETS_PER_BLOCK, binfo->block_packet_counter[block_i]);
+    fprintf(stderr, "Expected %lu packets, Got %lu\n", PACKETS_PER_BLOCK, binfo->block_packet_counter[block_i]);
     // Increment MISSEDPK by number of missed packets for this block
     hgetu4(st_p->buf, "MISSEDPK", &missed_pkt_cnt);
     missed_pkt_cnt += block_missed_pkt_cnt;
@@ -176,24 +175,31 @@ static inline uint64_t process_packet(
 
   static block_info_t binfo;
   packet_header_t pkt_header;
-  const uint32_t *payload_p;
-  uint32_t *dest_p;
+  //const uint32_t *payload_p;
+  //uint32_t *dest_p;
+  //int i;
   int pkt_block_i;
   int b, x, t, o;
   uint32_t pkt_offset;
-  int i;
   uint64_t bcnt = -1;
   int rv;
 
-  // Lazy init binfo
-  if(!binfo.initialized){
-    initialize_block_info(&binfo);
-  }
-
   // Parse packet header
   get_header(p_frame, &pkt_header);
-  pkt_block_i = block_for_bcnt(pkt_header.bcnt);
-   
+  pkt_block_i = block_for_bcnt(pkt_header.bcnt);  
+
+  // Lazy init binfo
+  if(!binfo.initialized){
+    fprintf(stderr,"Initializing binfo..!\n");
+    initialize_block_info(&binfo, pkt_block_i);
+    initialize_block(hera_catcher_input_databuf_p, pkt_header.bcnt); 
+    initialize_block(hera_catcher_input_databuf_p, pkt_header.bcnt+BASELINES_PER_BLOCK); 
+  }
+
+  fprintf(stderr, "curr:%d\tnext:%d\t",binfo.block_curr, binfo.block_next);
+  fprintf(stderr, "bcnt:%d\tblock_id:%d\t",pkt_header.bcnt,pkt_block_i);
+  fprintf(stderr, "xeng:%d\n",pkt_header.xeng_id);
+
   // Place the packet in curr/next block or drop it
   // If the packet belongs to the current block, process it as usual.
   // If the packet belongs to the next block, mark the previous block
@@ -207,9 +213,12 @@ static inline uint64_t process_packet(
     o = pkt_header.offset;
     
     pkt_offset = hera_catcher_input_databuf_pkt_offset(b, t, x, o);
+    //fprintf(stderr, "offset: %d\n", pkt_offset);
+    //fprintf(stderr, "bcnt-loc:%d\txeng:%d\ttime:%d\tpktoffset:%d\n",b,x,t,o);
     
     if(binfo.flags[pkt_block_i][pkt_offset]){
       // This slot is already filled
+      //fprintf(stderr, "Packet repeated!!\n");
       binfo.out_of_seq_cnt++;
       return -1;
     }
@@ -223,22 +232,25 @@ static inline uint64_t process_packet(
     }
 
     // Copy data into buffer with byte swap
-    payload_p = (uint32_t *)(PKT_UDP_DATA(p_frame) + sizeof(packet_header_t)); 
-    dest_p    = (uint32_t *)(hera_catcher_input_databuf_p->block[pkt_block_i].data + \
-                            (pkt_header.payload_len * pkt_offset/sizeof(uint32_t)));
+    //payload_p = (uint32_t *)(PKT_UDP_DATA(p_frame) + sizeof(packet_header_t)); 
+    //dest_p    = (uint32_t *)(hera_catcher_input_databuf_p->block[pkt_block_i].data + (pkt_header.payload_len * pkt_offset/sizeof(uint32_t)));
 
-    for(i=0; i<(pkt_header.payload_len>>2); i++){
-      dest_p[i] = be32toh(payload_p[i]);
-    }
+    //for(i=0; i<(pkt_header.payload_len>>2); i++){
+    //  dest_p[i] = be32toh(payload_p[i]);
+    //}
     binfo.flags[pkt_block_i][pkt_offset] = 1;
     binfo.block_packet_counter[pkt_block_i]++;
-    
+    //fprintf(stderr,"bcnt:%d\t block_id:%d\t Pkt cntr: %lu\n",b, pkt_block_i, binfo.block_packet_counter[pkt_block_i]);    
+
     // Check if curr block is full or next block is at thresh and set curr 
     // as filled. Wait to acquire the next block and update binfo tags.
     if((binfo.block_packet_counter[binfo.block_curr] == PACKETS_PER_BLOCK) || \
        (binfo.block_packet_counter[binfo.block_next] == binfo.thresh)){
       
       bcnt = set_block_filled(hera_catcher_input_databuf_p, &binfo);
+
+      // Print
+      fprintf(stderr,"Filled Block: %d with bcnt: %lu\n",binfo.block_curr, bcnt);
 
       // Update binfo
       binfo.block_packet_counter[binfo.block_curr] = 0;
@@ -277,7 +289,7 @@ static inline uint64_t process_packet(
   }
   
   if (binfo.out_of_seq_cnt > MAX_OUT_OF_SEQ_PKTS){
-    fprintf(stderr,"Lots of out of sequence packets!");
+    //fprintf(stderr,"Lots of out of sequence packets!");
   }
   return bcnt;  
 }
@@ -289,7 +301,7 @@ static int init(hashpipe_thread_args_t *args){
   int bindport = CATCHER_PORT;
   status_key = args->thread_desc->skey;
 
-  strcpy(bindhost, "127.0.0.1"); //"0.0.0.0");
+  strcpy(bindhost, "0.0.0.0");
 
   hashpipe_status_t st = args->st;
 
@@ -350,15 +362,15 @@ static void *run(hashpipe_thread_args_t * args){
   st_p = &st;	// allow global (this source file) access to the status buffer
 
   // Flag that holds off the net thread
+  //int holdoff = 1;
   int holdoff = 0;
 
   // Force ourself into the hold off state
-  fprintf(stdout, "Setting CNETHOLD state to 1."\
-          "Waiting for someone to set it to 0\n");
-  hashpipe_status_lock_safe(&st);
-  hputi4(st.buf, "CNETHOLD", 1);
-  hputs(st.buf, status_key, "holding");
-  hashpipe_status_unlock_safe(&st);
+  //fprintf(stderr, "Setting CNETHOLD state to 1.Waiting for someone to set it to 0\n");
+  //hashpipe_status_lock_safe(&st);
+  //hputi4(st.buf, "CNETHOLD", 1);
+  //hputs(st.buf, status_key, "holding");
+  //hashpipe_status_unlock_safe(&st);
 
   while(holdoff) {
     sleep(1);
@@ -368,10 +380,12 @@ static void *run(hashpipe_thread_args_t * args){
       // Done holding, so delete the key
       hdel(st.buf, "CNETHOLD");
       hputs(st.buf, status_key, "starting");
-      fprintf(stdout, "Starting...\n");
+      fprintf(stderr, "Starting...\n");
     }
     hashpipe_status_unlock_safe(&st);
   }
+
+  fprintf(stderr,"Waiting to acquire two blocks to start!\n");
 
   // Acquire first two blocks to start
   if(hera_catcher_input_databuf_busywait_free(db, 0) != HASHPIPE_OK){
@@ -394,6 +408,7 @@ static void *run(hashpipe_thread_args_t * args){
     }
   }
 
+  fprintf(stderr,"Initializing the blocks..\n");
   // Initialize the newly acquired block
   initialize_block(db, 0);
   initialize_block(db, BASELINES_PER_BLOCK);
@@ -448,6 +463,9 @@ static void *run(hashpipe_thread_args_t * args){
   uint64_t pktsock_drops_total = 0; // Stats total for socket packet
   struct timespec start, stop;
   struct timespec recv_start, recv_stop;
+
+
+  fprintf(stderr,"Starting to collect packets..\n");
 
   while (run_threads()) {
     // Read packet

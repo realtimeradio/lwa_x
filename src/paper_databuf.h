@@ -300,7 +300,7 @@ typedef struct hera_bda_buf{
 #define OUTPUT_BYTES_PER_PACKET (4096)
 #define CATCHER_CHAN_SUM        1
 #define N_STOKES                4
-#define BASELINES_PER_BLOCK     4096
+#define BASELINES_PER_BLOCK     16384
 
 #define CHAN_PER_CATCHER_PKT   (OUTPUT_BYTES_PER_PACKET/(N_STOKES * 8L))
 #define PACKETS_PER_BASELINE   (N_CHAN_TOTAL/CHAN_PER_CATCHER_PKT)
@@ -336,8 +336,8 @@ typedef struct hera_catcher_input_header{
   uint64_t good_data;
   uint64_t bcnt;                             // starting value of baseline_id for this block
   uint64_t mcnt[BASELINES_PER_BLOCK];        // times are diff for each baseline 
-  uint32_t ant_pair_0[BASELINES_PER_BLOCK];  // list of antennas in this block
-  uint32_t ant_pair_1[BASELINES_PER_BLOCK]; 
+  uint16_t ant_pair_0[BASELINES_PER_BLOCK];  // list of antennas in this block
+  uint16_t ant_pair_1[BASELINES_PER_BLOCK]; 
   //uint8_t flags[BASELINES_PER_BLOCK];
 } hera_catcher_input_header_t;
 

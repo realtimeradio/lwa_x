@@ -49,7 +49,7 @@ def baseline_index(n):
 
 # mcnt, bcnt, offset, ant0, ant1, xeng_id, payload_len
 def decode_packet(packet):
-   p = struct.unpack('>1Q2I2H1025i', packet)
+   p = struct.unpack('>1Q2I4H1024i', packet)
    time, bcnt, offset, ant0, ant1, xeng_id, payload_len = p[0:7]
    data = np.asarray(p[7:])
    return time, bcnt, offset, ant0, ant1, xeng_id, payload_len, data
@@ -69,7 +69,7 @@ while True:
         packets += 1
         t,b,o,a0,a1,x,l,data = decode_packet(pkt)
         if args.verbose:
-           print t, b//4096, b%4096, o, a0, a1, data[:8], data[-8:]
+           print "{0:4d} {1:3d} {2:4d} {3:1d} {4:3d} {5:3d} {6:2d}".format(t, b//4096, b%4096, o, a0, a1, x), data[:8]
         if args.check:
            if not (np.all(data[::2] == 1)):
               print "Error! Real", idx_map[b], o, data[::2]

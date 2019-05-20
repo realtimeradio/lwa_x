@@ -1,3 +1,7 @@
+# Imitate 16 xengs, 2 times, all baselines 
+# Send packets to catcher imitating the output
+# of all the xengs in the chain.
+
 import numpy as np
 import struct
 import socket
@@ -8,74 +12,48 @@ Nx = 16    # xeng
 Nc = 328   # chan
 Nt = 2     # demux
 Ns = 4     # stokes
-udp_ip = '10.20.1.66'
+Nbins = 5  # number of diff integration bins
+udp_ip = '10.80.40.251'
 udp_port = 10000
 
-bdaconfig = np.loadtxt('../bda_config.txt')
+int_bin = {}
+int_bin['baselines'] = {}
+int_bin['data']      = {}
 
-baselines = {}
-for i in range(5):
-    baselines[i] = []
+for n in range(Nbins):
+    int_bin['baselines'][n] = []
+    int_bin['data'][n] = (2**n)*np.ones(1024)
+    int_bin['data'][n][1::2] = -1*(2**n)
 
+# Populate baseline pairs from config file
+bdaconfig = np.loadtxt('../bda_config.txt', dtype=np.int)
 for i,t in enumerate(bdaconfig[:,2]):
-    baselines[int(np.log(t)/np.log(2))].append((bdaconfig[i,0],bdaconfig[i,1]))
-
-for a0 in range(Na):
-    baselines[1].append((a0,a0))
-
-bcnt = 0
-mcnt = 0
-cntr = 0
-offset = np.arange(3)
-xeng_id = 0
+    n = int(np.log(t)/np.log(2))
+    int_bin['baselines'][n].append((bdaconfig[i,0], bdaconfig[i,1]))
+for a in range(Na):
+    int_bin['baselines'][0].append((a,a))
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.bind(('10.20.1.2',8500))
-data = {}
-for i in range(6):
-    data[i] = (2**i)*np.ones(1024)
-    data[i][1::2] = -1*(2**i)
 
-# mcnt, bcnt, offset, ant0, ant1, xeng_id, payload_len
+bcnt = 0; mcnt = 0; ctr = 0
+offset = np.arange(3)
+
 while True:
-    cntr += 1
-    mcnt = cntr*1024
-    for a0,a1 in baselines[0]:
-        for o in offset:
-            pkt = struct.pack('>1Q2I4H1024i', mcnt, bcnt, o, a0, a1, xeng_id, 4096, *data[0])
-            sock.sendto(pkt, (udp_ip, udp_port))
-            time.sleep(0.001)
-        bcnt += 1
-
-    if (cntr%2 == 0):
-        for a0,a1 in baselines[1]:
-            for o in offset:
-                pkt = struct.pack('>1Q2I4H1024i', mcnt, bcnt, o, a0, a1, xeng_id, 4096, *data[1])
-                sock.sendto(pkt, (udp_ip, udp_port))
-                time.sleep(0.001)
-            bcnt += 1
-      
-    if (cntr%4 == 0):
-        for a0,a1 in baselines[2]:
-            for o in offset:
-                pkt = struct.pack('>1Q2I4H1024i', mcnt, bcnt, o, a0, a1, xeng_id, 4096, *data[2])
-                sock.sendto(pkt, (udp_ip, udp_port))
-                time.sleep(0.001)
-            bcnt += 1
-
-    if (cntr%8 == 0):
-        for a0,a1 in baselines[3]:
-            for o in offset:
-                pkt = struct.pack('>1Q2I4H1024i', mcnt, bcnt, o, a0, a1, xeng_id, 4096, *data[3])
-                sock.sendto(pkt, (udp_ip, udp_port))
-                time.sleep(0.001)
-            bcnt += 1
-
-    if (cntr%16 == 0):
-        for a0,a1 in baselines[4]:
-            for o in offset:
-                pkt = struct.pack('>1Q2I4H1024i', mcnt, bcnt, o, a0, a1, xeng_id, 4096, *data[4])
-                sock.sendto(pkt, (udp_ip, udp_port))
-                time.sleep(0.001)
-            bcnt += 1
-
+    ctr += 2
+    mcnt = ctr 
+    for ns in np.logspace(0, Nbins-1, num=Nbins, base=2, dtype=np.int):
+        if (ctr%ns == 0):
+            print 'Sending: %d'%ns
+            nb = int(np.log(ns)/np.log(2))
+            for (a0,a1) in int_bin['baselines'][nb]:
+                for xeng_id in range(Nx*Nt):
+                    pkt = struct.pack('>1Q2I4H1024i', mcnt+((xeng_id//Nx)*2), bcnt, 0, a0, a1, xeng_id, 4096, *int_bin['data'][nb]);
+                    sock.sendto(pkt, (udp_ip, udp_port))
+                    time.sleep(0.000001)
+                    pkt = struct.pack('>1Q2I4H1024i', mcnt+((xeng_id//Nx)*2), bcnt, 1, a0, a1, xeng_id, 4096, *int_bin['data'][nb]);
+                    sock.sendto(pkt, (udp_ip, udp_port))
+                    time.sleep(0.000001)
+                    pkt = struct.pack('>1Q2I4H1024i', mcnt+((xeng_id//Nx)*2), bcnt, 2, a0, a1, xeng_id, 4096, *int_bin['data'][nb]);
+                    sock.sendto(pkt, (udp_ip, udp_port))
+                    time.sleep(0.000001)
+                bcnt += 1 
