@@ -56,7 +56,7 @@ for host in hosts:
         run_on_hosts([host], ['taskset', cpu_masks[i], 'hashpipe_redis_gateway.rb', '-g', host, '-i', '%d'%i])
 
 # Wait for the gateways to come up
-time.sleep(1)
+time.sleep(3)
 
 # Configure the X-engines as even/odd correlators
 for hn, host in enumerate(hosts):
