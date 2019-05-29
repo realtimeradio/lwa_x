@@ -65,8 +65,8 @@ def get_ant_names():
     return ["foo"]*352
 
 def get_cm_info():
-    from hera_mc import sys_handling
-    h = sys_handling.Handling()
+    from hera_mc import cm_sysutils
+    h = cm_sysutils.Handling()
     return h.get_cminfo_correlator()
 
 def get_antpos_enu(antpos, lat, lon, alt):
