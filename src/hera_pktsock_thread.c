@@ -76,7 +76,7 @@ static int time_index;
 #if 0
 static void print_pkt_header(packet_header_t * pkt_header) {
 
-    static long long prior_mcnt;
+    static long int prior_mcnt;
 
     printf("packet header : mcnt %012lx (diff from prior %lld) fid %d xid %d\n",
 	   pkt_header->mcnt, pkt_header->mcnt-prior_mcnt, pkt_header->fid, pkt_header->xid);
@@ -167,7 +167,7 @@ static inline void get_header (unsigned char *p_frame, packet_header_t * pkt_hea
     //pkt_counter++;
 #else
     uint64_t raw_header;
-    raw_header = be64toh(*(unsigned long long *)PKT_UDP_DATA(p_frame));
+    raw_header = be64toh(*(unsigned long int *)PKT_UDP_DATA(p_frame));
     // raw header contains value of first time sample, not mcnt, as defined in this code
     //pkt_header->time        = (raw_header >> 27) & ((1L<<37)-1);
     //pkt_header->mcnt        = pkt_header->time >> 5;
@@ -405,7 +405,7 @@ static inline uint64_t process_packet(
 
 #if N_DEBUG_INPUT_BLOCKS == 1
     debug_ptr = (uint64_t *)&paper_input_databuf_p->block[N_INPUT_BLOCKS];
-    debug_ptr[debug_offset++] = be64toh(*(unsigned long long *)PKT_UDP_DATA(p_frame));
+    debug_ptr[debug_offset++] = be64toh(*(unsigned long int *)PKT_UDP_DATA(p_frame));
     if(--debug_remaining == 0) {
 	exit(1);
     }
@@ -813,35 +813,35 @@ static void *run(hashpipe_thread_args_t * args)
 
 	    // Get and put min and max values.  The "get-then-put" allows the
 	    // user to reset the min max values in the status buffer.
-	    hgeti8(st.buf, "NETWATMN", (long long *)&status_ns);
+	    hgeti8(st.buf, "NETWATMN", (long int *)&status_ns);
 	    status_ns = MIN(min_wait_ns, status_ns);
             hputi8(st.buf, "NETWATMN", status_ns);
 
-            hgeti8(st.buf, "NETRECMN", (long long *)&status_ns);
+            hgeti8(st.buf, "NETRECMN", (long int *)&status_ns);
 	    status_ns = MIN(min_recv_ns, status_ns);
             hputi8(st.buf, "NETRECMN", status_ns);
 
-            hgeti8(st.buf, "NETPRCMN", (long long *)&status_ns);
+            hgeti8(st.buf, "NETPRCMN", (long int *)&status_ns);
 	    status_ns = MIN(min_proc_ns, status_ns);
             hputi8(st.buf, "NETPRCMN", status_ns);
 
-            hgeti8(st.buf, "NETWATMX", (long long *)&status_ns);
+            hgeti8(st.buf, "NETWATMX", (long int *)&status_ns);
 	    status_ns = MAX(max_wait_ns, status_ns);
             hputi8(st.buf, "NETWATMX", status_ns);
 
-            hgeti8(st.buf, "NETRECMX", (long long *)&status_ns);
+            hgeti8(st.buf, "NETRECMX", (long int *)&status_ns);
 	    status_ns = MAX(max_recv_ns, status_ns);
             hputi8(st.buf, "NETRECMX", status_ns);
 
-            hgeti8(st.buf, "NETPRCMX", (long long *)&status_ns);
+            hgeti8(st.buf, "NETPRCMX", (long int *)&status_ns);
 	    status_ns = MAX(max_proc_ns, status_ns);
             hputi8(st.buf, "NETPRCMX", status_ns);
 
             hputu8(st.buf, "NETPKTS",  pktsock_pkts);
             hputu8(st.buf, "NETDROPS", pktsock_drops);
 
-            hgetu8(st.buf, "NETPKTTL", (long long unsigned int*)&pktsock_pkts_total);
-            hgetu8(st.buf, "NETDRPTL", (long long unsigned int*)&pktsock_drops_total);
+            hgetu8(st.buf, "NETPKTTL", (long unsigned int*)&pktsock_pkts_total);
+            hgetu8(st.buf, "NETDRPTL", (long unsigned int*)&pktsock_drops_total);
             hputu8(st.buf, "NETPKTTL", pktsock_pkts_total + pktsock_pkts);
             hputu8(st.buf, "NETDRPTL", pktsock_drops_total + pktsock_drops);
 
