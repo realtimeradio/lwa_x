@@ -232,7 +232,7 @@ typedef struct paper_gpu_input_databuf {
 
 typedef struct paper_output_header {
   uint64_t mcnt;
-  uint64_t flags[(N_CHAN_PER_X+63)/64];
+  uint64_t flags[(N_CHAN_PER_X+63) /64];
 } paper_output_header_t;
 
 typedef uint8_t paper_output_header_cache_alignment[
@@ -256,42 +256,46 @@ typedef struct paper_output_databuf {
  */
 
 #define N_BASELINES               (N_ANTS * (N_ANTS + 1)/2)
-#define N_CROSSPRODS              (N_ANTS * (N_ANTS - 1)/2)
 #define N_COMPLEX_PER_BASELINE    (N_STOKES * N_CHAN_PER_X)
-#define N_BDA_BINS                       5        
+#define N_BASELINES_BDA           (8*387 + 4*1533 + 2*7168 + 21571 + 30768) // (((N_ANTS-2)*(N_ANTS-1)/2) + 2)
+
+#define N_BDABUF_BLOCKS 2
+#define N_BDABUF_BINS   4
+#define N_MAX_INTTIME   8  // The longest baselines are collected for 8 time samples
 
 // integration bin indexing
-#define hera_int_bin_buf_data_idx(b, c, p) \
-  ((((b) * N_CHAN_PER_X * N_STOKES) + ((c) * N_STOKES) + (p)) * 2)
+#define hera_bda_buf_data_idx(l, s, b, c, p) \
+  ((((l)*(b)*N_CHAN_PER_X*N_STOKES)+((s)*N_CHAN_PER_X*N_STOKES)+((c)*N_STOKES)+(p))*2)
 
 
 typedef struct hera_bda_header{
-  uint64_t mcnt;        // mcnt of the first time sample in the data
-  int sam;
-  int totsam;           // number of time samples to be added (from config file)
-  unsigned long long datsize;     // size of buffer (from no. baselines)
+  uint64_t mcnt[8];               // mcnt of the first time sample in the data
+  uint64_t datsize;               // size of buffer (from no. baselines)
+  int sample;
+  uint64_t baselines;
+  int *ant_pair_0;
+  int *ant_pair_1; 
 } hera_bda_header_t;
 
 typedef uint8_t hera_bda_header_cache_alignment[
   CACHE_ALIGNMENT - (sizeof(hera_bda_header_t)%CACHE_ALIGNMENT)
 ];
 
-typedef struct hera_int_bin_buf{
-  hera_bda_header_t header;
+typedef struct hera_bda_block{
+  hera_bda_header_t header[N_BDABUF_BINS];
   hera_bda_header_cache_alignment padding;
-  uint32_t *data;
-} hera_int_bin_buf_t;
+  uint32_t *data[N_BDABUF_BINS];
+} hera_bda_block_t;
 
-typedef struct hera_bda_buf{
-  int *ant_pair_0[N_BDA_BINS];
-  int *ant_pair_1[N_BDA_BINS];
-  unsigned long int baselines_per_bin[N_BDA_BINS];
-  char send[N_BDA_BINS];         // 0 - don't packetize, 1 - ready for sending
-  hera_int_bin_buf_t buf[N_BDA_BINS];
-} hera_bda_buf_t;
+typedef struct hera_bda_databuf{
+  hashpipe_databuf_t header;
+  hashpipe_databuf_cache_alignment padding;
+  hera_bda_block_t block[N_BDABUF_BLOCKS];
+} hera_bda_databuf_t;
+
 
 /*
- * CATCHER BUFFER STRUCTURES
+ * CATCHER BUFFER STRUCTURES     
  */
 
 #define CATCHER_N_BLOCKS        4
@@ -300,14 +304,18 @@ typedef struct hera_bda_buf{
 #define OUTPUT_BYTES_PER_PACKET (4096)
 #define CATCHER_CHAN_SUM        1
 #define N_STOKES                4
-#define BASELINES_PER_BLOCK     16384
+#define BASELINES_PER_BLOCK     4096
 
-#define CHAN_PER_CATCHER_PKT   (OUTPUT_BYTES_PER_PACKET/(N_STOKES * 8L))
-#define PACKETS_PER_BASELINE   (N_CHAN_TOTAL/CHAN_PER_CATCHER_PKT)
-#define PACKETS_PER_BL_PER_X   (PACKETS_PER_BASELINE/N_XENGINES_PER_TIME)
-#define PACKETS_PER_BLOCK      (BASELINES_PER_BLOCK * TIME_DEMUX * PACKETS_PER_BASELINE)
+#define CHAN_PER_CATCHER_PKT   (OUTPUT_BYTES_PER_PACKET/(N_STOKES * 8L))                    // 128
+#define PACKETS_PER_BASELINE   (N_CHAN_TOTAL/CHAN_PER_CATCHER_PKT)                          //  48
+#define PACKETS_PER_BL_PER_X   (PACKETS_PER_BASELINE/N_XENGINES_PER_TIME)                   //   3
+#define PACKETS_PER_BLOCK      (BASELINES_PER_BLOCK * TIME_DEMUX * PACKETS_PER_BASELINE)    // 1572864
 
-#define BYTES_PER_BLOCK        (PACKETS_PER_BLOCK * OUTPUT_BYTES_PER_PACKET)        
+#define BYTES_PER_BLOCK        (PACKETS_PER_BLOCK * OUTPUT_BYTES_PER_PACKET)                // 6GB
+
+#define hera_bda_buf_data_offset(l, s, b, o) \
+  ((((l)*(b)*N_CHAN_PER_X*N_STOKES)+((s)*N_CHAN_PER_X*N_STOKES)+((o)*CHAN_PER_CATCHER_PKT*N_STOKES))*2)
+
 
 //entries_per_block = (BASELINES_PER_BLOCK * N_CHAN_TOTAL * TIME_DEMUX * N_STOKES)
 
@@ -334,7 +342,7 @@ typedef struct hera_bda_buf{
 
 typedef struct hera_catcher_input_header{
   uint64_t good_data;
-  uint64_t bcnt;                             // starting value of baseline_id for this block
+  uint32_t bcnt[BASELINES_PER_BLOCK];        // starting value of baseline_id for this block
   uint64_t mcnt[BASELINES_PER_BLOCK];        // times are diff for each baseline 
   uint16_t ant_pair_0[BASELINES_PER_BLOCK];  // list of antennas in this block
   uint16_t ant_pair_1[BASELINES_PER_BLOCK]; 
@@ -357,9 +365,10 @@ typedef struct hera_catcher_input_databuf {
   hera_catcher_input_block_t block[CATCHER_N_BLOCKS];
 } hera_catcher_input_databuf_t;
 
-//#define XENG_CHAN_SUM 4
-//#define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL/XENG_CHAN_SUM * (N_INPUTS * ((N_INPUTS>>1) + 1)))
-//#define VIS_MATRIX_ENTRIES_PER_CHAN (N_INPUTS * ((N_INPUTS>>1) + 1))
+#define XENG_CHAN_SUM 1
+#define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL/XENG_CHAN_SUM * (N_INPUTS * ((N_INPUTS>>1) + 1)))
+#define VIS_MATRIX_ENTRIES_PER_CHAN (N_INPUTS * ((N_INPUTS>>1) + 1))
+
 //#define PACKETS_PER_VIS_MATRIX ((8L*TIME_DEMUX*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
 
 /*
@@ -507,6 +516,67 @@ static inline int paper_gpu_input_databuf_set_free(paper_gpu_input_databuf_t *d,
 }
 
 static inline int paper_gpu_input_databuf_set_filled(paper_gpu_input_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_set_filled((hashpipe_databuf_t *)d, block_id);
+}
+
+/*
+ * BASELINE DEPENDENT AVERAGING BUFFER FUNCTIONS
+ */
+
+hashpipe_databuf_t *hera_bda_databuf_create(int instance_id, int databuf_id);
+
+static inline void hera_bda_databuf_clear(hera_bda_databuf_t *d)
+{
+    hashpipe_databuf_clear((hashpipe_databuf_t *)d);
+}
+
+static inline hera_bda_databuf_t *hera_bda_databuf_attach(int instance_id, int databuf_id)
+{
+    return (hera_bda_databuf_t *)hashpipe_databuf_attach(instance_id, databuf_id);
+}
+
+static inline int hera_bda_databuf_detach(hera_bda_databuf_t *d)
+{
+    return hashpipe_databuf_detach((hashpipe_databuf_t *)d);
+}
+
+static inline int hera_bda_databuf_block_status(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_block_status((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_total_status(hera_bda_databuf_t *d)
+{
+    return hashpipe_databuf_total_status((hashpipe_databuf_t *)d);
+}
+
+static inline int hera_bda_databuf_wait_free(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_wait_free((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_busywait_free(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_busywait_free((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_wait_filled(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_wait_filled((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_busywait_filled(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_busywait_filled((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_set_free(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_set_free((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_set_filled(hera_bda_databuf_t *d, int block_id)
 {
     return hashpipe_databuf_set_filled((hashpipe_databuf_t *)d, block_id);
 }

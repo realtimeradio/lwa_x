@@ -229,11 +229,41 @@ hashpipe_databuf_t *paper_gpu_input_databuf_create(int instance_id, int databuf_
 
 hashpipe_databuf_t *paper_output_databuf_create(int instance_id, int databuf_id)
 {
+#ifdef DEBUG_SEMS
+    // Init clock variables
+    if(databuf_id==1) {
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        now.tv_sec = start.tv_sec;
+        now.tv_nsec = start.tv_nsec;
+    }
+#endif
+
     /* Calc databuf sizes */
     size_t header_size = sizeof(hashpipe_databuf_t)
                        + sizeof(hashpipe_databuf_cache_alignment);
     size_t block_size  = sizeof(paper_output_block_t);
     int    n_block = N_OUTPUT_BLOCKS;
+
+    return hashpipe_databuf_create(
+        instance_id, databuf_id, header_size, block_size, n_block);
+}
+
+hashpipe_databuf_t *hera_bda_databuf_create(int instance_id, int databuf_id)
+{
+#ifdef DEBUG_SEMS
+    // Init clock variables
+    if(databuf_id==1) {
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        now.tv_sec = start.tv_sec;
+        now.tv_nsec = start.tv_nsec;
+    }
+#endif
+
+    /* Calc databuf sizes */
+    size_t header_size = sizeof(hashpipe_databuf_t)
+                       + sizeof(hashpipe_databuf_cache_alignment);
+    size_t block_size  = sizeof(hera_bda_block_t);
+    int    n_block = N_BDABUF_BLOCKS;
 
     return hashpipe_databuf_create(
         instance_id, databuf_id, header_size, block_size, n_block);
