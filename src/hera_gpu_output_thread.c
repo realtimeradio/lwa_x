@@ -23,7 +23,7 @@
 #include "hashpipe.h"
 #include "paper_databuf.h"
 
-#define LOG(x)           ((int)(log((x))/log(2))) // yields msb loc
+#define LOG(x)           ((uint32_t)(log((x))/log(2))) // yields msb loc
 #define CHECK_PWR2(x)    (!((x)&((x)-1)))
 
 // Macros for generating values for the pkthdr_t fields
@@ -35,6 +35,8 @@
 #define ANTENNA(x)        (htobe16((uint16_t)(x)))
 
 #define CONVERT(x)        (htobe32((x)))
+
+//#define PRINT_TEST
 
 typedef int32_t pktdata_t;
 static XGPUInfo xgpu_info;
@@ -70,7 +72,7 @@ typedef struct struct_pkt {
 
 // Set to 200 Mbps -- OK for two instances per node.
 // With 16 nodes, amounts to 6.4 Gbps of data
-#define PACKET_DELAY_NS (4 * 8*OUTPUT_BYTES_PER_PACKET)
+#define PACKET_DELAY_NS (4 * 8 * OUTPUT_BYTES_PER_PACKET)
 
 // bytes_per_dump depends on xgpu_info.triLength
 static uint64_t bytes_per_dump = 0;
@@ -124,7 +126,7 @@ open_udp_socket(const char *host, const char *port)
 
     freeaddrinfo(result);
 
-#if 0
+#ifdef PRINT_TEST
     // Print send buffer size
     int bufsize;
     unsigned int bufsizesize = sizeof(bufsize);
@@ -293,9 +295,12 @@ static int init_buffer(hera_bda_buf_t *bdabuf)
    // Load baseline averaging params from config file
    FILE *fp;  
    int j, bin, a0, a1, inttime;
-   unsigned long ctr[N_BDA_BINS] = {0,0,0,0,0};
+   unsigned long long ctr[N_BDA_BINS] = {0,0,0,0,0};
    hera_int_bin_buf_t *intbuf;
 
+   for(j=0;j<N_BDA_BINS;j++){ 
+     bdabuf->baselines_per_bin[j] = 0;
+   }
    // count baselines in each bin   
    if((fp=fopen("bda_config.txt","r")) == NULL){
       printf("Cannot open the configuration file.\n");
@@ -306,11 +311,27 @@ static int init_buffer(hera_bda_buf_t *bdabuf)
         printf("(%d,%d): Samples to integrate not power of 2!\n",a0,a1);
         exit(1);
       }
-      bdabuf->baselines_per_bin[LOG(inttime)]++;
+      bdabuf->baselines_per_bin[LOG(inttime)]+=1;
+      //switch(inttime){
+      //  case  1: bdabuf->baselines_per_bin[0]++; break;
+      //  case  2: bdabuf->baselines_per_bin[1]++; break;
+      //  case  4: bdabuf->baselines_per_bin[2]++; break;
+      //  case  8: bdabuf->baselines_per_bin[3]++; break;
+      //  case 16: bdabuf->baselines_per_bin[4]++; break;
+      //  default: printf("(%d,%d): Samples to integrate not power of 2!\n",a0,a1); exit(1);
+      //}
    }
 
    // Include autos for the no-integration baselines
-   bdabuf->baselines_per_bin[0] += N_ANTS;
+   bdabuf->baselines_per_bin[0] += N_ANTS; 
+
+#ifdef PRINT_TEST
+   fprintf(stderr,"Finished loading config file. Allocating memory..\n");
+   
+   for(j=0; j<N_BDA_BINS; j++){
+     fprintf(stderr,"Bin:%d\tBaselines:%lld\n",j,bdabuf->baselines_per_bin[j]);
+   }
+#endif
 
    // malloc for storing ant pairs
    for(j=0; j<N_BDA_BINS; j++){
@@ -348,6 +369,13 @@ static int init_buffer(hera_bda_buf_t *bdabuf)
        return -1;
      memset(intbuf->data, 0, intbuf->header.datsize);
    }
+
+   for(j=1;j<N_BDA_BINS;j++){ 
+     fprintf(stderr,"Bin:%d\tBaselines:%lld\tBin Size:%lld\n",
+             j,bdabuf->baselines_per_bin[j],
+             bdabuf->buf[j].header.datsize);
+   }
+
 return 1;
 }
 
@@ -356,11 +384,14 @@ return 1;
 
 static void *run(hashpipe_thread_args_t * args)
 {
+
    // Local aliases to shorten access to args fields
    // Our input buffer happens to be a paper_ouput_databuf
    paper_output_databuf_t *db = (paper_output_databuf_t *)args->ibuf;
    hashpipe_status_t st = args->st;
    const char * status_key = args->thread_desc->skey;
+
+   fprintf(stderr,"Initializing BDA buffers..\n");
 
    // Initialize buffers to store averaged baselines
    hera_bda_buf_t bdabuf;
@@ -380,6 +411,8 @@ static void *run(hashpipe_thread_args_t * args)
    hputu4(st.buf, "OUTDUMPS", 0);
    hashpipe_status_unlock_safe(&st);
 
+   fprintf(stderr,"Opening socket, starting main loop..\n");
+
    pkt_t pkt;
    pkt.hdr.xeng_id = XENG_ID(xengine_id);
    pkt.hdr.payload_len = PAYLOAD_LEN(OUTPUT_BYTES_PER_PACKET);
@@ -390,7 +423,7 @@ static void *run(hashpipe_thread_args_t * args)
 #define stringify(x) stringify2(x)
 
    // Open socket
-   sockfd = open_udp_socket("catcher", stringify(CATCHER_PORT));
+   sockfd = open_udp_socket("10.10.10.222",stringify(CATCHER_PORT)); //"catcher", stringify(CATCHER_PORT));
    if(sockfd == -1) {
        hashpipe_error(__FUNCTION__, "error opening socket");
        pthread_exit(NULL);
@@ -415,22 +448,27 @@ static void *run(hashpipe_thread_args_t * args)
 
    /* Main loop */
    int rv;
-   int casper_chan, gpu_chan;
-   unsigned long bl;
-   int j,pol;
    unsigned int dumps = 0;
    int block_idx = 0;
    struct timespec start, stop;
+   uint32_t nbytes = 0;
+   int casper_chan, gpu_chan;
+   unsigned long bl;
+   int j,pol;
    struct timespec pkt_start, pkt_stop;
    pktdata_t re, im;    //pktdata_t is 32bits
-   uint32_t nbytes = 0;
    int offset = 0;
    unsigned long long datoffset = 0;
    uint16_t ant0, ant1;
    unsigned long long idx_baseline; 
-   int baseline_id;
+   int baseline_id = 0;
    off_t idx_regtile;
    hera_int_bin_buf_t *intbuf;
+
+#ifdef PRINT_TEST
+   fprintf(stderr,"Number of antennas:%d\n",N_ANTS);
+   fprintf(stderr,"Number of channels per X-Eng: %d\n",N_CHAN_PER_X);
+#endif
 
    while (run_threads()) {
 
@@ -472,10 +510,18 @@ static void *run(hashpipe_thread_args_t * args)
      /* ------------------------------------------------ */
 
      for(j=0; j<N_BDA_BINS; j++){ //intbuf loop
+
+       fprintf(stderr,"Processing buffer: %d\n",j);
+
        intbuf = &(bdabuf.buf[j]);
        intbuf->header.mcnt = db->block[block_idx].header.mcnt;
 
        if (bdabuf.send[j]){
+
+#ifdef PRINT_TEST
+     fprintf(stderr,"Sending buffer: %d\n", j);         
+#endif
+
          pkt.hdr.timestamp = TIMESTAMP(intbuf->header.mcnt);
          offset = 0; nbytes = 0;
          p_out = pkt.data; 
@@ -558,6 +604,10 @@ static void *run(hashpipe_thread_args_t * args)
          memset(intbuf->data, 0, intbuf->header.datsize);
           
        }else{
+
+#ifdef PRINT_TEST
+     fprintf(stderr,"Copying buffer: %d\n", j);         
+#endif
          for(bl=0; bl<bdabuf.baselines_per_bin[j]; bl++){
            ant0 = bdabuf.ant_pair_0[j][bl]; 
            ant1 = bdabuf.ant_pair_1[j][bl];
@@ -573,7 +623,12 @@ static void *run(hashpipe_thread_args_t * args)
                intbuf->data[datoffset] += re;
                intbuf->data[datoffset+1] += -im;
              }
+             //fprintf(stderr,"bl:%ld\tchan:%d\toffset:%lld\n",bl,casper_chan,datoffset);
            }
+
+#ifdef PRINT_TEST
+           fprintf(stderr,"bl:%ld\toffset:%lld\n",bl,datoffset);
+#endif
          }
  
         intbuf->header.sam += 1;
