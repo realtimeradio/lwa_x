@@ -134,7 +134,7 @@ case ${hostname} in
       #                               GPU       NET FLF GPU OUT
       # mask  bind_host               DEV  XID  CPU CPU CPU CPU
       "0x00ff eth3                     0  $xid0  0   0x0006   3   4" # Instance 0, eth3
-      "0xff00 eth5                     1  $xid1  8   0x0600   9  12" # Instance 1, eth5
+      "0xff00 eth5                     1  $xid1  8   0x0600  11  12" # Instance 1, eth5
     );;
 
   *)
