@@ -461,7 +461,6 @@ int main(int argc, char *argv[])
   printf("N_BYTES_PER_BLOCK=%u\n", N_BYTES_PER_BLOCK);
 
 
-  fluff_check();
 
 #ifdef DEBUG_FLUFF
   fluffed = paper_fluff(in, out);
@@ -478,6 +477,8 @@ int main(int argc, char *argv[])
         ((float)fluffed*TEST_ITERATIONS*8*sizeof(uint64_t))/ELAPSED_NS(start, stop));
   }
 #endif // DEBUG_FLUFF_GEN
+
+  fluff_check();
 
   return 0;
 }
