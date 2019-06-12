@@ -7,6 +7,7 @@ import subprocess
 
 perf_tweaker = 'tweak-perf.sh'
 paper_init = 'paper_init.sh'
+paper_init_ibv = 'paper_init_ibv.sh'
 
 def run_on_hosts(hosts, cmd, user=None, wait=True):
     if isinstance(cmd, str):
@@ -32,6 +33,8 @@ parser.add_argument('-i', dest='ninstances', type=int, default=2,
                     help='Number of pipeline instances per host')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
+parser.add_argument('--ibverbs', dest='ibverbs', action='store_true', default=False,
+                    help='Use the IB Verbs netthread. Experimental!')
 
 args = parser.parse_args()
 hosts = args.hosts # Too lazy to keey typing this
@@ -47,7 +50,10 @@ if args.runtweak:
     run_on_hosts(hosts, perf_tweaker, user='root', wait=True)
 
 # Start X-Engines
-run_on_hosts(hosts, [paper_init, '0', '1'], wait=True) # two instances per host 
+if args.ibverbs:
+    run_on_hosts(hosts, [paper_init_ibv, '0', '1'], wait=True) # two instances per host
+else:
+    run_on_hosts(hosts, [paper_init, '0', '1'], wait=True) # two instances per host
 
 # Start hashpipe<->redis gateways
 cpu_masks = ['0x0080', '0x8000']
