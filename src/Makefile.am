@@ -27,6 +27,7 @@ paper_threads = paper_fake_net_thread.c       \
 		paper_gpu_thread.c            \
 		paper_fluff_thread.c          \
 		hera_pktsock_thread.c         \
+		hera_ibv_thread.c             \
 		paper_crc_thread.c            \
                 hera_catcher_net_thread.c     \
                 hera_catcher_disk_thread.c    \
@@ -45,13 +46,15 @@ hera_capture = hera_hdf5.h \
 # This is the paper_gpu plugin itself
 lib_LTLIBRARIES = paper_gpu.la
 paper_gpu_la_SOURCES  = $(paper_databuf) $(paper_threads) $(paper_fluff)
-paper_gpu_la_LIBADD   = -lrt -lxgpu
+paper_gpu_la_LIBADD   = -lrt -lxgpu -lhashpipe_ibverbs
 paper_gpu_la_LDFLAGS  = -avoid-version -module -shared -export-dynamic
 paper_gpu_la_LDFLAGS += -L"@XGPU_LIBDIR@" -Wl,-rpath,"@XGPU_LIBDIR@"
 paper_gpu_la_LDFLAGS += -L"@HASHPIPE_LIBDIR@" -Wl,-rpath,"@HASHPIPE_LIBDIR@"
 # Include HDF5 Libraries
 paper_gpu_la_LDFLAGS += -L/usr/lib/x86_64-linux-gnu/hdf5/serial
 paper_gpu_la_LDFLAGS += -lhdf5_hl -lhdf5 -lhiredis
+# for intel compiler:
+#paper_gpu_la_LDFLAGS += -L/usr/local/intel/compilers_and_libraries_2019.4.243/linux/compiler/lib/intel64_lin -Wl,-rpath,/usr/local/intel/compilers_and_libraries_2019.4.243/linux/compiler/lib/intel64_lin
 # Include HDF5 compression libraries
 #paper_gpu_la_LDFLAGS += -L/usr/local/lib/python2.7/dist-packages/bitshuffle/plugin
 #paper_gpu_la_LDFLAGS += -lh5LZF -lh5bshuf
@@ -59,6 +62,7 @@ paper_gpu_la_LDFLAGS += -lhdf5_hl -lhdf5 -lhiredis
 
 # Installed scripts
 dist_bin_SCRIPTS = scripts/paper_init.sh \
+                   scripts/paper_init_ibv.sh \
 	           scripts/paper_crc_init.sh \
 	           scripts/xtor_down.sh \
 	           scripts/xtor_up.py \
