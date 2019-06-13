@@ -484,7 +484,7 @@ static inline uint64_t process_packet(
             //fprintf(stdout, "m:%d, a:%d, c:%d, %lu\n", binfo.m, binfo.a, binfo.c, paper_input_databuf_data_idx(binfo.m, binfo.a, binfo.c, 0));
 	    payload_p        = (uint64_t *)((p_frame + UDP_PAYLOAD_OFFSET)+8+(i*2*N_CHAN_PER_PACKET*N_TIME_PER_PACKET));
             for(j=0; j<((2*N_CHAN_PER_PACKET*N_TIME_PER_PACKET) >> 5); j+=1) {
-                vecbuf = _mm256_set_epi64x(payload_p[0], payload_p[1], payload_p[2], payload_p[3]);
+                vecbuf = _mm256_set_epi64x(payload_p[3], payload_p[2], payload_p[1], payload_p[0]);
                 _mm256_stream_si256((__m256i *)dest_p, vecbuf);
                 dest_p += 4;
                 payload_p += 4;
