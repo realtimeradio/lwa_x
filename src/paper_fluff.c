@@ -34,11 +34,25 @@ typedef union {
  * This code isn't generic anymore, it assumes that Nt = 2. Sometimes the variable Nt is used to provide
  * hints about what might need changing for different Nt values.
 */
-int paper_fluff(const uint64_t const * const in, uint64_t * out)
+
+struct data {
+    uint64_t * in;
+    uint64_t * out;
+    int n_threads;
+    int thread_id;
+};
+
+void paper_fluff_threaded(void *args)
 {
   //uint64_t v0, v1, v2, v3;
   //vec_t in0, in1, in2, in3;
   //vec_t v0, v1, v2, v3;
+  struct data *d = args;
+  uint64_t *in = d->in;
+  uint64_t *out = d->out;
+  int n_threads = d->n_threads;
+  int thread_id = d->thread_id;
+
   int m, c, a, j, k, nn, mm, wa, wc, rn, i;
 
   __m256i int0, int1, int2, int3, outx, outy;
@@ -73,7 +87,7 @@ int paper_fluff(const uint64_t const * const in, uint64_t * out)
    */
 
   // First loop is over time/4 (i.e., mcounts in steps of 2)
-  for(m=0; m<Nm; m=m+(4/Nt)) { //dealing with 4 time samples, which come from two m-addresses
+  for(m=thread_id*4/Nt; m<Nm; m=m+(n_threads*4/Nt)) { //dealing with 4 time samples, which come from two m-addresses
     // Second loop over antennas, loading 4 each iteration
     for(a=0; a<Na; a=a+4) {
       // Third loop over channels, loading 8 in each iteration
@@ -303,6 +317,33 @@ int paper_fluff(const uint64_t const * const in, uint64_t * out)
   }
   // Return number of 64 bit words fluffed
   //return Nm*Na*2*N_WORD128_PER_PACKET;
+  //return N_BYTES_PER_BLOCK >> 3;
+}
+
+
+#define N_THREADS 2
+int paper_fluff(uint64_t * in, uint64_t * out)
+{
+  int i;
+  struct data args[N_THREADS];
+  pthread_t threads[N_THREADS];
+
+  for (i=0; i<N_THREADS; i++) {
+    args[i].in = in;
+    args[i].out = out;
+    args[i].n_threads = N_THREADS;
+    args[i].thread_id = i;
+  }
+
+  for(i=0; i<N_THREADS; i++){
+    if (pthread_create(&threads[i], NULL, (void *)&paper_fluff_threaded, (void *)(&args[i]))) {
+        fprintf(stderr, "Failed to create fluff thread %d\n", i);
+    }
+  }
+  for(i=0; i<N_THREADS; i++){
+    pthread_join(threads[i], NULL);
+  }
+    
   return N_BYTES_PER_BLOCK >> 3;
 }
 
