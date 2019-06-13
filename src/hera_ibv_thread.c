@@ -602,9 +602,11 @@ static void *run(hashpipe_thread_args_t * args)
     struct hashpipe_ibv_recv_pkt * hibv_rpkt;
     struct hashpipe_ibv_recv_pkt * curr_rpkt;
     char ifname[IFNAMSIZ];
+    int bindport;
 
     hashpipe_status_lock_safe(&st);
     hgets(st.buf, "BINDHOST", IFNAMSIZ, ifname);
+    hgeti4(st.buf, "BINDPORT", &bindport);
     hashpipe_status_unlock_safe(&st);
 
     strncpy(hibv_ctx.interface_name, ifname, IFNAMSIZ);
@@ -622,10 +624,8 @@ static void *run(hashpipe_thread_args_t * args)
     printf("max_qp_wr=%u\n", hibv_ctx.dev_attr.max_qp_wr);
 
     // Subscribe to RX flows
-    int src_port = 8511;
-    printf("udp ucast flow\n");
     if(hashpipe_ibv_flow(&hibv_ctx, 0, IBV_FLOW_SPEC_UDP,
-          hibv_ctx.mac, NULL, 0, 0, 0, 0, src_port, 0)) {
+          hibv_ctx.mac, NULL, 0, 0, 0, 0, 0, bindport)) {
       hashpipe_error(__FUNCTION__, "Failed to configure IBV flow rule");
     }
 
@@ -696,7 +696,6 @@ static void *run(hashpipe_thread_args_t * args)
     initialize_block(db, N_TIME_PER_BLOCK*TIME_DEMUX + time_index);
 
     /* Read network params */
-    int bindport = 8511;
     // (N_BYTES_PER_PACKET excludes header, so +8 for the header)
     size_t expected_packet_size = N_BYTES_PER_PACKET + 8 + UDP_PAYLOAD_OFFSET; // Inc. Eth/IP/UDP headers
 
