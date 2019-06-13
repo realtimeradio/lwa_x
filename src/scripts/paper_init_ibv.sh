@@ -133,8 +133,8 @@ case ${hostname} in
     instances=( 
       #                               GPU       NET FLF GPU OUT
       # mask  bind_host               DEV  XID  CPU CPU CPU CPU
-      "0x00ff eth3                     0  $xid0  0   1   2   3" # Instance 0, eth3
-      "0xff00 eth5                     1  $xid1  9   10   11  12" # Instance 1, eth5
+      "0x00ff eth3                     0  $xid0  0   0x0006   3   4" # Instance 0, eth3
+      "0xff00 eth5                     1  $xid1  8   0x0600   9  12" # Instance 1, eth5
     );;
 
   *)
@@ -172,7 +172,7 @@ function init() {
     -o GPUDEV=$gpudev \
     -o XID=$xid \
     -c $netcpu hera_ibv_thread \
-    -c $flfcpu paper_fluff_thread \
+    -m $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
     -c $outcpu hera_gpu_output_thread
 
@@ -182,7 +182,7 @@ function init() {
     -o GPUDEV=$gpudev \
     -o XID=$xid \
     -c $netcpu hera_ibv_thread \
-    -c $flfcpu paper_fluff_thread \
+    -m $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
     -c $outcpu hera_gpu_output_thread \
      < /dev/null \
