@@ -6,4 +6,4 @@
 	url = https://github.com/kiyo-masui/bitshuffle
 [submodule "hashpipe"]
 	path = hashpipe
-	url = https://astro.berkeley.edu/~davidm/hashpipe.git
+	url = https://github.com/hera-team/hashpipe.git
