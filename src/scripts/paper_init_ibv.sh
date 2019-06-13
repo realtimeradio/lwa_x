@@ -171,7 +171,7 @@ function init() {
     -o BINDHOST=$bindhost \
     -o GPUDEV=$gpudev \
     -o XID=$xid \
-    -c $netcpu hera_pktsock_thread \
+    -c $netcpu hera_ibv_thread \
     -m $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
     -c $outcpu hera_gpu_output_thread
@@ -181,7 +181,7 @@ function init() {
     -o BINDHOST=$bindhost \
     -o GPUDEV=$gpudev \
     -o XID=$xid \
-    -c $netcpu hera_pktsock_thread \
+    -c $netcpu hera_ibv_thread \
     -m $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
     -c $outcpu hera_gpu_output_thread \
