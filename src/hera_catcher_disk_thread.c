@@ -299,7 +299,7 @@ static hid_t open_hdf5_from_template(char * sourcename, char * destname)
 }
 
 
-#define VERSION_BYTES 32
+#define VERSION_BYTES 128
 static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, uint64_t file_obs_id, double file_start_t, char* tag) {
     hid_t dataset_id;
     hid_t memtype;

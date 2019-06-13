@@ -813,35 +813,35 @@ static void *run(hashpipe_thread_args_t * args)
 
 	    // Get and put min and max values.  The "get-then-put" allows the
 	    // user to reset the min max values in the status buffer.
-	    hgeti8(st.buf, "NETWATMN", (long long *)&status_ns);
+	    hgeti8(st.buf, "NETWATMN", (long *)&status_ns);
 	    status_ns = MIN(min_wait_ns, status_ns);
             hputi8(st.buf, "NETWATMN", status_ns);
 
-            hgeti8(st.buf, "NETRECMN", (long long *)&status_ns);
+            hgeti8(st.buf, "NETRECMN", (long *)&status_ns);
 	    status_ns = MIN(min_recv_ns, status_ns);
             hputi8(st.buf, "NETRECMN", status_ns);
 
-            hgeti8(st.buf, "NETPRCMN", (long long *)&status_ns);
+            hgeti8(st.buf, "NETPRCMN", (long *)&status_ns);
 	    status_ns = MIN(min_proc_ns, status_ns);
             hputi8(st.buf, "NETPRCMN", status_ns);
 
-            hgeti8(st.buf, "NETWATMX", (long long *)&status_ns);
+            hgeti8(st.buf, "NETWATMX", (long *)&status_ns);
 	    status_ns = MAX(max_wait_ns, status_ns);
             hputi8(st.buf, "NETWATMX", status_ns);
 
-            hgeti8(st.buf, "NETRECMX", (long long *)&status_ns);
+            hgeti8(st.buf, "NETRECMX", (long *)&status_ns);
 	    status_ns = MAX(max_recv_ns, status_ns);
             hputi8(st.buf, "NETRECMX", status_ns);
 
-            hgeti8(st.buf, "NETPRCMX", (long long *)&status_ns);
+            hgeti8(st.buf, "NETPRCMX", (long *)&status_ns);
 	    status_ns = MAX(max_proc_ns, status_ns);
             hputi8(st.buf, "NETPRCMX", status_ns);
 
             hputu8(st.buf, "NETPKTS",  pktsock_pkts);
             hputu8(st.buf, "NETDROPS", pktsock_drops);
 
-            hgetu8(st.buf, "NETPKTTL", (long long unsigned int*)&pktsock_pkts_total);
-            hgetu8(st.buf, "NETDRPTL", (long long unsigned int*)&pktsock_drops_total);
+            hgetu8(st.buf, "NETPKTTL", (long unsigned int*)&pktsock_pkts_total);
+            hgetu8(st.buf, "NETDRPTL", (long unsigned int*)&pktsock_drops_total);
             hputu8(st.buf, "NETPKTTL", pktsock_pkts_total + pktsock_pkts);
             hputu8(st.buf, "NETDRPTL", pktsock_drops_total + pktsock_drops);
 
