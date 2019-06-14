@@ -423,7 +423,7 @@ static void *run(hashpipe_thread_args_t * args)
 #define stringify(x) stringify2(x)
 
    // Open socket
-   sockfd = open_udp_socket("10.10.10.222",stringify(CATCHER_PORT)); //"catcher", stringify(CATCHER_PORT));
+   sockfd = open_udp_socket("catcher", stringify(CATCHER_PORT));
    if(sockfd == -1) {
        hashpipe_error(__FUNCTION__, "error opening socket");
        pthread_exit(NULL);
