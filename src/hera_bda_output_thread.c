@@ -235,7 +235,7 @@ static void *run(hashpipe_thread_args_t * args)
      hashpipe_status_lock_safe(&st);
      hputs(st.buf, status_key, "processing");
      hputi4(st.buf, "OUTBLKIN", block_idx);
-     hputu4(st.buf, "OUTBCNT",  baseline_id/N_BASELINES_BDA);
+     hputu4(st.buf, "OUTBCNT",  baseline_id/N_BLTS_BDA);
      hashpipe_status_unlock_safe(&st);
      
      buf = &(db->block[block_idx]); 

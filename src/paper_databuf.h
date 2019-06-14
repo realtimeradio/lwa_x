@@ -257,7 +257,7 @@ typedef struct paper_output_databuf {
 
 #define N_BASELINES               (N_ANTS * (N_ANTS + 1)/2)
 #define N_COMPLEX_PER_BASELINE    (N_STOKES * N_CHAN_PER_X)
-#define N_BASELINES_BDA           (8*387 + 4*1533 + 2*7168 + 21571 + 30768) // (((N_ANTS-2)*(N_ANTS-1)/2) + 2)
+#define N_BLTS_BDA                (8*387 + 4*1533 + 2*7168 + 21571 + 30768) // (((N_ANTS-2)*(N_ANTS-1)/2) + 2)
 
 #define N_BDABUF_BLOCKS 2
 #define N_BDABUF_BINS   4
@@ -339,6 +339,9 @@ typedef struct hera_bda_databuf{
 
 #define  hera_catcher_input_databuf_pkt_offset(b, t, x, o) \
      (((b)*TIME_DEMUX*PACKETS_PER_BASELINE) + ((t)*PACKETS_PER_BASELINE) + ((x)*PACKETS_PER_BL_PER_X) + (o))
+
+#define hera_catcher_input_databuf_by_bcnt_idx32(b,s) \
+      (((b)*TIME_DEMUX + (s))*N_CHAN_TOTAL*N_STOKES*2)
 
 typedef struct hera_catcher_input_header{
   uint64_t good_data;
