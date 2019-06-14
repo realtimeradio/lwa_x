@@ -1,0 +1,999 @@
+/*
+ * hera_catcher_disk_thread.c
+ *
+ * Writes correlated data to disk as hdf5 files.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+#include <signal.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+#include <sys/types.h>
+#include <sys/sendfile.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <hdf5.h>
+#include <smmintrin.h>
+#include <immintrin.h>
+#include <hiredis.h>
+
+#include "hashpipe.h"
+#include "paper_databuf.h"
+#include "lzf_filter.h"
+
+#define ELAPSED_NS(start,stop) \
+  (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
+
+#ifndef MIN
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
+
+#define N_DATA_DIMS (4)
+#define N_CHAN_PROCESSED (N_CHAN_TOTAL / (CATCHER_CHAN_SUM * XENG_CHAN_SUM))
+#define N_CHAN_RECEIVED (N_CHAN_TOTAL / XENG_CHAN_SUM)
+#define N_BL_PER_WRITE (32)
+//#define SKIP_DIFF
+
+#define CPTR(VAR,CONST) ((VAR)=(CONST),&(VAR))
+
+#define MAXTIMES 64
+
+static hid_t complex_id;
+static hid_t boolenumtype;
+//static hid_t boolean_id;
+
+typedef enum {
+    FALSE,
+    TRUE
+} bool_t;
+
+typedef struct {
+    double e;
+    double n;
+    double u;
+} enu_t;
+
+typedef struct {
+    int a;
+    int b;
+} bl_t;
+
+typedef struct {
+    int ant0;
+    int ant1;
+    int tsamp;
+} bl_bda_t;
+
+typedef struct {
+    hid_t file_id;
+    hid_t header_gid;
+    hid_t data_gid;
+    hid_t extra_keywords_gid;
+    hid_t visdata_did;
+    hid_t flags_did;
+    hid_t nsamples_did;
+    hid_t time_array_did;
+    hid_t integration_time_did;
+    hid_t uvw_array_did;
+    hid_t ant_1_array_did;
+    hid_t ant_2_array_did;
+    hid_t visdata_fs;
+    hid_t flags_fs;
+    hid_t nsamples_fs;
+    hid_t time_array_fs;
+    hid_t integration_time_fs;
+    hid_t uvw_array_fs;
+    hid_t ant_1_array_fs;
+    hid_t ant_2_array_fs;
+} hdf5_id_t;
+
+static hid_t open_hdf5_from_template(char * sourcename, char * destname)
+{
+    int read_fd, write_fd;
+    struct stat stat_buf;
+    off_t offset = 0;
+    hid_t status;
+    
+    read_fd = open(sourcename, O_RDONLY);
+    if (read_fd < 0) {
+        hashpipe_error(__FUNCTION__, "error opening %s", sourcename);
+        pthread_exit(NULL);
+    }
+
+    // Get the file size
+    fstat(read_fd, &stat_buf);
+
+    write_fd = open(destname, O_WRONLY | O_CREAT, stat_buf.st_mode);
+    if (write_fd < 0) {
+        hashpipe_error(__FUNCTION__, "error opening %s", destname);
+        pthread_exit(NULL);
+    }
+
+    sendfile(write_fd, read_fd, &offset, stat_buf.st_size);
+    
+    close(read_fd);
+    close(write_fd);
+
+    status = H5Fopen(destname, H5F_ACC_RDWR, H5P_DEFAULT);
+    if (status < 0) {
+        hashpipe_error(__FUNCTION__, "error opening %s as HDF5 file", destname);
+        pthread_exit(NULL);
+    }
+
+    return status;
+}
+
+# define FILTER_H5_LZF 32000
+# define FILTER_H5_BITSHUFFLE 32008
+static void init_data_dataset(hdf5_id_t *id){
+
+   hsize_t data_dims[N_DATA_DIMS] = {N_BLTS_BDA, 1, N_CHAN_PROCESSED, N_STOKES};
+   hsize_t chunk_dims[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
+
+   hid_t file_space = H5Screate_simple(N_DATA_DIMS, data_dims, NULL);
+
+   //make plist for LZF datasets
+   int r;
+   r = register_lzf();
+   if (r<0) {
+     hashpipe_error(__FUNCTION__, "Failed to register LZF filter");
+     pthread_exit(NULL);
+   }
+   hid_t plist_lzf = H5Pcreate(H5P_DATASET_CREATE);
+   H5Pset_chunk(plist_lzf, N_DATA_DIMS, chunk_dims);
+   H5Pset_shuffle(plist_lzf);
+   H5Pset_filter(plist_lzf, H5PY_FILTER_LZF, H5Z_FLAG_OPTIONAL, 0, NULL);
+
+   // make plist for non-compressed datasets
+   hid_t plist = H5Pcreate(H5P_DATASET_CREATE);
+   H5Pset_layout(plist, H5D_CHUNKED);
+   H5Pset_chunk(plist, N_DATA_DIMS, chunk_dims);
+
+   // Now we have the dataspace properties, create the datasets
+   id->visdata_did = H5Dcreate(id->data_gid, "visdata", complex_id, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+   if (id->visdata_did < 0) {
+       hashpipe_error(__FUNCTION__, "Failed to create visdata dataset");
+       pthread_exit(NULL);
+   }
+
+   id->nsamples_did = H5Dcreate(id->data_gid, "nsamples", H5T_IEEE_F32LE, file_space, H5P_DEFAULT, plist_lzf, H5P_DEFAULT);
+   if (id->nsamples_did < 0) {
+       hashpipe_error(__FUNCTION__, "Failed to create nsamples dataset");
+       pthread_exit(NULL);
+   }
+
+   id->flags_did = H5Dcreate(id->data_gid, "flags", boolenumtype, file_space, H5P_DEFAULT, plist_lzf, H5P_DEFAULT);
+   if (id->flags_did < 0) {
+       hashpipe_error(__FUNCTION__, "Failed to create flags dataset");
+       pthread_exit(NULL);
+   }
+
+   H5Pclose(plist);
+   H5Pclose(plist_lzf);
+   H5Sclose(file_space);
+}
+
+/* Create the extensible header entries which have dimensions ~Nblts.
+ * These are:
+ * Header/uvw_array (Nblts x 3)
+ * Header/time_array (Nblts)
+ * Header/integration_time (Nblts)
+ * Header/ant_1_array (Nblts)
+ * Header/ant_2_array (Nblts)
+ */
+#define DIM1 1
+#define DIM2 2
+static void init_headers_dataset(hdf5_id_t *id) {
+   hsize_t dims1[DIM1] = {N_BLTS_BDA};
+   hsize_t chunk_dims1[DIM1] = {1};
+
+   hid_t file_space = H5Screate_simple(DIM1, dims1, NULL);
+   hid_t plist = H5Pcreate(H5P_DATASET_CREATE);
+
+   H5Pset_layout(plist, H5D_CHUNKED);
+   H5Pset_chunk(plist, DIM1, chunk_dims1);
+
+   // Now we have the dataspace properties, create the datasets
+   id->time_array_did = H5Dcreate(id->header_gid, "time_array", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+   if (id->time_array_did < 0) {
+       hashpipe_error(__FUNCTION__, "Failed to create time_array dataset");
+       pthread_exit(NULL);
+   }
+
+   id->integration_time_did = H5Dcreate(id->header_gid, "integration_time", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+   if (id->integration_time_did < 0) {
+       hashpipe_error(__FUNCTION__, "Failed to create integration_time dataset");
+       pthread_exit(NULL);
+   }
+
+   id->ant_1_array_did = H5Dcreate(id->header_gid, "ant_1_array", H5T_NATIVE_INT, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+   if (id->ant_1_array_did < 0) {
+       hashpipe_error(__FUNCTION__, "Failed to create ant_1_array dataset");
+       pthread_exit(NULL);
+   }
+
+   id->ant_2_array_did = H5Dcreate(id->header_gid, "ant_2_array", H5T_NATIVE_INT, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+   if (id->ant_2_array_did < 0) {
+       hashpipe_error(__FUNCTION__, "Failed to create ant_2_array dataset");
+       pthread_exit(NULL);
+   }
+
+   id->time_array_fs = H5Dget_space(id->time_array_did);
+   id->integration_time_fs = H5Dget_space(id->integration_time_did);
+   id->ant_1_array_fs = H5Dget_space(id->ant_1_array_did);
+   id->ant_2_array_fs = H5Dget_space(id->ant_2_array_did);
+
+   H5Pclose(plist);
+   H5Sclose(file_space);
+
+   // TODO: uvw array can be static for a file. See if you can encode this in python.
+   ///* And now uvw_array, which has shape Nblts x 3 */
+   //hsize_t dims2[DIM2]   = {N_BLTS_BDA, 3};
+   //hsize_t chunk_dims2[DIM2] = {1, 3};
+
+   //file_space = H5Screate_simple(DIM2, dims2, NULL);
+   //plist = H5Pcreate(H5P_DATASET_CREATE);
+
+   //H5Pset_layout(plist, H5D_CHUNKED);
+
+   //H5Pset_chunk(plist, DIM2, chunk_dims2);
+
+   //// Now we have the dataspace properties, create the datasets
+   //id->uvw_array_did = H5Dcreate(id->header_gid, "uvw_array", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+   //if (id->uvw_array_did < 0) {
+   //    hashpipe_error(__FUNCTION__, "Failed to create uvw_array dataset");
+   //    pthread_exit(NULL);
+   //}
+   //id->uvw_array_fs = H5Dget_space(id->uvw_array_did);
+
+   //H5Pclose(plist);
+   H5Sclose(file_space);
+}
+
+#define VERSION_BYTES 32
+static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, uint64_t file_obs_id, double file_start_t, char* tag) {
+    hid_t dataset_id;
+    hid_t memtype;
+    hid_t stat;
+    char ver[VERSION_BYTES] = GIT_VERSION; // defined at compile time
+
+    id->file_id = open_hdf5_from_template(template_fname, hdf5_fname);
+
+    // Open HDF5 header groups and create data group
+    id->header_gid = H5Gopen(id->file_id, "Header", H5P_DEFAULT);
+    if (id->header_gid < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header");
+        pthread_exit(NULL);
+    }
+    
+    id->extra_keywords_gid = H5Gopen(id->header_gid, "extra_keywords", H5P_DEFAULT);
+    if (id->extra_keywords_gid < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords");
+        pthread_exit(NULL);
+    }
+
+    id->data_gid = H5Gcreate(id->file_id, "Data", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (id->data_gid < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to create Data group");
+        pthread_exit(NULL);
+    }
+
+    // Create the "Data" group datasets. This function
+    // assigns all the dataset ids to the id struct
+    init_data_dataset(id);
+    // Create the "Header/*" group datasets. This function
+    // assigns all the dataset ids to the id struct
+    init_headers_dataset(id);
+    
+    // Write meta-data values we know at file-open
+    // Write data tag
+    memtype = H5Tcopy(H5T_C_S1);
+    stat = H5Tset_size(memtype, 128);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to set size of tag memtype");
+    }
+    dataset_id = H5Dopen(id->extra_keywords_gid, "tag", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/tag");
+    }
+    stat = H5Dwrite(dataset_id, memtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, tag);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to write Header/tag");
+    }
+    stat = H5Dclose(dataset_id);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/tag");
+    }
+
+    dataset_id = H5Dopen(id->extra_keywords_gid, "obs_id", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/obs_id");
+    }
+    H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_obs_id);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to write Header/extra_keywords/obs_id");
+    }
+    H5Dclose(dataset_id);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/obs_id");
+    }
+    dataset_id = H5Dopen(id->extra_keywords_gid, "corr_ver", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/corr_ver");
+    }
+    memtype = H5Tcopy(H5T_C_S1);
+    stat = H5Tset_size(memtype, VERSION_BYTES);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to set size of corr_ver memtype");
+    }
+    stat = H5Dwrite(dataset_id, memtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, ver);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to write Header/extra_keywords/corr_ver");
+    }
+    stat = H5Dclose(dataset_id);
+    if (stat < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/corr_ver");
+    }
+    dataset_id = H5Dopen(id->extra_keywords_gid, "startt", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/startt");
+    }
+    H5Dwrite(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_start_t);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to write Header/extra_keywords/startt");
+    }
+    H5Dclose(dataset_id);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/startt");
+    }
+}
+
+
+static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, uint64_t file_nblts, uint64_t file_nts) {
+    hid_t dataset_id;
+    dataset_id = H5Dopen(id->extra_keywords_gid, "stopt", H5P_DEFAULT);
+    H5Dwrite(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_stop_t);
+    H5Dclose(dataset_id);
+    dataset_id = H5Dopen(id->extra_keywords_gid, "duration", H5P_DEFAULT);
+    H5Dwrite(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_duration);
+    H5Dclose(dataset_id);
+    dataset_id = H5Dopen(id->header_gid, "Nblts", H5P_DEFAULT);
+    H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_nblts);
+    H5Dclose(dataset_id);
+    dataset_id = H5Dopen(id->header_gid, "Ntimes", H5P_DEFAULT);
+    H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_nts);
+    H5Dclose(dataset_id);
+    // Close datasets
+    if (H5Dclose(id->visdata_did) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close visdata dataset");
+    }
+    if (H5Dclose(id->flags_did) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close flags dataset");
+    }
+    if (H5Dclose(id->nsamples_did) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close nsamples dataset");
+    }
+    // Close groups
+    if (H5Gclose(id->extra_keywords_gid) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close extra_keywords group");
+    }
+    if (H5Gclose(id->header_gid) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close header group");
+    }
+    if (H5Gclose(id->data_gid) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close data group");
+    }
+    // Close file
+    if (H5Fflush(id->file_id, H5F_SCOPE_GLOBAL) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to flush file");
+    }
+    if (H5Fclose(id->file_id) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close file");
+    }
+}
+
+static void close_filespaces(hdf5_id_t *id) {
+    H5Sclose(id->visdata_fs);
+    H5Sclose(id->flags_fs);
+    H5Sclose(id->nsamples_fs);
+    H5Sclose(id->time_array_fs);
+    H5Sclose(id->integration_time_fs);
+    H5Sclose(id->uvw_array_fs);
+    H5Sclose(id->ant_1_array_fs);
+    H5Sclose(id->ant_2_array_fs);
+}
+
+/* Given an array of baseline pairs, figure out the indices of the autocorrs */
+static void get_auto_indices(bl_t *bl_order, int32_t *auto_indices, uint32_t n_bls) {
+    int32_t i = 0;
+    for (i=0; i<N_ANTS; i++) {
+        auto_indices[i] = -1;
+    }
+    for (i=0; i<n_bls; i+=1) {
+        if (bl_order[i].a == bl_order[i].b) {
+            if (bl_order[i].a < N_ANTS) {
+                auto_indices[bl_order[i].a] = i;
+            }
+        }
+    }
+}
+
+///* Given an array of baseline pairs, figure out the indices of the autocorrs */
+//static void get_auto_indices(bl_bda_t *bl_bda_order, int32_t *auto_indices, uint32_t n_blts) {
+//    int32_t i = 0;
+//    for (i=0; i<N_ANTS; i++) {
+//        auto_indices[i] = -1;
+//    }
+//    for (i=0; i<n_blts; i+=1) {
+//        if ((bl_bda_order[i].ant0 == bl_bda_order[i].ant1) && (bl_bda_order.tsamp==0)) {
+//            if (bl_bda_order[i].ant0 < N_ANTS) {
+//                auto_indices[bl_bda_order[i].ant0] = i;
+//            }
+//        }
+//    }
+//}
+
+///* Read the baseline-time order for baseline dependent averaged data from an HDF5 file via the Header/corr_bl_bda_order dataset */
+//static void get_bl_bda_order(hdf5_id_t *id, bl_bda_t *bl_bda_order){
+//    hid_t dataset_id;
+//    herr_t status;
+//    dataset_id = H5Dopen(id->header_gid, "corr_bl_bda_order", H5P_DEFAULT);
+//    if (dataset_id < 0) {
+//        hashpipe_error(__FUNCTION__, "Failed to open Header/corr_bl_order dataset");
+//        pthread_exit(NULL);
+//    }
+//    status = H5Dread(dataset_id, H5T_STD_I32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, bl_bda_order);
+//    if (status < 0) {
+//        hashpipe_error(__FUNCTION__, "Failed to read Header/corr_bl_order dataset");
+//        pthread_exit(NULL);
+//    }
+//    status = H5Dclose(dataset_id);
+//    if (status < 0) {
+//        hashpipe_error(__FUNCTION__, "Failed to close Header/corr_bl_order dataset");
+//        pthread_exit(NULL);
+//    }
+//}
+
+/* Read the baseline order from an HDF5 file via the Header/corr_bl_order dataset */
+static void get_bl_order(hdf5_id_t *id, bl_t *bl_order) {
+    hid_t dataset_id;
+    herr_t status;
+    dataset_id = H5Dopen(id->header_gid, "corr_bl_order", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/corr_bl_order dataset");
+        pthread_exit(NULL);
+    }
+    status = H5Dread(dataset_id, H5T_STD_I32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, bl_order);
+    if (status < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to read Header/corr_bl_order dataset");
+        pthread_exit(NULL);
+    }
+    status = H5Dclose(dataset_id);
+    if (status < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/corr_bl_order dataset");
+        pthread_exit(NULL);
+    }
+}
+
+/* Read the antenna positions from an HDF5 file via the Header/antenna_positions_enu dataset */
+static void get_ant_pos(hdf5_id_t *id, enu_t *ant_pos) {
+    hid_t dataset_id;
+    herr_t status;
+    dataset_id = H5Dopen(id->header_gid, "antenna_positions_enu", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/antenna_positions_enu dataset");
+        pthread_exit(NULL);
+    }
+    status = H5Dread(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, ant_pos);
+    if (status < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to read Header/antenna_positions_enu dataset");
+        pthread_exit(NULL);
+    }
+    status = H5Dclose(dataset_id);
+    if (status < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/antenna_positions_enu dataset");
+        pthread_exit(NULL);
+    }
+}
+
+/*
+Turn an mcnt into a UNIX time in double-precision.
+*/
+static double mcnt2time(uint64_t mcnt, uint32_t sync_time)
+{
+    return sync_time + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
+}
+
+/* 
+ * Write a bcnt to the dataset, at the right offset
+ */
+static void write_baseline_index(hdf5_id_t *id, hsize_t bcnt, hid_t mem_space, uint64_t *visdata_buf)
+{
+    hsize_t start[N_DATA_DIMS] = {(bcnt%N_BLTS_BDA), 0, 0, 0};
+    hsize_t count[N_DATA_DIMS] = {1 , 1, N_CHAN_PROCESSED, N_STOKES};
+    H5Sselect_hyperslab(id->visdata_fs, H5S_SELECT_SET, start, NULL, count, NULL);
+    H5Dwrite(id->visdata_did, complex_id, mem_space, id->visdata_fs, H5P_DEFAULT, visdata_buf);
+}
+
+/* 
+ * Write information to the hdf5 header. The data is written in the order it comes in, so the 
+ * header might not be in a particular order-- verify!
+ * Write: time, ant0, ant1, integration time
+ */
+
+static void write_header(hdf5_id_t *id, hsize_t t, hid_t mem_space_nblts, double *integration_time_buf, double *time_array_buf, int *ant_0_array, int *ant_1_array){
+
+   // integration time  
+   if (H5Dwrite(id->integration_time_did, H5T_NATIVE_DOUBLE, mem_space_nblts, id->integration_time_fs, H5P_DEFAULT, integration_time_buf) < 0){
+        hashpipe_error(__FUNCTION__, "Error writing integration time");
+   }
+
+   // time stamp of integration
+   if (H5Dwrite(id->time_array_did, H5T_NATIVE_DOUBLE, mem_space_nblts, id->time_array_fs, H5P_DEFAULT, time_array_buf) < 0) {
+       hashpipe_error(__FUNCTION__, "Error writing time_array");
+   }
+
+   // ant0
+   if (H5Dwrite(id->ant_1_array_did, H5T_NATIVE_INT, mem_space_nblts, id->ant_1_array_fs, H5P_DEFAULT, ant_0_array) < 0) {
+       hashpipe_error(__FUNCTION__, "Error writing ant_1_array");
+   }
+
+   // ant1
+   if (H5Dwrite(id->ant_2_array_did, H5T_NATIVE_INT, mem_space_nblts, id->ant_2_array_fs, H5P_DEFAULT, ant_1_array) < 0) {
+       hashpipe_error(__FUNCTION__, "Error writing ant_2_array");
+   }
+
+}
+
+// Get the even-sample / first-pol / first-complexity of the correlation buffer for chan `c` baseline `b`
+static void compute_sum_diff(int32_t *in, int32_t *out_sum, int32_t *out_diff, uint32_t bcnt) {
+
+    int chan;    
+
+    __m256i val_even = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
+    __m256i val_odd  = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
+
+    __m256i *in_even256, *in_odd256;
+    __m256i *out_sum256  = (__m256i *)out_sum;
+    __m256i *out_diff256 = (__m256i *)out_diff;
+
+    in_even256 = (__m256i *)(in + hera_catcher_input_databuf_by_bcnt_idx32(bcnt, 0));
+    in_odd256 = (__m256i *)(in + hera_catcher_input_databuf_by_bcnt_idx32(bcnt, 1));
+
+    // 256 bits = 4 stokes * 2 real/imag * 32 bits == 1 channel
+
+    for(chan=0; chan< N_CHAN_PROCESSED; chan++){
+       val_even = _mm256_load_si256(in_even256 + chan);
+       val_odd  = _mm256_load_si256(in_odd256 + chan);
+       _mm256_store_si256((out_sum256  + chan), _mm256_add_epi32(val_even, val_odd));
+       _mm256_store_si256((out_diff256 + chan), _mm256_sub_epi32(val_even, val_odd));
+    }
+
+return;
+}
+
+static int init(hashpipe_thread_args_t *args)
+{
+    //hashpipe_status_t st = args->st;
+    //if (register_lzf() < 0) {
+    //    hashpipe_error(__FUNCTION__, "error registering LZF filter");
+    //    pthread_exit(NULL);
+    //}
+    fprintf(stdout, "Initializing Catcher disk thread\n");
+
+    // generate the complex data type
+    complex_id = H5Tcreate(H5T_COMPOUND, 8);
+    H5Tinsert(complex_id, "r", 0, H5T_STD_I32LE);
+    H5Tinsert(complex_id, "i", 4, H5T_STD_I32LE);
+
+    // generate the boolean data type
+    bool_t val;
+    boolenumtype = H5Tcreate(H5T_ENUM, sizeof(bool_t));
+    H5Tenum_insert(boolenumtype, "FALSE", CPTR(val, FALSE ));
+    H5Tenum_insert(boolenumtype, "TRUE",  CPTR(val, TRUE  ));
+    //H5Tinsert(boolean_id, "FLAG", 0, boolenumtype);
+    return 0;
+}
+
+static void *run(hashpipe_thread_args_t * args)
+{
+    // Local aliases to shorten access to args fields
+    // Our input buffer is a hera_catcher_input_databuf
+    hera_catcher_input_databuf_t *db_in = (hera_catcher_input_databuf_t *)args->ibuf;
+    hashpipe_status_t st = args->st;
+    const char * status_key = args->thread_desc->skey;
+
+    // Timers for performance monitoring
+    struct timespec t_start, w_start, w_stop; // transpose start, write start, write stop
+    float gbps, min_gbps;
+
+    struct timespec start, finish;
+    uint64_t t_ns; // transpose
+    uint64_t w_ns; // write
+    uint64_t min_t_ns = 999999999;
+    uint64_t min_w_ns = 999999999;
+    uint64_t max_t_ns = 0;
+    uint64_t max_w_ns = 0;
+    uint64_t elapsed_t_ns = 0;
+    uint64_t elapsed_w_ns = 0;
+    float bl_t_ns = 0.0;
+    float bl_w_ns = 0.0;
+     
+    // Buffers for file name strings
+    char template_fname[128];
+    char hdf5_fname[128];
+
+    // Variables for sync time and computed gps time / JD
+    uint32_t sync_time = 0;
+    double gps_time;
+    double julian_time;
+
+    // Variables for data collection parameters
+    uint32_t acc_len;
+    uint32_t nfiles;
+    uint32_t file_cnt = 0;
+    uint32_t trigger = 0;
+    char tag[128];
+
+    // Variables for antenna positions and baseline orders. These should be provided
+    // via the HDF5 header template.
+    bl_t bl_order[VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES];
+    //bl_bda_t bl_bda_order[N_BLTS_BDA];
+    int32_t auto_indices[N_ANTS];
+    enu_t ant_pos[N_ANTS];
+
+    // A buffer for the real parts of a single auto-corr. Used for writing to redis
+    float auto_corr_n[N_CHAN_PROCESSED];
+    float auto_corr_e[N_CHAN_PROCESSED];
+
+    // Init status variables
+    hashpipe_status_lock_safe(&st);
+    hputi8(st.buf, "DISKMCNT", 0);
+    hputu4(st.buf, "TRIGGER", 0);
+    hashpipe_status_unlock_safe(&st);
+
+    // Redis connection
+    redisContext *c;
+    redisReply *reply;
+    const char *hostname = "redishost";
+    int redisport = 6379;
+    int use_redis = 1;
+    int idle = 0;
+
+    struct timeval redistimeout = { 0, 100000 }; // 0.1 seconds
+    c = redisConnectWithTimeout(hostname, redisport, redistimeout);
+    if (c == NULL || c->err) {
+        if (c) {
+            fprintf(stderr, "Redis connection error: %s\n", c->errstr);
+            redisFree(c);
+            use_redis = 0;
+        } else {
+            fprintf(stderr, "Connection error: can't allocate redis context\n");
+            use_redis = 0;
+        }
+    }
+
+    // Indicate via redis that we're started but not taking data
+    redisCommand(c, "HMSET corr:is_taking_data state False time %d", (int)time(NULL));
+    redisCommand(c, "EXPIRE corr:is_taking_data 60");
+
+    /* Loop(s) */
+    int32_t *db_in32;
+    int rv;
+    unsigned int samp;
+    int curblock_in=0;
+    int a, xeng, xchan, chan;
+    double file_start_t, file_stop_t, file_duration;
+    int64_t file_obs_id, file_nblts=0, file_nts=0;
+    int64_t start_mcnt;
+    int64_t curr_file_mcnts[8];
+    int32_t bcnt;
+    int32_t curr_file_bcnt = -1;
+    uint32_t bctr;        // bcnt variable
+    int bl;               // baseline variable
+
+    hdf5_id_t sum_file, diff_file;
+    
+    // aligned_alloc because we're going to use 256-bit AVX instructions
+    int32_t *bl_buf_sum  = (int32_t *)aligned_alloc(32, N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
+    int32_t *bl_buf_diff = (int32_t *)aligned_alloc(32, N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
+
+    double *integration_time_buf = (double *)malloc(N_BLTS_BDA * sizeof(double));
+    double *time_array_buf       = (double *)malloc(N_BLTS_BDA * sizeof(double));
+    uint16_t *ant_0_array        = (uint16_t *)malloc(N_BLTS_BDA * sizeof(uint16_t));
+    uint16_t *ant_1_array        = (uint16_t *)malloc(N_BLTS_BDA * sizeof(uint16_t));
+    //double *uvw_array_buf        = (double *)malloc(N_BLTS_BDA * 3 * sizeof(double));
+
+    // Allocate an array of bools for flags and n_samples
+    hbool_t *flags = (hbool_t *)calloc(0, N_BLTS_BDA * sizeof(hbool_t));
+    //uint64_t *nsamples = (uint64_t *)malloc(N_BLTS_BDA * sizeof(uint64_t));
+
+    // Define the memory space used by these buffers for HDF5 access
+    // We write 1[baseline] x 1[spw] x N_CHAN_PROCESSED x N_STOKES at a time
+    hsize_t dims[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
+    hid_t mem_space_data = H5Screate_simple(N_DATA_DIMS, dims, NULL);
+    // Memory spaces to Nblts-element header vectors
+    hsize_t dims1[DIM1] = {N_BLTS_BDA};
+    hid_t mem_space_nblts = H5Screate_simple(DIM1, dims1, NULL);
+    // Memory spaces to (Nblts x 3)-element header vectors
+    hsize_t dims2[DIM2] = {N_BLTS_BDA, 3};
+    hid_t mem_space_uvw = H5Screate_simple(DIM2, dims2, NULL);
+
+    while (run_threads()) {
+        // Note waiting status,
+        hashpipe_status_lock_safe(&st);
+        if (idle) {
+            hputs(st.buf, status_key, "idle");
+        } else {
+            hputs(st.buf, status_key, "waiting");
+        }
+        hashpipe_status_unlock_safe(&st);
+
+        // Expire the "corr:is_taking_data" key after 60 seconds.
+        // If this pipeline goes down, we will know because the key will disappear
+        redisCommand(c, "EXPIRE corr:is_taking_data 60");
+
+        // Wait for new input block to be filled
+        while ((rv=hera_catcher_input_databuf_busywait_filled(db_in, curblock_in)) != HASHPIPE_OK) {
+            if (rv==HASHPIPE_TIMEOUT) {
+                hashpipe_status_lock_safe(&st);
+                hputs(st.buf, status_key, "blocked_in");
+                hashpipe_status_unlock_safe(&st);
+                continue;
+            } else {
+                hashpipe_error(__FUNCTION__, "error waiting for filled databuf");
+                pthread_exit(NULL);
+                break;
+            }
+        }
+
+        // reset elapsed time counters
+        elapsed_w_ns = 0;
+        elapsed_t_ns = 0.0;
+
+        // Get template filename from redis
+        hashpipe_status_lock_safe(&st);
+        hgets(st.buf, "HDF5TPLT", 128, template_fname);
+
+        // Get time that F-engines were last sync'd
+        hgetu4(st.buf, "SYNCTIME", &sync_time);
+
+        // Get the integration time reported by the correlator
+        hgetu4(st.buf, "INTTIME", &acc_len);
+
+        // Get the number of files to write
+        hgetu4(st.buf, "NFILES", &nfiles);
+        // Update the status with how many files we've already written
+        hputu4(st.buf, "NDONEFIL", file_cnt);
+
+        // Data tag
+        hgets(st.buf, "TAG", 128, tag);
+
+        // Get the number of files to write
+        hgetu4(st.buf, "TRIGGER", &trigger);
+        hashpipe_status_unlock_safe(&st);
+
+        // If we have written all the files we were commanded to
+        // start marking blocks as done and idling until a new
+        // trigger is received
+        if (trigger) {
+            fprintf(stdout, "Catcher got a new trigger and will write %d files\n", nfiles);
+            file_cnt = 0;
+            hashpipe_status_lock_safe(&st);
+            hputu4(st.buf, "TRIGGER", 0);
+            hashpipe_status_unlock_safe(&st);
+            idle = 0;
+            if (use_redis) {
+                // Create the "corr:is_taking_data" hash. This will be set to 
+                // state=False when data taking is complete. Or if this pipeline 
+                // exits the key will expire.
+                redisCommand(c, "HMSET corr:is_taking_data state True time %d", (int)time(NULL));
+            }
+        } else if (file_cnt >= nfiles) {
+            // If we're transitioning to idle state
+            // Indicate via redis that we're no longer taking data
+            if (!idle) {
+                redisCommand(c, "HMSET corr:is_taking_data state False time %d", (int)time(NULL));
+            }
+            idle = 1;
+            // Mark input block as free and advance
+            if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+                hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
+                pthread_exit(NULL);
+            }
+            curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
+            continue;
+        }
+
+        // If we make it to here we're not idle any more.
+        // Usually this would mean there has been another trigger but
+        // it could be some weirdness where someone tried to take more
+        // data by incrementing NFILES without retriggering.
+        idle = 0;
+
+        // Start writing files!
+        // A file is defined as N_BLTS_BDA number of bcnts. If a bcnt belonging
+        // to a new intergation arrives, close the old file and start a new file.
+
+        db_in32 = (int32_t *)db_in->block[curblock_in].data;
+
+        for(bctr = 0; bctr < BASELINES_PER_BLOCK; bctr++){
+
+           // Check if bcnt marks the beginning of a new file
+           bcnt = db_in->block[curblock_in].header.bcnt[bctr];  
+           if (bcnt % N_BLTS_BDA == 0){
+
+              // If a file is open, finish its meta-data and close it.
+              if (curr_file_bcnt > 0){
+                fprintf(stdout, "Closing datasets and files\n");
+                close_file(&sum_file, file_stop_t, file_duration, file_nblts, file_nts);
+                close_file(&diff_file, file_stop_t, file_duration, file_nblts, file_nts);
+                file_cnt += 1;
+
+                // If this is the last file, mark this block done and get out of the loop
+                if (file_cnt >= nfiles) {
+                    fprintf(stdout, "Catcher has written %d file and is going to sleep\n", file_cnt);
+                    if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+                        hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
+                        pthread_exit(NULL);
+                    }
+                    curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
+                    curr_file_bcnt = -1; //So the next trigger will start a new file
+                    continue;
+                }
+              }
+
+              // Open a new sum and difference file
+
+              // Init all counters to zero
+              file_nblts = 0;
+              file_nts = 0;
+              memset(ant_0_array, 0, N_BLTS_BDA * sizeof(uint16_t));
+              memset(ant_1_array, 0, N_BLTS_BDA * sizeof(uint16_t));
+              memset(time_array_buf, 0, N_BLTS_BDA * sizeof(double));
+              memset(integration_time_buf, 0, N_BLTS_BDA * sizeof(double));
+
+              curr_file_bcnt = bcnt;
+              gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt[bctr], sync_time);
+              julian_time = 2440587.5 + (gps_time / (double)(86400.0)); 
+              file_start_t = gps_time;
+              file_obs_id = (int64_t)gps_time;
+
+              sprintf(hdf5_fname, "zen.%7.5lf.uvh5", julian_time);
+              fprintf(stdout, "Opening new file %s\n", hdf5_fname);
+              start_file(&sum_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
+
+              sprintf(hdf5_fname, "zen.%7.5lf.diff.uvh5", julian_time);
+              fprintf(stdout, "Opening new file %s\n", hdf5_fname);
+              start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
+
+              // Get the antenna positions and baseline orders
+              // These are needed for populating the ant_[1|2]_array and uvw_array
+              get_ant_pos(&sum_file, ant_pos);
+              get_bl_order(&sum_file, bl_order);
+              //get_bl_bda_order(&sum_file, bl_bda_order);
+              get_auto_indices(bl_order, auto_indices, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES);
+           }
+ 
+           // If bcnt does not start a new file, and an open file exists, 
+           // copy data to the right location
+           if (curr_file_bcnt > 0){
+
+              // Update time and sample counters
+              file_nblts += 1;
+              file_nts += 1;
+
+              if (file_nts > MAXTIMES) {
+                  hashpipe_error(__FUNCTION__, "Writing time sample %d but maximum hardcoded limit is %d\n", file_nts, MAXTIMES);
+              }
+
+              // extend the datasets with time axes and update filespace IDs
+
+              compute_sum_diff(db_in32, bl_buf_sum, bl_buf_diff, bcnt%BASELINES_PER_BLOCK);
+              write_baseline_index(&sum_file, (bcnt-curr_file_bcnt), mem_space_data, (uint64_t *)bl_buf_sum);
+              write_baseline_index(&diff_file, (bcnt-curr_file_bcnt), mem_space_data, (uint64_t *)bl_buf_diff);
+
+              samp = bcnt - curr_file_bcnt;
+              ant_0_array[samp] = db_in->block[curblock_in].header.ant_pair_0[bctr];
+              ant_1_array[samp] = db_in->block[curblock_in].header.ant_pair_1[bctr];
+              time_array_buf[samp] = mcnt2time(db_in->block[curblock_in].header.mcnt[bctr], sync_time);
+                  
+              // Close the filespaces - leave the datasets open. We'll close those when the file is done
+              close_filespaces(&sum_file);
+              close_filespaces(&diff_file);
+
+              clock_gettime(CLOCK_MONOTONIC, &finish);
+
+           } // processed data copying
+        } // bctr for loop
+ 
+        //// Write autocorrs to redis
+        //if(use_redis) {
+        //    for (a=0; a<N_ANTS; a++) {
+        //        // auto_indices default to -1. Use this test to delete
+        //        // redis keys for invalid antennas
+        //        if (auto_indices[a] >= 0) {
+        //            //fprintf(stdout, "Reporting autocorrs for ant %d (bl %d) to redis\n", a, auto_indices[a]);
+        //            for (xeng=0; xeng<N_XENGINES_PER_TIME; xeng++) {
+        //                for (xchan=0; xchan<N_CHAN_PROCESSED/N_XENGINES_PER_TIME; xchan++) {
+        //                    chan = xeng*N_CHAN_PROCESSED/N_XENGINES_PER_TIME + xchan;
+        //                    // Divide out accumulation length.
+        //                    // Don't divide out integration over frequency channels (if any)
+        //                    auto_corr_n[chan] = (float) db_in32[hera_catcher_input_databuf_by_bl_idx32(xeng, auto_indices[a]) + (N_STOKES*2*TIME_DEMUX*xchan)] / acc_len;
+        //                    auto_corr_e[chan] = (float) db_in32[hera_catcher_input_databuf_by_bl_idx32(xeng, auto_indices[a]) + (N_STOKES*2*TIME_DEMUX*xchan) + 2] / acc_len;
+        //                    //fprintf(stdout, "ant %d: chan %d, xeng: %d, xchan: %d, val: %f\n", a, chan, xeng, xchan, auto_corr_n[chan]);
+        //                }
+        //            }
+        //            reply = redisCommand(c, "SET auto:%dn %b", a, auto_corr_n, (size_t) (sizeof(float) * N_CHAN_PROCESSED));
+        //            freeReplyObject(reply);
+        //            reply = redisCommand(c, "SET auto:%de %b", a, auto_corr_e, (size_t) (sizeof(float) * N_CHAN_PROCESSED));
+        //            freeReplyObject(reply);
+        //        } else {
+        //            reply = redisCommand(c, "DEL auto:%dn", a);
+        //            freeReplyObject(reply);
+        //            reply = redisCommand(c, "DEL auto:%de", a);
+        //            freeReplyObject(reply);
+        //        }
+        //    }
+        //    //reply = redisCommand(c, "SET auto:timestamp %lf", julian_time);
+        //    reply = redisCommand(c, "SET auto:timestamp  %b", &julian_time, (size_t) (sizeof(double)));
+        //    freeReplyObject(reply);
+        //}
+
+        // Note processing time for this integration and update other stats
+        bl_t_ns = (float)elapsed_t_ns / BASELINES_PER_BLOCK;
+        bl_w_ns = (float)elapsed_w_ns / BASELINES_PER_BLOCK;
+
+        hashpipe_status_lock_safe(&st);
+        hputr4(st.buf, "DISKTBNS", bl_t_ns); 
+        hputi8(st.buf, "DISKTMIN", min_t_ns); 
+        hputi8(st.buf, "DISKTMAX", max_t_ns); 
+        hputr4(st.buf, "DISKWBNS", bl_w_ns); 
+        hputi8(st.buf, "DISKWMIN", min_w_ns); 
+        hputi8(st.buf, "DISKWMAX", max_w_ns); 
+
+        hgetr4(st.buf, "DISKMING", &min_gbps);
+        gbps = (float)(2*64L*N_BLTS_BDA)/ELAPSED_NS(start,finish); //Gigabits / s
+        hputr4(st.buf, "DISKGBPS", gbps);
+        hputr4(st.buf, "DUMPMS", ELAPSED_NS(start,finish) / 1000000.0);
+        if(min_gbps == 0 || gbps < min_gbps) {
+          hputr4(st.buf, "DISKMING", gbps);
+        }
+        hashpipe_status_unlock_safe(&st);
+
+        // Mark input block as free and advance
+        if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+            hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
+            pthread_exit(NULL);
+        }
+        curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
+
+        /* Check for cancel */
+        pthread_testcancel();
+    }
+
+    // Thread success!
+    return NULL;
+}
+ 
+static hashpipe_thread_desc_t hera_catcher_disk_thread = {
+    name: "hera_catcher_disk_thread",
+    skey: "DISKSTAT",
+    init: init,
+    run:  run,
+    ibuf_desc: {hera_catcher_input_databuf_create},
+    obuf_desc: {NULL}
+};
+
+static __attribute__((constructor)) void ctor()
+{
+  register_hashpipe_thread(&hera_catcher_disk_thread);
+}
