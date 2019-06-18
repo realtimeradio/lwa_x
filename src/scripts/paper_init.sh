@@ -166,33 +166,87 @@ function init() {
     return 1
   fi
 
+  if [ $USE_IBVERBS -eq 1 ]
+  then
+    netthread=hera_ibv_thread
+  else
+    netthread=hera_pktsock_thread
+  fi
+
+  echo "Using netthread: $netthread"
+
   echo taskset $mask \
   hashpipe -p paper_gpu -I $instance \
     -o BINDHOST=$bindhost \
     -o GPUDEV=$gpudev \
     -o XID=$xid \
-    -c $netcpu hera_pktsock_thread \
+    -c $netcpu $netthread \
     -m $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
     -c $outcpu hera_gpu_output_thread
 
-  taskset $mask \
-  hashpipe -p paper_gpu -I $instance \
-    -o BINDHOST=$bindhost \
-    -o GPUDEV=$gpudev \
-    -o XID=$xid \
-    -c $netcpu hera_pktsock_thread \
-    -m $flfcpu paper_fluff_thread \
-    -c $gpucpu paper_gpu_thread \
-    -c $outcpu hera_gpu_output_thread \
-     < /dev/null \
-    1> px${mypx}.out.$instance \
-    2> px${mypx}.err.$instance &
+  if [ $USE_REDIS -eq 1 ]
+  then
+    echo "Using redis logger"
+    { taskset $mask \
+    hashpipe -p paper_gpu -I $instance \
+      -o BINDHOST=$bindhost \
+      -o GPUDEV=$gpudev \
+      -o XID=$xid \
+      -c $netcpu $netthread \
+      -m $flfcpu paper_fluff_thread \
+      -c $gpucpu paper_gpu_thread \
+      -c $outcpu hera_gpu_output_thread \
+    < /dev/null 2>&3 | tee px${mypx}.out.$instance | \
+    stdin_to_redis.py -l INFO >/dev/null; } \
+    3>&1 1>&2 | tee px${mypx}.err.$instance | \
+    stdin_to_redis.py -l WARNING > /dev/null &
+  else
+    echo "*NOT* using redis logger"
+    taskset $mask \
+    hashpipe -p paper_gpu -I $instance \
+      -o BINDHOST=$bindhost \
+      -o GPUDEV=$gpudev \
+      -o XID=$xid \
+      -c $netcpu $netthread \
+      -m $flfcpu paper_fluff_thread \
+      -c $gpucpu paper_gpu_thread \
+      -c $outcpu hera_gpu_output_thread \
+       < /dev/null \
+      1> px${mypx}.out.$instance \
+      2> px${mypx}.err.$instance &
+  fi
 }
+
+# Default to Packet sockets; No redis logging
+USE_IBVERBS=0
+USE_REDIS=0
+
+for arg in $@; do
+  case $arg in
+    -h)
+      echo "Usage: $(basename $0) [-r] [-i] INSTANCE_ID [...]"
+      echo "  -r : Use redis logging (in addition to log files)"
+      echo "  -i : Use IB-verbs pipeline (rather than packet sockets)"
+      exit 0
+    ;;
+
+    -i)
+      USE_IBVERBS=1
+      shift
+    ;;
+    -r)
+      USE_REDIS=1
+      shift
+    ;;
+  esac
+done
 
 if [ -z "$1" ]
 then
-  echo "Usage: $(basename $0) INSTANCE_ID [...]"
+  echo "Usage: $(basename $0) [-r] [-i] INSTANCE_ID [...]"
+  echo "  -r : Use redis logging (in addition to log files)"
+  echo "  -i : Use IB-verbs pipeline (rather than packet sockets)"
   exit 1
 fi
 

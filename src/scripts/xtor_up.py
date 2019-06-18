@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import redis
 import time
 import argparse
@@ -35,6 +36,11 @@ parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
 parser.add_argument('--ibverbs', dest='ibverbs', action='store_true', default=False,
                     help='Use the IB Verbs netthread. Experimental!')
+parser.add_argument('--redislog', dest='redislog', action='store_true', default=False,
+                    help='Use the redis logger to duplicate log messages on redishost\'s log-channel pubsub stream')
+parser.add_argument('--pypath', dest='pypath', type=str, default="/home/hera/hera-venv",
+                    help='The path to a python virtual environment which will be activated prior to running paper_init. ' +
+                         'Only relevant if using the --redislog flag, which uses a python redis interface')
 
 args = parser.parse_args()
 hosts = args.hosts # Too lazy to keey typing this
@@ -50,10 +56,17 @@ if args.runtweak:
     run_on_hosts(hosts, perf_tweaker, user='root', wait=True)
 
 # Start X-Engines
+init_args = []
 if args.ibverbs:
-    run_on_hosts(hosts, [paper_init_ibv, '0', '1'], wait=True) # two instances per host
+    init_args += ['-i']
+if args.redislog:
+    init_args += ['-r']
+
+if args.redislog:
+    python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate")+";"]
+    run_on_hosts(hosts, python_source_cmd + [paper_init] + init_args + ['0', '1'], wait=True) # two instances per host
 else:
-    run_on_hosts(hosts, [paper_init, '0', '1'], wait=True) # two instances per host
+    run_on_hosts(hosts, [paper_init] + init_args + ['0', '1'], wait=True) # two instances per host
 
 # Start hashpipe<->redis gateways
 cpu_masks = ['0x0080', '0x8000']
