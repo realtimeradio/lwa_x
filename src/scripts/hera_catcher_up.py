@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import redis
 import time
 import argparse
@@ -32,6 +33,11 @@ parser.add_argument('-t', dest='hdf5template', type=str, default='/tmp/template.
                     help='Place to put HDF5 header template file')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
+parser.add_argument('--redislog', dest='redislog', action='store_true', default=False,
+                    help='Use the redis logger to duplicate log messages on redishost\'s log-channel pubsub stream')
+parser.add_argument('--pypath', dest='pypath', type=str, default="/home/hera/hera-venv",
+                    help='The path to a python virtual environment which will be activated prior to running paper_init. ' +
+                         'Only relevant if using the --redislog flag, which uses a python redis interface')
 
 args = parser.parse_args()
 
@@ -42,7 +48,11 @@ if args.runtweak:
     run_on_hosts([args.host], perf_tweaker, user='root', wait=True)
 
 # Start Catcher
-run_on_hosts([args.host], ['cd', '/data;', init, '0'], wait=True)
+if args.redislog:
+    python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate")+";"]
+    run_on_hosts([args.host], python_source_cmd + ['cd', '/data;', init, '-r', '0'], wait=True)
+else:
+    run_on_hosts([args.host], ['cd', '/data;', init, '0'], wait=True)
 time.sleep(15)
 
 # Start hashpipe<->redis gateways
