@@ -19,6 +19,11 @@ echo "killing any remaining hashpipe-redis gateways"
 ssh root@$catcherhost pkill -f hashpipe_redis_gateway.rb
 ssh root@$catcherhost pkill -f -9 hashpipe_redis_gateway.rb
 
+#Kill any redis loggers
+echo "killing any redis loggers"
+ssh root@$catcherhost pkill    -f stdin_to_redis.py
+ssh root@$catcherhost pkill -9 -f stdin_to_redis.py
+
 # Stop hashpipe instances
 echo "killing hashpipe instances"
 ssh root@$catcherhost pkill -f hashpipe

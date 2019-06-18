@@ -97,6 +97,11 @@ echo "killing any remaining hashpipe-redis gateways"
 for x; do ssh root@px$x pkill    -f hashpipe_redis_gateway.rb; done
 for x; do ssh root@px$x pkill -9 -f hashpipe_redis_gateway.rb; done
 
+#Kill any redis loggers
+echo "killing any redis loggers"
+for x; do ssh root@px$x pkill    -f stdin_to_redis.py; done
+for x; do ssh root@px$x pkill -9 -f stdin_to_redis.py; done
+
 # Stop hashpipe instances
 echo "killing hashpipe instances"
 for x; do ssh root@px$x pkill    hashpipe; done
