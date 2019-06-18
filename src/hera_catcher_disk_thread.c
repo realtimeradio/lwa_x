@@ -760,7 +760,10 @@ static void *run(hashpipe_thread_args_t * args)
     hashpipe_status_lock_safe(&st);
     hputi8(st.buf, "DISKMCNT", 0);
     hputu4(st.buf, "TRIGGER", 0);
+    hputu4(st.buf, "NFILES", 0);
+    hputu4(st.buf, "NDONEFIL", 0);
     hashpipe_status_unlock_safe(&st);
+    int idle = 1; // Start in idle state. Need s trigger to kick off.
 
     // Redis connection
     redisContext *c;
@@ -768,8 +771,6 @@ static void *run(hashpipe_thread_args_t * args)
     const char *hostname = "redishost";
     int redisport = 6379;
     int use_redis = 1;
-    int idle = 0;
-    use_redis = use_redis;
 
     struct timeval redistimeout = { 0, 100000 }; // 0.1 seconds
     c = redisConnectWithTimeout(hostname, redisport, redistimeout);
@@ -824,15 +825,17 @@ static void *run(hashpipe_thread_args_t * args)
     hsize_t dims2[DIM2] = {VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES, 3};
     hid_t mem_space2 = H5Screate_simple(DIM2, dims2, NULL);
 
+    hashpipe_status_lock_safe(&st);
+    hputs(st.buf, status_key, "starting");
+    hashpipe_status_unlock_safe(&st);
+
     while (run_threads()) {
         // Note waiting status,
-        hashpipe_status_lock_safe(&st);
         if (idle) {
-            hputs(st.buf, status_key, "idle");
-        } else {
-            hputs(st.buf, status_key, "waiting");
+            hashpipe_status_lock_safe(&st);
+            hputs(st.buf, "TRIGSTAT", "idle");
+            hashpipe_status_unlock_safe(&st);
         }
-        hashpipe_status_unlock_safe(&st);
 
         // Expire the "corr:is_taking_data" key after 60 seconds.
         // If this pipeline goes down, we will know because the key will disappear
@@ -888,6 +891,7 @@ static void *run(hashpipe_thread_args_t * args)
             file_cnt = 0;
             hashpipe_status_lock_safe(&st);
             hputu4(st.buf, "TRIGGER", 0);
+            hputs(st.buf, "TRIGSTAT", "running");
             hashpipe_status_unlock_safe(&st);
             idle = 0;
             if (use_redis) {
@@ -895,7 +899,7 @@ static void *run(hashpipe_thread_args_t * args)
                 // when data taking is complete. Or if this pipeline exits the key will expire.
                 redisCommand(c, "HMSET corr:is_taking_data state True time %d", (int)time(NULL));
             }
-        } else if (file_cnt >= nfiles) {
+        } else if (file_cnt >= nfiles || idle) {
             // If we're transitioning to idle state
             // Indicate via redis that we're no longer taking data
             if (!idle) {
@@ -915,7 +919,7 @@ static void *run(hashpipe_thread_args_t * args)
         // Usually this would mean there has been another trigger but
         // it could be some weirdness where someone tried to take more
         // data by incrementing NFILES without retriggering.
-        idle = 0;
+        // ED: this is no longer possible -- the only way out of idle state is a trigger
 
         // Got a new data block, update status
         hashpipe_status_lock_safe(&st);
