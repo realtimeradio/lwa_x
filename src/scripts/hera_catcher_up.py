@@ -40,6 +40,9 @@ parser.add_argument('--pypath', dest='pypath', type=str, default="/home/hera/her
 
 args = parser.parse_args()
 
+# Environment sourcing command required to run remote python jobs
+python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate")+";"]
+
 r = redis.Redis(args.redishost)
 
 # Run performance tweaking script
@@ -48,7 +51,6 @@ if args.runtweak:
 
 # Start Catcher
 if args.redislog:
-    python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate")+";"]
     run_on_hosts([args.host], python_source_cmd + ['cd', '/data;', init, '-r', '0'], wait=True)
 else:
     run_on_hosts([args.host], ['cd', '/data;', init, '0'], wait=True)
