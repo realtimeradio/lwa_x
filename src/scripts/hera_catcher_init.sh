@@ -32,8 +32,7 @@ function init() {
       -o BINDHOST=$bindhost \
       -c $netcpu hera_catcher_net_thread \
       -c $outcpu hera_catcher_disk_thread \
-    < /dev/null 2>&3 | tee ~/catcher.out.$instance | \
-    stdin_to_redis.py -l INFO > /dev/null; } \
+    < /dev/null 2>&3 1>~/catcher.out.$instance; } \
     3>&1 1>&2 | tee ~/catcher.err.$instance | \
     stdin_to_redis.py -l WARNING > /dev/null &
   else

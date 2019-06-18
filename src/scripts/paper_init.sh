@@ -197,8 +197,7 @@ function init() {
       -m $flfcpu paper_fluff_thread \
       -c $gpucpu paper_gpu_thread \
       -c $outcpu hera_gpu_output_thread \
-    < /dev/null 2>&3 | tee px${mypx}.out.$instance | \
-    stdin_to_redis.py -l INFO >/dev/null; } \
+    < /dev/null 2>&3 1>px${mypx}.out.$instance; } \
     3>&1 1>&2 | tee px${mypx}.err.$instance | \
     stdin_to_redis.py -l WARNING > /dev/null &
   else
