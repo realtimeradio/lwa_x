@@ -9,7 +9,7 @@
 #define N_CHAN_TOTAL_GENERATED (8192)
 #define FENG_SAMPLE_RATE (500000000)
 #define N_CHAN_TOTAL 6144
-#define N_FENGINES   192
+//#define N_FENGINES   192 # isn't this always the same as the number of antennas?
 #define N_CHAN_PER_F N_CHAN_TOTAL
 
 // Number of separate X-engines which deal with
@@ -30,6 +30,7 @@
 #define N_CHAN_PER_X         XGPU_NFREQUENCY
 
 // Derived from above quantities
+#define N_FENGINES		N_ANTS
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / N_TIME_PER_PACKET)
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK N_TIME_PER_BLOCK
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / 2048)
