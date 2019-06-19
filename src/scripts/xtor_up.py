@@ -83,6 +83,8 @@ for hn, host in enumerate(hosts):
       key = 'hashpipe://%s/%d/set' % (host, i)
       r.publish(key, 'TIMEIDX=%d' % (hn//nhosts_per_timeslice))
 
+time.sleep(2)
+
 # Let the network threads begin processing
 for hn, host in enumerate(hosts):
    for i in range(args.ninstances):
