@@ -26,7 +26,7 @@
 #define LOG(x)           ((uint32_t)(log((x))/log(2))) // yields msb loc
 #define CHECK_PWR2(x)    (!((x)&((x)-1)))
 
-//#define PRINT_TEST
+#define PRINT_TEST
 
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
@@ -176,29 +176,36 @@ static int init_idx_map()
   return 0;
 }
 
-static int init_bda_info(bda_info_t *binfo){
+static int init_bda_info(bda_info_t *binfo, char *config_fname){
    FILE *fp;
    int j, a0, a1, inttime, bin;
    uint32_t blctr[] = {0,0,0,0,0};
 
-   if((fp=fopen("bda_config.txt","r")) == NULL){
+   fprintf(stderr,"Loading config file..\n");
+
+   if((fp=fopen(config_fname,"r")) == NULL){
       printf("Cannot open the configuration file.\n");
       exit(1);
    }
    while(fscanf(fp, "%d %d %d", &a0, &a1, &inttime)!=EOF){
-      if((inttime == 0) || !CHECK_PWR2(inttime)){
+      if(!CHECK_PWR2(inttime)){
         printf("(%d,%d): Samples to integrate not power of 2!\n",a0,a1);
         exit(1);
       }
+      if(inttime == 0) continue;
       blctr[LOG(inttime)]+=1;
    }
-   blctr[0] += N_ANTS;
+
+   // Config file should contain auto-corrs as well.
+   //blctr[0] += N_ANTS;
 
    for(j=0; j<N_BDABUF_BINS; j++){ 
      binfo[j].baselines = blctr[j];
      blctr[j] = 0;
    }
    binfo[N_BDABUF_BINS-1].baselines += blctr[N_BDABUF_BINS]; // 32sec considered as 16sec integration
+
+   fprintf(stderr,"Finished loading config file. Allocating memory to store baseline pairs.\n");
 
    // malloc for storing ant pairs
    for(j=0; j<N_BDABUF_BINS; j++){
@@ -207,7 +214,9 @@ static int init_bda_info(bda_info_t *binfo){
    }
    rewind(fp); //re-read antpairs to store them
    while(fscanf(fp, "%d %d %d", &a0, &a1, &inttime)!=EOF){
-     bin = LOG(inttime); if(bin>=N_BDABUF_BINS) bin=N_BDABUF_BINS-1;
+     if (inttime == 0) continue;
+     bin = LOG(inttime); 
+     if(bin>=N_BDABUF_BINS) bin=N_BDABUF_BINS-1;
      binfo[bin].ant_pair_0[blctr[bin]] = a0;
      binfo[bin].ant_pair_1[blctr[bin]++] = a1;
      //fprintf(stderr,"Bin: %d Ctr: %d\n", bin, blctr[bin]);
@@ -215,10 +224,10 @@ static int init_bda_info(bda_info_t *binfo){
    fclose(fp);
 
    // Include the autos
-   for(a0=0;a0<N_ANTS;a0++){
-     binfo[0].ant_pair_0[blctr[0]] = a0;
-     binfo[0].ant_pair_1[blctr[0]++] = a0;
-   }
+   //for(a0=0;a0<N_ANTS;a0++){
+   //  binfo[0].ant_pair_0[blctr[0]] = a0;
+   //  binfo[0].ant_pair_1[blctr[0]++] = a0;
+   //}
 
 #ifdef PRINT_TEST
    fprintf(stderr,"Finished loading config file. Allocating memory..\n");
@@ -257,7 +266,11 @@ static int init_bda_block_header(hera_bda_block_t *bdablk){
 }
 
 static int init(struct hashpipe_thread_args *args)
-{   
+{ 
+   hashpipe_status_t st = args->st; 
+   const char * status_key = args->thread_desc->skey;
+   char config_fname[128];
+ 
    // Get sizing parameters
    xgpuInfo(&xgpu_info);
    //bytes_per_dump = xgpu_info.triLength * sizeof(Complex);
@@ -268,8 +281,26 @@ static int init(struct hashpipe_thread_args *args)
      return -1;
    }
 
+   hashpipe_status_lock_safe(&st);
+   hputs(st.buf, status_key, "initing");
+   hgets(st.buf, "BDACONF", 128, config_fname);
+   hashpipe_status_unlock_safe(&st);
+
+   if (config_fname!=NULL){
+      sprintf(config_fname, "bda_config_192ants_nobda.txt"); 
+   }
+
    // Initialize binfo with config file params
-   init_bda_info(binfo); 
+   init_bda_info(binfo, config_fname); 
+
+   // Write the number of baselines per integration
+   // bin to redis for downstream stuff
+   hashpipe_status_lock_safe(&st);
+   hputu8(st.buf,"NBL2SEC",binfo[0].baselines);
+   hputu8(st.buf,"NBL4SEC",binfo[1].baselines);
+   hputu8(st.buf,"NBL8SEC",binfo[2].baselines);
+   hputu8(st.buf,"NBL16SEC",binfo[3].baselines);
+   hashpipe_status_unlock_safe(&st);
 
    // Allocate memory to the output data blocks based on the config file
    int blk_id,j;

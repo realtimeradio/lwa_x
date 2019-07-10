@@ -13,7 +13,7 @@ AM_CPPFLAGS += -I/usr/include/hiredis/
 
 # AM_CFLAGS is used for all C compiles
 #AM_CFLAGS = -ggdb -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx2
-AM_CFLAGS = -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx2 -march=native -funroll-loops \
+AM_CFLAGS = -fPIC -O3 -Wall -fno-strict-aliasing -mavx2 -march=native -funroll-loops \
             -DGIT_VERSION=\"$(GIT_VERSION)\" -DBUILD_USER=\"$(BUILD_USER)\" \
             -DBUILD_HOST=\"$(BUILD_HOST)\" -DBUILD_DATE=\"$(BUILD_DATE)\"
 
@@ -28,9 +28,12 @@ paper_threads = paper_fake_net_thread.c          \
                 paper_fluff_thread.c             \
                 hera_pktsock_thread.c            \
                 hera_fake_gpu_thread.c           \
-	        paper_crc_thread.c               \
+	            paper_crc_thread.c               \
                 hera_catcher_net_thread_bda_v2.c \
-                hera_gpu_output_thread.c         \
+                hera_catcher_disk_thread_v2.c    \
+                hera_gpu_bda_thread.c            \
+                hera_bda_output_thread.c         \
+                hera_null_thread.c               \
                 lzf/lzf_c.c                      \
                 lzf/lzf_d.c                      \
                 lzf_filter.c                     \
