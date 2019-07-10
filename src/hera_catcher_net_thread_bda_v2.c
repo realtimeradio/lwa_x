@@ -42,6 +42,11 @@
 
 #define MAX_OUT_OF_SEQ_PKTS           (4096)
 
+// This allows packets to be two full databufs late without being considered
+// out of sequence.
+#define LATE_PKT_BCNT_THRESHOLD (2*BASELINES_PER_BLOCK*CATCHER_N_BLOCKS)
+
+
 typedef struct{
     uint64_t mcnt;        // timestamp of the packet
     uint32_t bcnt;        // unique id based on order of baselines sent to catcher
@@ -57,8 +62,8 @@ typedef struct{
 typedef struct {
     int initialized;
     uint32_t bcnt_start; 
-    int block_curr;
-    int block_next;
+    int block_i;
+    uint64_t bcnt_log_late;
     long out_of_seq_cnt;
     long block_packet_counter[CATCHER_N_BLOCKS];
     char flags[CATCHER_N_BLOCKS][PACKETS_PER_BLOCK];
@@ -67,10 +72,11 @@ typedef struct {
 
 static hashpipe_status_t *st_p;
 static const char * status_key;
+static uint32_t first_bcnt;
 
 // Get physical block number given the bcnt
 static inline int block_for_bcnt(uint32_t bcnt){
-    return (bcnt/BASELINES_PER_BLOCK) % CATCHER_N_BLOCKS;
+    return ((bcnt-first_bcnt) / BASELINES_PER_BLOCK) % CATCHER_N_BLOCKS;
 }
 
 // Initialize a block by clearing its "good data" flag and saving the 
@@ -80,31 +86,6 @@ static inline void initialize_block(hera_catcher_input_databuf_t * db, uint64_t 
   int block_i = block_for_bcnt(bcnt);
   db->block[block_i].header.bcnt[0]   = bcnt;
   db->block[block_i].header.good_data = 0;
-}
-
-/* Initialize block_info */
-// This function must be called once and only once per block_info structure!
-// Subsequent calls are no-ops.
-static inline void initialize_block_info(block_info_t * binfo, uint32_t bcnt){
-    int i;
-
-    // If this block_info structure has already been initialized
-    if(binfo->initialized) {
-	  return;
-    }
-
-    for(i = 0; i < CATCHER_N_BLOCKS; i++) {
-      binfo->block_packet_counter[i] = 0;
-      memset(binfo->flags[i], 0, PACKETS_PER_BLOCK*sizeof(char));
-      memset(binfo->baselines[i], 0, BASELINES_PER_BLOCK*sizeof(char));
-    }
-
-    // The number of the current block is set by the first packet received
-    binfo->bcnt_start     = bcnt;
-    binfo->block_curr     = block_for_bcnt(bcnt);
-    binfo->block_next     = (binfo->block_curr+1) % CATCHER_N_BLOCKS;
-    binfo->out_of_seq_cnt = 0;
-    binfo->initialized    = 1;
 }
 
 /* Get packet header */
@@ -124,13 +105,10 @@ static inline void get_header(unsigned char *p_frame, packet_header_t *pkt_heade
 // Returns bcnt of the block being marked filled.
 static uint64_t set_block_filled(hera_catcher_input_databuf_t *db, block_info_t *binfo){
   static int last_filled = -1; 
-  if (last_filled==-1){ 
-    last_filled = (binfo->block_curr-1)% CATCHER_N_BLOCKS;
-  }
 
   uint64_t block_missed_pkt_cnt;
-  uint32_t missed_pkt_cnt;
-  uint32_t block_i = binfo->block_curr;
+  uint64_t block_missed_xengs, block_missed_mod_cnt, missed_pkt_cnt=0;
+  uint32_t block_i = block_for_bcnt(binfo->bcnt_start);
 
   // Validate that we're filling blocks in the proper sequence
   last_filled = (last_filled+1) % CATCHER_N_BLOCKS;
@@ -138,7 +116,17 @@ static uint64_t set_block_filled(hera_catcher_input_databuf_t *db, block_info_t 
     printf("block %d being marked filled, but expected block %d!\n", block_i, last_filled);
   }
 
-  db->block[block_i].header.good_data = 1;
+  // Validate that block_i matches binfo->block_i
+  if(block_i != binfo->block_i) {
+  hashpipe_warn(__FUNCTION__,
+  	"block_i for binfo's mcnt (%d) != binfo's block_i (%d)",
+  	block_i, binfo->block_i);
+  }
+
+  // If all packets are accounted for, mark this block as good
+  if(binfo->block_packet_counter[block_i] == PACKETS_PER_BLOCK){
+    db->block[block_i].header.good_data = 1;
+  }
 
   // Set the block as filled
   if(hera_catcher_input_databuf_set_filled(db, block_i) != HASHPIPE_OK){
@@ -148,22 +136,51 @@ static uint64_t set_block_filled(hera_catcher_input_databuf_t *db, block_info_t 
 
   // Calculate missing packets.
   block_missed_pkt_cnt = PACKETS_PER_BLOCK - binfo->block_packet_counter[block_i];
+  block_missed_xengs = block_missed_pkt_cnt / (PACKETS_PER_BL_PER_X * BASELINES_PER_BLOCK);
+  block_missed_mod_cnt = block_missed_xengs % N_XENGINES_PER_TIME; 
+
+  //fprintf(stderr,"Missed packets: %ld\tMissed Xengs:%ld\t", block_missed_pkt_cnt, block_missed_xengs);
 
   // Update status buffer
   hashpipe_status_lock_busywait_safe(st_p);
   hputu4(st_p->buf, "NETBKOUT", block_i);
-  if(block_missed_pkt_cnt){
+  hputu4(st_p->buf, "MISSXENG", block_missed_xengs);
+  if(block_missed_mod_cnt){
     fprintf(stderr, "Expected %lu packets, Got %lu\n", PACKETS_PER_BLOCK, binfo->block_packet_counter[block_i]);
     // Increment MISSEDPK by number of missed packets for this block
-    hgetu4(st_p->buf, "MISSEDPK", &missed_pkt_cnt);
+    hgetu8(st_p->buf, "MISSEDPK", &missed_pkt_cnt);
     missed_pkt_cnt += block_missed_pkt_cnt;
-    hputu4(st_p->buf, "MISSEDPK", missed_pkt_cnt);
+    hputu8(st_p->buf, "MISSEDPK", missed_pkt_cnt);
     //  fprintf(stderr, "got %d packets instead of %d\n",
     //	    binfo->block_packet_counter[block_i], N_PACKETS_PER_BLOCK);
   }
   hashpipe_status_unlock_safe(st_p);
 
   return db->block[block_i].header.bcnt[0];
+}
+
+/* Initialize block_info */
+// This function must be called once and only once per block_info structure!
+// Subsequent calls are no-ops.
+static inline void initialize_block_info(block_info_t * binfo){
+    int i;
+
+    // If this block_info structure has already been initialized
+    if(binfo->initialized) {
+	  return;
+    }
+
+    for(i = 0; i < CATCHER_N_BLOCKS; i++) {
+      binfo->block_packet_counter[i] = 0;
+      memset(binfo->flags[i], 0, PACKETS_PER_BLOCK*sizeof(char));
+      memset(binfo->baselines[i], 0, BASELINES_PER_BLOCK*sizeof(char));
+    }
+
+    // Start with block 0
+    binfo->out_of_seq_cnt = 0;
+    binfo->block_i        = 0;
+    binfo->bcnt_log_late  = BASELINES_PER_BLOCK;
+    binfo->initialized    = 1;
 }
 
 
@@ -178,30 +195,38 @@ static inline uint64_t process_packet(
 
   static block_info_t binfo;
   packet_header_t pkt_header;
+  int pkt_block_i;
+  int i;
   const uint32_t *payload_p;
   uint32_t *dest_p;
-  int i;
-  int pkt_block_i;
+  uint32_t pkt_bcnt_dist;
+  uint32_t pkt_bcnt;
+  uint32_t cur_bcnt;
+  uint32_t netbcnt = -1; // Value to return if a block is filled
   int b, x, t, o;
   uint32_t pkt_offset;
-  uint32_t pkt_bcnt_dist;
-  uint64_t bcnt = -1;
 
   // Parse packet header
   get_header(p_frame, &pkt_header);
-  pkt_block_i = block_for_bcnt(pkt_header.bcnt);
+  pkt_bcnt = pkt_header.bcnt;
 
   // Lazy init binfo
   if(!binfo.initialized){
+    // This is the first packet received
     fprintf(stderr,"Initializing binfo..!\n");
-    initialize_block_info(&binfo, pkt_header.bcnt);
+    initialize_block_info(&binfo);
+
+    first_bcnt = pkt_bcnt;
+    binfo.bcnt_start = pkt_bcnt;
 
     fprintf(stderr,"Initializing the first blocks..\n");
-    // Initialize the newly acquired block
-    initialize_block(db, pkt_header.bcnt); 
-    initialize_block(db, pkt_header.bcnt+BASELINES_PER_BLOCK); 
-    initialize_block(db, pkt_header.bcnt+2*BASELINES_PER_BLOCK); 
+    // Initialize the newly acquired blocks
+    initialize_block(db, pkt_bcnt); 
+    initialize_block(db, pkt_bcnt+BASELINES_PER_BLOCK); 
   }
+
+  pkt_block_i = block_for_bcnt(pkt_bcnt);
+  cur_bcnt = binfo.bcnt_start;
 
   //fprintf(stderr, "curr:%d\tnext:%d\t",binfo.block_curr, binfo.block_next);
   //fprintf(stderr, "bcnt:%d\tblock_id:%d\n",pkt_header.bcnt, pkt_block_i);
@@ -209,27 +234,29 @@ static inline uint64_t process_packet(
 
   // Packet bcnt distance (how far away is this packet's bcnt from the
   // current bcnt).  Positive distance for pcnt mcnts > current mcnt.
-  pkt_bcnt_dist = pkt_header.bcnt - binfo.bcnt_start; 
+  pkt_bcnt_dist = pkt_bcnt - cur_bcnt;
 
-  // We expect packets for the current block, the next block and the block after.
+  // We expect packets for the current block (0) and the next block (1). If a packet 
+  // belonging to the block after (2) arrives, the current block is marked full and
+  // counters advance (1,2,3). 
   if (0 <= pkt_bcnt_dist && pkt_bcnt_dist < 3*BASELINES_PER_BLOCK){
     // If the packet is for the block after the next block (i.e. current 
     // block + 2 blocks), mark the current block as filled.
-    if (pkt_bcnt_dist >= 2*BASELINES_PER_BLOCK){
+    if ((pkt_bcnt_dist >= 2*BASELINES_PER_BLOCK) || (binfo.block_packet_counter[binfo.block_i] == PACKETS_PER_BLOCK)){
        
-       bcnt = set_block_filled(db, &binfo);
+       netbcnt = set_block_filled(db, &binfo);
 
        // Print
-       fprintf(stderr,"Filled Block: %d with bcnt: %lu\n",binfo.block_curr, bcnt);
+       fprintf(stderr,"Filled Block: %d with bcnt: %d\n", binfo.block_i, netbcnt);
 
        // Update binfo
+       cur_bcnt += BASELINES_PER_BLOCK;
        binfo.bcnt_start += BASELINES_PER_BLOCK;
-       binfo.block_packet_counter[binfo.block_curr] = 0;
-       memset(binfo.flags[binfo.block_curr],     0, PACKETS_PER_BLOCK*sizeof(char));
-       memset(binfo.baselines[binfo.block_curr], 0, BASELINES_PER_BLOCK*sizeof(char));
+       binfo.block_packet_counter[binfo.block_i] = 0;
+       memset(binfo.flags[binfo.block_i],     0, PACKETS_PER_BLOCK*sizeof(char));
+       memset(binfo.baselines[binfo.block_i], 0, BASELINES_PER_BLOCK*sizeof(char));
 
-       binfo.block_curr = binfo.block_next;
-       binfo.block_next = (binfo.block_next+1) % CATCHER_N_BLOCKS; 
+       binfo.block_i = (binfo.block_i+1) % CATCHER_N_BLOCKS; 
 
        // Wait (hopefully not long!) to acquire the block after next.
        if(hera_catcher_input_databuf_busywait_free(db, pkt_block_i) != HASHPIPE_OK) {
@@ -246,7 +273,7 @@ static inline uint64_t process_packet(
        }
 
        // Initialize the newly acquired block
-       initialize_block(db, bcnt+2*BASELINES_PER_BLOCK); 
+       initialize_block(db, pkt_bcnt); 
 
        // Reset out-of-seq counter
        binfo.out_of_seq_cnt = 0;
@@ -258,8 +285,8 @@ static inline uint64_t process_packet(
     t = (pkt_header.mcnt/Nt) % TIME_DEMUX;  //Nt = 2
     o = pkt_header.offset;
     pkt_offset = hera_catcher_input_databuf_pkt_offset(b, t, x, o);
-    //fprintf(stderr, "offset: %d\n", pkt_offset);
     //fprintf(stderr, "bcnt-loc:%d\txeng:%d\ttime:%d\tpktoffset:%d\n",b,x,t,o);
+    //fprintf(stderr, "offset: %d\n", pkt_offset);
     
     // Copy data into buffer with byte swap
     payload_p = (uint32_t *)(PKT_UDP_DATA(p_frame) + sizeof(packet_header_t)); 
@@ -283,24 +310,69 @@ static inline uint64_t process_packet(
     binfo.block_packet_counter[pkt_block_i]++;
 
     // Check for duplicate packets
-    // if(binfo.flags[pkt_block_i][pkt_offset]){
-    //   // This slot is already filled
-    //   //fprintf(stderr, "Packet repeated!!\n");
-    //   binfo.out_of_seq_cnt++;
-    //   return -1;
-    // }
+    if(binfo.flags[pkt_block_i][pkt_offset]){
+      // This slot is already filled
+      //fprintf(stderr, "Packet repeated!!\n");
+      binfo.out_of_seq_cnt++;
+      return -1;
+    }
 
-  }else{
+  return netbcnt;
+  }
+
+  // Else, if the packet is late, but not too late (so we can handle catcher being
+  // restarted and bcnt rollover), then ignore it
+  else if(pkt_bcnt_dist < 0  && pkt_bcnt_dist > -LATE_PKT_BCNT_THRESHOLD) {
+    // Issue warning if not after a reset
+    if (cur_bcnt >= binfo.bcnt_log_late) {
+       hashpipe_warn("hera_catcher_net_thread", 
+           "Ignorning late packet (%d bcnts late)", 
+            cur_bcnt - pkt_bcnt);
+    }
+    return -1;
+  } 
+
+  else {
+    // If not at start-up and this is the first out of order packet, issue warning.
+    if (cur_bcnt !=0 && binfo.out_of_seq_cnt == 0) {
+       hashpipe_warn("hera_catcher_net_thread", "out of seq bcnt %012lx (expected: %012lx <= bcnt < %012x)", 
+                      pkt_bcnt, cur_bcnt, cur_bcnt+3*BASELINES_PER_BLOCK);
+    }
+
     binfo.out_of_seq_cnt++;
+
+    // If too many out of sequence packets
+    if (binfo.out_of_seq_cnt > MAX_OUT_OF_SEQ_PKTS) {
+      // Reset current mcnt. The value to reset to must be the first
+      // value greater than or equal to the pkt_bcnt that corresponds 
+      // to the same databuf block as the old current bcnt.  
+      first_bcnt = pkt_header.bcnt - binfo.block_i*BASELINES_PER_BLOCK;
+      binfo.bcnt_start = pkt_header.bcnt;  
+      binfo.block_i = block_for_bcnt(pkt_header.bcnt);
+      binfo.bcnt_log_late = binfo.bcnt_start + BASELINES_PER_BLOCK;
+
+      hashpipe_warn("hera_catcher_net_thread", 
+      "resetting to bcnt %012lx block %d based on packet bcnt %012lx",
+                     binfo.bcnt_start, binfo.block_i, pkt_header.bcnt);
+
+      // Reinitialize the acquired blocks with new mcnt values.
+      initialize_block(db, binfo.bcnt_start);
+      initialize_block(db, binfo.bcnt_start+BASELINES_PER_BLOCK);
+
+      // Reinitialize binfo counter for these blocks  
+      binfo.block_packet_counter[binfo.block_i] = 0;
+      memset(binfo.flags[binfo.block_i],     0, PACKETS_PER_BLOCK*sizeof(char));
+      memset(binfo.baselines[binfo.block_i], 0, BASELINES_PER_BLOCK*sizeof(char));
+
+      int next_block = (binfo.block_i + 1) % CATCHER_N_BLOCKS;
+      binfo.block_packet_counter[next_block] = 0;
+      memset(binfo.flags[next_block],     0, PACKETS_PER_BLOCK*sizeof(char));
+      memset(binfo.baselines[next_block], 0, BASELINES_PER_BLOCK*sizeof(char));
+    } 
     return -1;
   }
-  
-  //if (binfo.out_of_seq_cnt > MAX_OUT_OF_SEQ_PKTS){
-  //  fprintf(stderr,"Lots of out of sequence packets!");
-  //}
-  return bcnt;  
+  return netbcnt;  
 }
-
 
 static int init(hashpipe_thread_args_t *args){
   /* Read network params */
@@ -321,7 +393,7 @@ static int init(hashpipe_thread_args_t *args){
   // Store bind host/port info etc in status buffer
   hputs(st.buf, "BINDHOST", bindhost);
   hputi4(st.buf, "BINDPORT", bindport);
-  hputu4(st.buf, "MISSEDFE", 0);
+  hputu4(st.buf, "MISSXENG", 0);
   hputu4(st.buf, "MISSEDPK", 0);
   hashpipe_status_unlock_safe(&st);
 
@@ -391,7 +463,7 @@ static void *run(hashpipe_thread_args_t * args){
     hashpipe_status_unlock_safe(&st);
   }
 
-  fprintf(stderr,"Waiting to acquire three blocks to start!\n");
+  fprintf(stderr,"Waiting to acquire two blocks to start!\n");
 
   // Acquire first two blocks to start
   if(hera_catcher_input_databuf_busywait_free(db, 0) != HASHPIPE_OK){
@@ -404,15 +476,6 @@ static void *run(hashpipe_thread_args_t * args){
         pthread_exit(NULL);
     }
   }if(hera_catcher_input_databuf_busywait_free(db, 1) != HASHPIPE_OK){
-    if (errno == EINTR){
-      // Interrupted by signal, return -1
-      hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
-      pthread_exit(NULL);
-    }else{
-        hashpipe_error(__FUNCTION__, "error waiting for free databuf");
-        pthread_exit(NULL);
-    }
-  }if(hera_catcher_input_databuf_busywait_free(db, 2) != HASHPIPE_OK){
     if (errno == EINTR){
       // Interrupted by signal, return -1
       hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");

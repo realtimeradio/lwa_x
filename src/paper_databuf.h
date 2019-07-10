@@ -257,7 +257,7 @@ typedef struct paper_output_databuf {
 
 #define N_BASELINES               (N_ANTS * (N_ANTS + 1)/2)
 #define N_COMPLEX_PER_BASELINE    (N_STOKES * N_CHAN_PER_X)
-#define N_BLTS_BDA                (8*387 + 4*1533 + 2*7168 + 21571 + 30768) // (((N_ANTS-2)*(N_ANTS-1)/2) + 2)
+//#define N_BLTS_BDA                (8*387 + 4*1533 + 2*7168 + 21571 + 30768) // (((N_ANTS-2)*(N_ANTS-1)/2) + 2)
 
 #define N_BDABUF_BLOCKS 2
 #define N_BDABUF_BINS   4
@@ -304,7 +304,7 @@ typedef struct hera_bda_databuf{
 #define OUTPUT_BYTES_PER_PACKET (4096)
 #define CATCHER_CHAN_SUM        1
 #define N_STOKES                4
-#define BASELINES_PER_BLOCK     4096
+#define BASELINES_PER_BLOCK     256 //8192
 
 #define CHAN_PER_CATCHER_PKT   (OUTPUT_BYTES_PER_PACKET/(N_STOKES * 8L))                    // 128
 #define PACKETS_PER_BASELINE   (N_CHAN_TOTAL/CHAN_PER_CATCHER_PKT)                          //  48
