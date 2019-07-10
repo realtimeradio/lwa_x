@@ -7,7 +7,7 @@ import socket
 import argparse 
 
 Nbins = 5               # number of diff integration bins
-Na = 352                # antennas
+Na = 192                # antennas
 N_bl_per_block = 16384  # baselines within each block
 
 parser = argparse.ArgumentParser(description='Test packet format and contents for BDA',
@@ -46,12 +46,13 @@ for n in range(Nbins):
 int_bin['data'][4] = (2**3)*np.ones(1024)
 int_bin['data'][4][1::2] = -2*(2**3)
 
-bdaconfig = np.loadtxt('../bda_config.txt', dtype=np.int)
+bdaconfig = np.loadtxt('../bda_config_192ants_nobda.txt', dtype=np.int)
 for i,t in enumerate(bdaconfig[:,2]):
+    if t==0: continue
     n = int(np.log(t)/np.log(2))
     int_bin['baselines'][n].append((bdaconfig[i,0], bdaconfig[i,1]))
-for a in range(Na):
-    int_bin['baselines'][0].append((a,a))
+#for a in range(Na):
+#    int_bin['baselines'][0].append((a,a))
 
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -68,6 +69,8 @@ while True:
         if args.verbose:
            print "{0:4d} {1:3d} {2:4d} {3:1d} {4:3d} {5:3d} {6:2d}".format(t, b//16384, b%16384, o, a0, a1, x), data[:8]
         if args.check:
+           if (a0 > Na or a1 > Na): 
+              print "Error! Received wrong antenna!"
            n = [y for y,v in int_bin['baselines'].items() if (a0,a1) in v][0]
            if not (np.all(data == int_bin['data'][n])):
               print "Error!", int_bin['data'][n][:8], o, n, data[:8]
