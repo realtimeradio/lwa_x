@@ -103,7 +103,7 @@ static inline void get_header(unsigned char *p_frame, packet_header_t *pkt_heade
 /* Set hashpipe block to filled */
 // This sets the "current" block to be marked as filled.
 // Returns bcnt of the block being marked filled.
-static uint64_t set_block_filled(hera_catcher_input_databuf_t *db, block_info_t *binfo){
+static uint32_t set_block_filled(hera_catcher_input_databuf_t *db, block_info_t *binfo){
   static int last_filled = -1; 
 
   uint64_t block_missed_pkt_cnt;
@@ -190,7 +190,14 @@ static inline void initialize_block_info(block_info_t * binfo){
 // Any return value other than -1 will be stored in the status memory as
 // NETMCNT, so it is important that values other than -1 are returned rarely
 // (i.e. when marking a block as filled)!!!
-static inline uint64_t process_packet(
+
+//static inline uint32_t process_packet(
+//  hera_catcher_input_databuf_t *db, unsigned char *p_frame){
+//  uint32_t netbcnt = 32;
+//  return netbcnt;
+//}
+
+static inline uint32_t process_packet(
   hera_catcher_input_databuf_t *db, unsigned char *p_frame){
 
   static block_info_t binfo;
@@ -245,15 +252,13 @@ static inline uint64_t process_packet(
     if ((pkt_bcnt_dist >= 2*BASELINES_PER_BLOCK) || (binfo.block_packet_counter[binfo.block_i] == PACKETS_PER_BLOCK)){
        
        netbcnt = set_block_filled(db, &binfo);
-
-       // Print
        fprintf(stderr,"Filled Block: %d with bcnt: %d\n", binfo.block_i, netbcnt);
 
        // Update binfo
        cur_bcnt += BASELINES_PER_BLOCK;
        binfo.bcnt_start += BASELINES_PER_BLOCK;
        binfo.block_packet_counter[binfo.block_i] = 0;
-       memset(binfo.flags[binfo.block_i],     0, PACKETS_PER_BLOCK*sizeof(char));
+       memset(binfo.flags[binfo.block_i],     1, PACKETS_PER_BLOCK*sizeof(char));
        memset(binfo.baselines[binfo.block_i], 0, BASELINES_PER_BLOCK*sizeof(char));
 
        binfo.block_i = (binfo.block_i+1) % CATCHER_N_BLOCKS; 
@@ -306,20 +311,18 @@ static inline uint64_t process_packet(
       binfo.baselines[pkt_block_i][b] = 1;
     }
     // Update binfo
-    binfo.flags[pkt_block_i][pkt_offset] = 1;
+    binfo.flags[pkt_block_i][pkt_offset] = 0;
     binfo.block_packet_counter[pkt_block_i]++;
 
     // Check for duplicate packets
     if(binfo.flags[pkt_block_i][pkt_offset]){
       // This slot is already filled
-      //fprintf(stderr, "Packet repeated!!\n");
+      fprintf(stderr, "Packet repeated!!\n");
       binfo.out_of_seq_cnt++;
       return -1;
     }
-
-  return netbcnt;
+    return netbcnt;
   }
-
   // Else, if the packet is late, but not too late (so we can handle catcher being
   // restarted and bcnt rollover), then ignore it
   else if(pkt_bcnt_dist < 0  && pkt_bcnt_dist > -LATE_PKT_BCNT_THRESHOLD) {
@@ -441,7 +444,7 @@ static void *run(hashpipe_thread_args_t * args){
   st_p = &st;	// allow global (this source file) access to the status buffer
 
   // Flag that holds off the net thread
-  int holdoff = 0;
+  int holdoff = 1;
 
   // Force ourself into the hold off state
   //fprintf(stderr, "Setting CNETHOLD state to 1.Waiting for someone to set it to 0\n");
@@ -558,7 +561,7 @@ static void *run(hashpipe_thread_args_t * args){
     if (expected_packet_size != packet_size) {
       // Log warning and ignore wrongly sized packet
       #ifdef DEBUG_NET
-        hashpipe_warn("hera_pktsock_thread", "Invalid pkt size (%d)", packet_size);
+        hashpipe_warn(__FUNCTION__, "Invalid pkt size (%d)", packet_size);
       #endif
       hashpipe_pktsock_release_frame(p_frame);
       continue;
@@ -567,7 +570,8 @@ static void *run(hashpipe_thread_args_t * args){
     packet_count++;
     
     // Copy packet into any blocks where it belongs.
-    const uint64_t bcnt = process_packet((hera_catcher_input_databuf_t *)db, p_frame);
+    uint32_t bcnt = process_packet((hera_catcher_input_databuf_t *)db, p_frame);
+
     // Release frame back to kernel
     hashpipe_pktsock_release_frame(p_frame);
 
