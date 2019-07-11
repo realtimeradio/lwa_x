@@ -47,7 +47,7 @@
 static hid_t complex_id;
 static hid_t boolenumtype;
 //static hid_t boolean_id;
-static uint64_t total_baselines;
+static uint64_t bcnts_per_file;
 
 typedef enum {
     FALSE,
@@ -134,7 +134,7 @@ static hid_t open_hdf5_from_template(char * sourcename, char * destname)
 # define FILTER_H5_BITSHUFFLE 32008
 static void init_data_dataset(hdf5_id_t *id){
 
-   hsize_t data_dims[N_DATA_DIMS] = {total_baselines, 1, N_CHAN_PROCESSED, N_STOKES};
+   hsize_t data_dims[N_DATA_DIMS] = {bcnts_per_file, 1, N_CHAN_PROCESSED, N_STOKES};
    hsize_t chunk_dims[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
 
    hid_t file_space = H5Screate_simple(N_DATA_DIMS, data_dims, NULL);
@@ -207,7 +207,7 @@ static void init_data_dataset(hdf5_id_t *id){
 #define DIM1 1
 #define DIM2 2
 static void init_headers_dataset(hdf5_id_t *id) {
-   hsize_t dims1[DIM1] = {total_baselines};
+   hsize_t dims1[DIM1] = {bcnts_per_file};
    hsize_t chunk_dims1[DIM1] = {1};
 
    hid_t file_space = H5Screate_simple(DIM1, dims1, NULL);
@@ -251,7 +251,7 @@ static void init_headers_dataset(hdf5_id_t *id) {
 
    // TODO: uvw array can be static for a file. See if you can encode this in python.
    ///* And now uvw_array, which has shape Nblts x 3 */
-   //hsize_t dims2[DIM2]   = {total_baselines, 3};
+   //hsize_t dims2[DIM2]   = {bcnts_per_file, 3};
    //hsize_t chunk_dims2[DIM2] = {1, 3};
 
    //file_space = H5Screate_simple(DIM2, dims2, NULL);
@@ -444,42 +444,6 @@ static void get_auto_indices(bl_t *bl_order, int32_t *auto_indices, uint32_t n_b
     }
 }
 
-///* Given an array of baseline pairs, figure out the indices of the autocorrs */
-//static void get_auto_indices(bl_bda_t *bl_bda_order, int32_t *auto_indices, uint32_t n_blts) {
-//    int32_t i = 0;
-//    for (i=0; i<N_ANTS; i++) {
-//        auto_indices[i] = -1;
-//    }
-//    for (i=0; i<n_blts; i+=1) {
-//        if ((bl_bda_order[i].ant0 == bl_bda_order[i].ant1) && (bl_bda_order.tsamp==0)) {
-//            if (bl_bda_order[i].ant0 < N_ANTS) {
-//                auto_indices[bl_bda_order[i].ant0] = i;
-//            }
-//        }
-//    }
-//}
-
-///* Read the baseline-time order for baseline dependent averaged data from an HDF5 file via the Header/corr_bl_bda_order dataset */
-//static void get_bl_bda_order(hdf5_id_t *id, bl_bda_t *bl_bda_order){
-//    hid_t dataset_id;
-//    herr_t status;
-//    dataset_id = H5Dopen(id->header_gid, "corr_bl_bda_order", H5P_DEFAULT);
-//    if (dataset_id < 0) {
-//        hashpipe_error(__FUNCTION__, "Failed to open Header/corr_bl_order dataset");
-//        pthread_exit(NULL);
-//    }
-//    status = H5Dread(dataset_id, H5T_STD_I32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, bl_bda_order);
-//    if (status < 0) {
-//        hashpipe_error(__FUNCTION__, "Failed to read Header/corr_bl_order dataset");
-//        pthread_exit(NULL);
-//    }
-//    status = H5Dclose(dataset_id);
-//    if (status < 0) {
-//        hashpipe_error(__FUNCTION__, "Failed to close Header/corr_bl_order dataset");
-//        pthread_exit(NULL);
-//    }
-//}
-
 /* Read the baseline order from an HDF5 file via the Header/corr_bl_order dataset */
 static void get_bl_order(hdf5_id_t *id, bl_t *bl_order) {
     hid_t dataset_id;
@@ -533,11 +497,11 @@ static double mcnt2time(uint64_t mcnt, uint32_t sync_time)
 /* 
  * Write a bcnt to the dataset, at the right offset
  */
-static void write_baseline_index(hdf5_id_t *id, hsize_t bcnt, hid_t mem_space, uint64_t *visdata_buf)
+static void write_baseline_index(hdf5_id_t *id, hsize_t bcnt, hsize_t nblts, hid_t mem_space, uint64_t *visdata_buf)
 {
     herr_t status;
     hsize_t start[N_DATA_DIMS] = {bcnt, 0, 0, 0};
-    hsize_t count[N_DATA_DIMS] = {1 , 1, N_CHAN_PROCESSED, N_STOKES};
+    hsize_t count[N_DATA_DIMS] = {nblts, 1, N_CHAN_PROCESSED, N_STOKES};
     status = H5Sselect_hyperslab(id->visdata_fs, H5S_SELECT_SET, start, NULL, count, NULL);
     if (status < 0){
         hashpipe_error(__FUNCTION__, "Failed to select hyperslab for copying data");
@@ -581,9 +545,10 @@ static void write_header(hdf5_id_t *id, double *integration_time_buf, double *ti
 }
 
 // Get the even-sample / first-pol / first-complexity of the correlation buffer for chan `c` baseline `b`
-static void compute_sum_diff(int32_t *in, int32_t *out_sum, int32_t *out_diff, uint32_t bcnt) {
+static void compute_sum_diff(int32_t *in, int32_t *out_sum, int32_t *out_diff) {
 
-    int chan;    
+    // 256 bits = 4 stokes * 2 real/imag * 32 bits == 1 channel
+    int chan, bcnt;    
 
     __m256i val_even = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
     __m256i val_odd  = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
@@ -592,23 +557,17 @@ static void compute_sum_diff(int32_t *in, int32_t *out_sum, int32_t *out_diff, u
     __m256i *out_sum256  = (__m256i *)out_sum;
     __m256i *out_diff256 = (__m256i *)out_diff;
 
-    fprintf(stderr,"Even: %d\t Odd: %d\t",hera_catcher_input_databuf_by_bcnt_idx32(bcnt, 0),
-                                            hera_catcher_input_databuf_by_bcnt_idx32(bcnt, 1));
+    for(bcnt=0; bcnt < BASELINES_PER_BLOCK; bcnt++){
+       in_even256 = (__m256i *)(in + hera_catcher_input_databuf_by_bcnt_idx32(bcnt, 0));
+       in_odd256 = (__m256i *)(in + hera_catcher_input_databuf_by_bcnt_idx32(bcnt, 1));
 
-    in_even256 = (__m256i *)(in + hera_catcher_input_databuf_by_bcnt_idx32(bcnt, 0));
-    in_odd256 = (__m256i *)(in + hera_catcher_input_databuf_by_bcnt_idx32(bcnt, 1));
-
-    //fprintf(stderr, "Even Val: %lld \t Odd Val: %lld \n", *in_even256, *in_odd256); 
-
-    // 256 bits = 4 stokes * 2 real/imag * 32 bits == 1 channel
-
-    for(chan=0; chan< N_CHAN_PROCESSED; chan++){
-       val_even = _mm256_load_si256(in_even256 + chan);
-       val_odd  = _mm256_load_si256(in_odd256 + chan);
-       _mm256_store_si256((out_sum256  + chan), _mm256_add_epi32(val_even, val_odd));
-       _mm256_store_si256((out_diff256 + chan), _mm256_sub_epi32(val_even, val_odd));
+       for(chan=0; chan< N_CHAN_PROCESSED; chan++){
+          val_even = _mm256_load_si256(in_even256 + chan);
+          val_odd  = _mm256_load_si256(in_odd256 + chan);
+          _mm256_store_si256((out_sum256  + chan), _mm256_add_epi32(val_even, val_odd));
+          _mm256_store_si256((out_diff256 + chan), _mm256_sub_epi32(val_even, val_odd));
+       }
     }
-
 return;
 }
 
@@ -644,12 +603,21 @@ static void *run(hashpipe_thread_args_t * args)
     const char * status_key = args->thread_desc->skey;
 
     // Timers for performance monitoring
+    struct timespec t_stop, w_start, w_stop;
     float gbps, min_gbps;
 
     struct timespec start, finish;
-    struct timespec file_start, file_finish;
-    struct timespec w_start, w_stop; 
-    uint64_t w_ns; // write
+    clock_gettime(CLOCK_MONOTONIC, &finish);
+    uint64_t t_ns;
+    uint64_t w_ns;
+    uint64_t min_t_ns = 999999999;
+    uint64_t min_w_ns = 999999999;
+    uint64_t max_t_ns = 0;
+    uint64_t max_w_ns = 0;
+    uint64_t elapsed_t_ns = 0;
+    uint64_t elapsed_w_ns = 0;
+    float bl_t_ns = 0.0;
+    float bl_w_ns = 0.0;
      
     // Buffers for file name strings
     char template_fname[128];
@@ -671,7 +639,7 @@ static void *run(hashpipe_thread_args_t * args)
     // Variables for antenna positions and baseline orders. These should be provided
     // via the HDF5 header template.
     bl_t bl_order[VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES];
-    //bl_bda_t bl_bda_order[total_baselines];
+    //bl_bda_t bl_bda_order[bcnts_per_file];
     int32_t auto_indices[N_ANTS];
     enu_t ant_pos[N_ANTS];
 
@@ -713,11 +681,11 @@ static void *run(hashpipe_thread_args_t * args)
     hgetu8(st.buf,"NBL16SEC",&baseline_dist[3]);
     hashpipe_status_unlock_safe(&st);
 
-    total_baselines = 8*baseline_dist[0] + 4*baseline_dist[1] + 2*baseline_dist[2] + baseline_dist[3];
+    bcnts_per_file = 8*baseline_dist[0] + 4*baseline_dist[1] + 2*baseline_dist[2] + baseline_dist[3];
     fprintf(stdout,"Baseline Distribution per file:\n");
     fprintf(stdout,"8 x %ld\t 4 x %ld\t 2 x %ld\t 1 x %ld\n",
             baseline_dist[0],baseline_dist[1],baseline_dist[2],baseline_dist[3]);
-    fprintf(stdout,"Total Baselines: %ld", total_baselines);
+    fprintf(stdout,"Total Baselines: %ld\n", bcnts_per_file);
 
     /* Loop(s) */
     int32_t *db_in32;
@@ -725,43 +693,44 @@ static void *run(hashpipe_thread_args_t * args)
     uint32_t samp;
     int curblock_in=0;
     double file_start_t, file_stop_t, file_duration; // time from bcnt
-    double file_time; // time from local machine
     int64_t file_obs_id, file_nblts=0, file_nts=0;
-    int32_t bcnt;
     int32_t curr_file_bcnt = -1;
-    uint32_t bctr;        // bcnt variable
+    uint32_t strt_bcnt, stop_bcnt, break_bcnt;        // bcnt variable
+    int b;
+    unsigned int nbls, block_loc;
 
     hdf5_id_t sum_file, diff_file;
     
     // aligned_alloc because we're going to use 256-bit AVX instructions
-    int32_t *bl_buf_sum  = (int32_t *)aligned_alloc(32, N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
-    int32_t *bl_buf_diff = (int32_t *)aligned_alloc(32, N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
+    int32_t *bl_buf_sum  = (int32_t *)aligned_alloc(32, BASELINES_PER_BLOCK * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
+    int32_t *bl_buf_diff = (int32_t *)aligned_alloc(32, BASELINES_PER_BLOCK * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
 
     memset(bl_buf_sum, 0, N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
 
-    double *integration_time_buf = (double *)malloc(total_baselines * sizeof(double));
-    double *time_array_buf       = (double *)malloc(total_baselines * sizeof(double));
-    int *ant_0_array             = (int *)malloc(total_baselines * sizeof(int));
-    int *ant_1_array             = (int *)malloc(total_baselines * sizeof(int));
-    //double *uvw_array_buf        = (double *)malloc(total_baselines * 3 * sizeof(double));
+    double *integration_time_buf = (double *)malloc(bcnts_per_file * sizeof(double));
+    double *time_array_buf       = (double *)malloc(bcnts_per_file * sizeof(double));
+    int *ant_0_array             = (int *)malloc(bcnts_per_file * sizeof(int));
+    int *ant_1_array             = (int *)malloc(bcnts_per_file * sizeof(int));
+    //double *uvw_array_buf        = (double *)malloc(bcnts_per_file * 3 * sizeof(double));
 
     // Allocate an array of bools for flags and n_samples
-    hbool_t *flags = (hbool_t *)calloc(1, total_baselines * sizeof(hbool_t));
-    //uint64_t *nsamples = (uint64_t *)malloc(total_baselines * sizeof(uint64_t));
+    hbool_t *flags = (hbool_t *)calloc(1, bcnts_per_file * sizeof(hbool_t));
+    //uint64_t *nsamples = (uint64_t *)malloc(bcnts_per_file * sizeof(uint64_t));
+
+    // Define memory space of a block
+    hsize_t dims[DIM1] = {N_CHAN_PROCESSED * N_STOKES * BASELINES_PER_BLOCK};
+    hid_t mem_space_block = H5Screate_simple(DIM1, dims, NULL);
 
     // Define the memory space used by these buffers for HDF5 access
     // We write 1[baseline] x 1[spw] x N_CHAN_PROCESSED x N_STOKES at a time
     //hsize_t dims[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
     //hid_t mem_space_data = H5Screate_simple(N_DATA_DIMS, dims, NULL);
 
-    hsize_t dims[DIM1] = {N_CHAN_PROCESSED * N_STOKES};
-    hid_t mem_space_data = H5Screate_simple(DIM1, dims, NULL);
-
     // Memory spaces to Nblts-element header vectors
     //hsize_t dims1[DIM1] = {N_CHAN_PROCESSED*NSTOKES};
     //hid_t mem_space_nblts = H5Screate_simple(DIM1, dims1, NULL);
     // Memory spaces to (Nblts x 3)-element header vectors
-    //hsize_t dims2[DIM2] = {total_baselines, 3};
+    //hsize_t dims2[DIM2] = {bcnts_per_file, 3};
     //hid_t mem_space_uvw = H5Screate_simple(DIM2, dims2, NULL);
 
     while (run_threads()) {
@@ -791,6 +760,10 @@ static void *run(hashpipe_thread_args_t * args)
                 break;
             }
         }
+
+        // reset elapsed time counters
+        elapsed_w_ns = 0.0;
+        elapsed_t_ns = 0.0;
 
         // Get template filename from redis
         hashpipe_status_lock_safe(&st);
@@ -861,125 +834,205 @@ static void *run(hashpipe_thread_args_t * args)
         hashpipe_status_unlock_safe(&st);
 
         // Start writing files!
-        // A file is defined as total_baselines number of bcnts. If a bcnt belonging
+        // A file is defined as bcnts_per_file number of bcnts. If a bcnt belonging
         // to a new intergation arrives, close the old file and start a new file.
 
         clock_gettime(CLOCK_MONOTONIC, &start);
         db_in32 = (int32_t *)db_in->block[curblock_in].data;
+             
+        // Compute the sum and diff of entire buffer 
+        compute_sum_diff(db_in32, bl_buf_sum, bl_buf_diff);
+        clock_gettime(CLOCK_MONOTONIC, &t_stop);
 
-        // reset elapsed time counters
-        w_ns = 0.0;
-
-        for(bctr = 0; bctr < BASELINES_PER_BLOCK; bctr++){
-
-           // Check if bcnt marks the beginning of a new file
-           bcnt = db_in->block[curblock_in].header.bcnt[bctr];  
-           if (bcnt % total_baselines == 0){
-
-              fprintf(stderr,"Processing bcnt: %d\n", bcnt);
-
-              // If a file is open, finish its meta-data and close it.
-              if (curr_file_bcnt >= 0){
-
-                gps_time = mcnt2time(bcnt, sync_time);
-                file_stop_t = gps_time;
-                file_duration = file_stop_t - file_start_t;
-
-                fprintf(stdout, "Closing datasets and files\n");
-                write_header(&sum_file,  integration_time_buf, time_array_buf, ant_0_array, ant_1_array);
-                write_header(&diff_file, integration_time_buf, time_array_buf, ant_0_array, ant_1_array);
-                close_filespaces(&sum_file);
-                close_filespaces(&diff_file);
-                close_file(&sum_file, file_stop_t, file_duration, file_nblts, file_nts);
-                close_file(&diff_file, file_stop_t, file_duration, file_nblts, file_nts);
-                file_cnt += 1;
-
-                clock_gettime(CLOCK_MONOTONIC, &file_finish);
-                file_time = ELAPSED_NS(file_start, file_finish)/ 1000000000;
-
-                hashpipe_status_lock_safe(&st);
-                hputu8(st.buf, "FILESEC", file_time);
-                hashpipe_status_unlock_safe(&st); 
-
-                fprintf(stderr,"Closing file %s\n", hdf5_fname);
-
-                // If this is the last file, mark this block done and get out of the loop
-                if (file_cnt >= nfiles) {
-                    fprintf(stdout, "Catcher has written %d file and is going to sleep\n", file_cnt);
-                    if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
-                        hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
-                        pthread_exit(NULL);
-                    }
-                    curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
-                    curr_file_bcnt = -1; //So the next trigger will start a new file
-                    break;
-                }
-              }
-
-              // Open a new sum and difference file
-
-              // Init all counters to zero
-              clock_gettime(CLOCK_MONOTONIC, &file_start);
-
-              file_nblts = 0;
-              file_nts = 0;
-              memset(ant_0_array, 0, total_baselines * sizeof(uint16_t));
-              memset(ant_1_array, 0, total_baselines * sizeof(uint16_t));
-              memset(time_array_buf, 0, total_baselines * sizeof(double));
-              memset(integration_time_buf, 0, total_baselines * sizeof(double));
-
-              curr_file_bcnt = bcnt;
-              fprintf(stderr, "Curr file bcnt: %d\n", curr_file_bcnt);
-              fprintf(stderr, "Curr file mcnt: %ld\n", db_in->block[curblock_in].header.mcnt[bctr]);
-              gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt[bctr], sync_time);
-              julian_time = 2440587.5 + (gps_time / (double)(86400.0)); 
-              file_start_t = gps_time;
-              file_obs_id = (int64_t)gps_time;
-
-              sprintf(hdf5_fname, "zen.%7.5lf.uvh5", julian_time);
-              fprintf(stderr, "Opening new file %s\n", hdf5_fname);
-              start_file(&sum_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
-
-              sprintf(hdf5_fname, "zen.%7.5lf.diff.uvh5", julian_time);
-              fprintf(stderr, "Opening new file %s\n", hdf5_fname);
-              start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
-
-              // Get the antenna positions and baseline orders
-              // These are needed for populating the ant_[1|2]_array and uvw_array
-              get_ant_pos(&sum_file, ant_pos);
-              get_bl_order(&sum_file, bl_order);
-              //get_bl_bda_order(&sum_file, bl_bda_order);
-              get_auto_indices(bl_order, auto_indices, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES);
-           }
+        t_ns = ELAPSED_NS(start, t_stop);
+        elapsed_t_ns += t_ns;
+        min_t_ns = MIN(t_ns, min_t_ns);
+        max_t_ns = MAX(t_ns, max_t_ns);
  
-           // If an open file exists, copy data to the right location
+        strt_bcnt = db_in->block[curblock_in].header.bcnt[0];
+        stop_bcnt = db_in->block[curblock_in].header.bcnt[BASELINES_PER_BLOCK-1]; 
+
+        fprintf(stderr, "Start bcnt: %d\t Stop bcnt: %d\n", strt_bcnt, stop_bcnt);
+
+        if (((strt_bcnt / bcnts_per_file) == (stop_bcnt / bcnts_per_file)) &&
+              (strt_bcnt % bcnts_per_file != 0)){
+           // copy contents of the entire block to file if an open file exists
+           fprintf(stderr, "Copying entire block\n");
+
            if (curr_file_bcnt >= 0){
 
               // Update time and sample counters
-              file_nblts += 1;
-
-              compute_sum_diff(db_in32, bl_buf_sum, bl_buf_diff, bcnt%BASELINES_PER_BLOCK);
+              file_nblts += BASELINES_PER_BLOCK;
 
               clock_gettime(CLOCK_MONOTONIC, &w_start);               
-              write_baseline_index(&sum_file, (bcnt-curr_file_bcnt), mem_space_data, (uint64_t *)bl_buf_sum);
+              write_baseline_index(&sum_file, (strt_bcnt-curr_file_bcnt), BASELINES_PER_BLOCK,  
+                                   mem_space_block, (uint64_t *)bl_buf_sum);
               //write_baseline_index(&diff_file, (bcnt-curr_file_bcnt), mem_space_data, (uint64_t *)bl_buf_diff);
+              samp = strt_bcnt - curr_file_bcnt;
+
+              memcpy(ant_0_array+samp, db_in->block[curblock_in].header.ant_pair_0, BASELINES_PER_BLOCK * sizeof(uint16_t));
+              memcpy(ant_1_array+samp, db_in->block[curblock_in].header.ant_pair_1, BASELINES_PER_BLOCK * sizeof(uint16_t));
+              memset(flags+samp, 0, BASELINES_PER_BLOCK * sizeof(hbool_t));
+
+              for(b=0; b< BASELINES_PER_BLOCK; b++){
+                 time_array_buf[samp+b] = mcnt2time(db_in->block[curblock_in].header.mcnt[b], sync_time);
+              }
+
               clock_gettime(CLOCK_MONOTONIC, &w_stop);
 
-              w_ns += ELAPSED_NS(w_start, w_stop);
+              w_ns = ELAPSED_NS(w_start, w_stop);
+              elapsed_w_ns += w_ns;
+              min_w_ns = MIN(w_ns, min_w_ns);
+              max_w_ns = MAX(w_ns, max_w_ns);
+           }
+        }else{
+           // the block has a file boundary. If there is an open file, copy the relevant part of the block 
+           // and close the file. Open a new file for the rest of the block.
+           break_bcnt = (strt_bcnt / bcnts_per_file) * bcnts_per_file + strt_bcnt;
+           if (break_bcnt % bcnts_per_file) fprintf(stderr,"So much weirdness.\n");
+           if (break_bcnt > stop_bcnt) {
+              fprintf(stderr,"Lots of weirdness.\n");
+              break_bcnt = strt_bcnt;
+           }
+           if (curr_file_bcnt >=0){
+               // copy data
+               fprintf(stderr, "Copying till bcnt: %d\n", break_bcnt);
 
-              samp = bcnt - curr_file_bcnt;
+               unsigned int nbls = break_bcnt - strt_bcnt;
+               hsize_t dims[DIM1] = {nbls * N_CHAN_PROCESSED * N_STOKES};
+               hid_t mem_space_data = H5Screate_simple(DIM1, dims, NULL);
 
-              ant_0_array[samp] = (int)db_in->block[curblock_in].header.ant_pair_0[bctr];
-              ant_1_array[samp] = (int)db_in->block[curblock_in].header.ant_pair_1[bctr];
-              time_array_buf[samp] = mcnt2time(db_in->block[curblock_in].header.mcnt[bctr], sync_time);
-              flags[samp] = 0; 
+               file_nblts += nbls;
+               clock_gettime(CLOCK_MONOTONIC, &w_start);
+               write_baseline_index(&sum_file, (strt_bcnt-curr_file_bcnt), nbls,
+                                    mem_space_data, (uint64_t *)bl_buf_sum);
+               write_baseline_index(&diff_file, (strt_bcnt-curr_file_bcnt), nbls,
+                                    mem_space_data, (uint64_t *)bl_buf_diff);
+               samp = strt_bcnt - curr_file_bcnt;
 
-           } // processed data copying
-        } // bctr for loop
-              
+               memcpy(ant_0_array+samp, db_in->block[curblock_in].header.ant_pair_0, nbls * sizeof(uint16_t));
+               memcpy(ant_1_array+samp, db_in->block[curblock_in].header.ant_pair_1, nbls * sizeof(uint16_t));
+               memset(flags+samp, 0, nbls * sizeof(hbool_t));
+
+               for(b=0; b< nbls; b++){
+                  time_array_buf[samp+b] = mcnt2time(db_in->block[curblock_in].header.mcnt[b], sync_time);
+               }
+               clock_gettime(CLOCK_MONOTONIC, &w_stop);
+
+               w_ns = ELAPSED_NS(w_start, w_stop);
+               elapsed_w_ns += w_ns;
+               min_w_ns = MIN(w_ns, min_w_ns);
+               max_w_ns = MAX(w_ns, max_w_ns);
+
+               // finish meta data and close the file
+               gps_time = mcnt2time(break_bcnt, sync_time);
+               file_stop_t = gps_time;
+               file_duration = file_stop_t - file_start_t;
+
+               fprintf(stdout, "Closing datasets and files\n");
+               write_header(&sum_file,  integration_time_buf, time_array_buf, ant_0_array, ant_1_array);
+               write_header(&diff_file, integration_time_buf, time_array_buf, ant_0_array, ant_1_array);
+               close_filespaces(&sum_file);
+               close_filespaces(&diff_file);
+               close_file(&sum_file, file_stop_t, file_duration, file_nblts, file_nts);
+               close_file(&diff_file, file_stop_t, file_duration, file_nblts, file_nts);
+               file_cnt += 1;
+
+               hashpipe_status_lock_safe(&st);
+               hputu8(st.buf, "FILESEC", file_duration);
+               hashpipe_status_unlock_safe(&st); 
+
+               fprintf(stderr,"Closing file %s\n", hdf5_fname);
+
+               // If this is the last file, mark this block done and get out of the loop
+               if (file_cnt >= nfiles) {
+                   fprintf(stdout, "Catcher has written %d file and is going to sleep\n", file_cnt);
+                   if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+                       hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
+                       pthread_exit(NULL);
+                   }
+                   curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
+                   curr_file_bcnt = -1; //So the next trigger will start a new file
+                   break;
+               }
+           }
+
+           // Open new sum and difference files
+           // Init all counters to zero
+           file_nblts = 0;
+           file_nts = 0;
+           memset(ant_0_array, 0, bcnts_per_file * sizeof(uint16_t));
+           memset(ant_1_array, 0, bcnts_per_file * sizeof(uint16_t));
+           memset(time_array_buf, 0, bcnts_per_file * sizeof(double));
+           memset(integration_time_buf, 0, bcnts_per_file * sizeof(double));
+
+           curr_file_bcnt = break_bcnt;
+           block_loc = break_bcnt - strt_bcnt;
+           fprintf(stderr, "Curr file bcnt: %d\n", curr_file_bcnt);
+           fprintf(stderr, "Curr file mcnt: %ld\n", db_in->block[curblock_in].header.mcnt[block_loc]);
+           gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt[block_loc], sync_time);
+           julian_time = 2440587.5 + (gps_time / (double)(86400.0)); 
+           file_start_t = gps_time;
+           file_obs_id = (int64_t)gps_time;
+
+           sprintf(hdf5_fname, "zen.%7.5lf.uvh5", julian_time);
+           fprintf(stderr, "Opening new file %s\n", hdf5_fname);
+           start_file(&sum_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
+
+           sprintf(hdf5_fname, "zen.%7.5lf.diff.uvh5", julian_time);
+           fprintf(stderr, "Opening new file %s\n", hdf5_fname);
+           start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
+
+           // Get the antenna positions and baseline orders
+           // These are needed for populating the ant_[1|2]_array and uvw_array
+           get_ant_pos(&sum_file, ant_pos);
+           get_bl_order(&sum_file, bl_order);
+           //get_bl_bda_order(&sum_file, bl_bda_order);
+           get_auto_indices(bl_order, auto_indices, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES);
+       
+           // Copy data to the right location
+           nbls = stop_bcnt - break_bcnt;
+           fprintf(stderr, "Copying nbls: %d\n", nbls);
+
+           hsize_t dims[DIM1] = {nbls * N_CHAN_PROCESSED * N_STOKES};
+           hid_t mem_space_data = H5Screate_simple(DIM1, dims, NULL);
+
+           file_nblts += nbls;
+           clock_gettime(CLOCK_MONOTONIC, &w_start);
+           write_baseline_index(&sum_file, (break_bcnt-curr_file_bcnt), nbls,
+                                mem_space_data, (uint64_t *)bl_buf_sum);
+           write_baseline_index(&diff_file, (break_bcnt-curr_file_bcnt), nbls,
+                                mem_space_data, (uint64_t *)bl_buf_diff);
+           samp = break_bcnt - curr_file_bcnt;
+
+           memcpy(ant_0_array+samp, db_in->block[curblock_in].header.ant_pair_0, nbls * sizeof(uint16_t));
+           memcpy(ant_1_array+samp, db_in->block[curblock_in].header.ant_pair_1, nbls * sizeof(uint16_t));
+           memset(flags+samp, 0, nbls * sizeof(hbool_t));
+
+           for(b=0; b< nbls; b++){
+              time_array_buf[samp+b] = mcnt2time(db_in->block[curblock_in].header.mcnt[block_loc+b], sync_time);
+           }
+           clock_gettime(CLOCK_MONOTONIC, &w_stop); 
+           w_ns = ELAPSED_NS(w_start, w_stop);
+           elapsed_w_ns += w_ns;
+           min_w_ns = MIN(w_ns, min_w_ns);
+           max_w_ns = MAX(w_ns, max_w_ns);
+        } 
+        
         clock_gettime(CLOCK_MONOTONIC, &finish);
+
+        // Compute processing time for this block
+        bl_t_ns = (float)elapsed_t_ns / BASELINES_PER_BLOCK;
+        bl_w_ns = (float)elapsed_w_ns / BASELINES_PER_BLOCK;
  
         hashpipe_status_lock_safe(&st);
+        hputr4(st.buf, "DISKTBNS", bl_t_ns);
+        hputi8(st.buf, "DISKTMIN", min_t_ns);
+        hputi8(st.buf, "DISKTMAX", max_t_ns);
+        hputr4(st.buf, "DISKWBNS", bl_w_ns);
+        hputi8(st.buf, "DISKWMIN", min_w_ns);
+        hputi8(st.buf, "DISKWMAX", max_w_ns);
+
          
         hputi8(st.buf, "DISKWBL", w_ns/BASELINES_PER_BLOCK);
 
