@@ -596,6 +596,18 @@ static void compute_nsamples_array(float nsamples, float *nsamples_array){
     }
 }
 
+/*
+ Add an observation to the M&C system.
+*/
+static void add_mc_obs(char *fname)
+{
+  char cmd[256];
+  fprintf(stdout, "Adding observation to M&C\n");
+  // Launch (hard-coded) python script in the background and pass in filename.
+  sprintf(cmd, "/home/hera/hera-venv/bin/mc_add_observation.py %s &", fname);
+  system(cmd);
+}
+
 static void compute_integration_time_array(double integration_time, double *integration_time_buf)
 {
     int i;
@@ -943,6 +955,7 @@ static void *run(hashpipe_thread_args_t * args)
                 close_file(&sum_file, file_stop_t, file_duration, file_nblts, file_nts);
                 close_file(&diff_file, file_stop_t, file_duration, file_nblts, file_nts);
                 file_cnt += 1;
+                add_mc_obs(hdf5_fname);
                 // If this is the last file, mark this block done and get out of the loop
                 if (file_cnt >= nfiles) {
                     fprintf(stdout, "Catcher has written %d file and is going to sleep\n", file_cnt);
