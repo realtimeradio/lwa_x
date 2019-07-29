@@ -618,7 +618,7 @@ static void make_librarian_sessions(void)
   // Launch (hard-coded) python script in the background using fork.
   // We want to wait few seconds to give M&C a chance to finish importing the final file,
   // but don't want to hold up main thread execution.
-  sprintf(cmd, "sleep 10; /home/hera/hera-venv/bin/librarian_assign_sessions.py local-rtp");
+  sprintf(cmd, "sleep 10; /home/hera/hera-venv/bin/librarian_assign_sessions.py local-correlator");
   if (fork() != 0) {
     system(cmd);
   }
