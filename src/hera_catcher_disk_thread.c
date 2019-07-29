@@ -608,6 +608,22 @@ static void add_mc_obs(char *fname)
   system(cmd);
 }
 
+/*
+ Have the librarian make new sessions.
+*/
+static void make_librarian_sessions(void)
+{
+  char cmd[256];
+  fprintf(stdout, "Making new sessions in the Librarian\n");
+  // Launch (hard-coded) python script in the background using fork.
+  // We want to wait few seconds to give M&C a chance to finish importing the final file,
+  // but don't want to hold up main thread execution.
+  sprintf(cmd, "sleep 10; /home/hera/hera-venv/bin/librarin_assign_sessions.py local-rtp");
+  if (fork() != 0) {
+    system(cmd);
+  }
+}
+
 static void compute_integration_time_array(double integration_time, double *integration_time_buf)
 {
     int i;
@@ -963,6 +979,8 @@ static void *run(hashpipe_thread_args_t * args)
                         hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
                         pthread_exit(NULL);
                     }
+                    // Have the librarian make new sessions.
+                    make_librarian_sessions();
                     curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
                     curr_file_time = -1; //So the next trigger will start a new file
                     continue;
