@@ -602,10 +602,17 @@ static void compute_nsamples_array(float nsamples, float *nsamples_array){
 static void add_mc_obs(char *fname)
 {
   char cmd[256];
-  fprintf(stdout, "Adding observation to M&C\n");
+  int err;
+  fprintf(stdout, "Adding observation %s to M&C\n", fname);
   // Launch (hard-coded) python script in the background and pass in filename.
-  sprintf(cmd, "/home/hera/hera-venv/bin/mc_add_observation.py %s &", fname);
-  system(cmd);
+  sprintf(cmd, "/home/hera/hera-venv/bin/mc_add_observation.py %s", fname);
+  if (fork() != 0) {
+    err = system(cmd);
+    if (err != 0) {
+      fprintf(stderr, "Error adding observation %s to M&C\n", fname);
+    }
+    exit(0);
+  }
 }
 
 /*
@@ -614,13 +621,18 @@ static void add_mc_obs(char *fname)
 static void make_librarian_sessions(void)
 {
   char cmd[256];
+  int err;
   fprintf(stdout, "Making new sessions in the Librarian\n");
   // Launch (hard-coded) python script in the background using fork.
   // We want to wait few seconds to give M&C a chance to finish importing the final file,
   // but don't want to hold up main thread execution.
   sprintf(cmd, "sleep 10; /home/hera/hera-venv/bin/librarian_assign_sessions.py local-correlator");
   if (fork() != 0) {
-    system(cmd);
+    err = system(cmd);
+    if (err != 0) {
+      fprintf(stderr, "Error creating new session in the librarian\n");
+    }
+    exit(0);
   }
 }
 
