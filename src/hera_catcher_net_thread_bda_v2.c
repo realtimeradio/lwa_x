@@ -206,11 +206,12 @@ static inline uint32_t process_packet(
   int i;
   const uint32_t *payload_p;
   uint32_t *dest_p;
-  uint32_t pkt_bcnt_dist;
+  int32_t pkt_bcnt_dist;
   uint32_t pkt_bcnt;
   uint32_t cur_bcnt;
   uint32_t netbcnt = -1; // Value to return if a block is filled
   int b, x, t, o;
+  int rv;
   uint32_t pkt_offset;
 
   // Parse packet header
@@ -252,7 +253,8 @@ static inline uint32_t process_packet(
     if ((pkt_bcnt_dist >= 2*BASELINES_PER_BLOCK) || (binfo.block_packet_counter[binfo.block_i] == PACKETS_PER_BLOCK)){
        
        netbcnt = set_block_filled(db, &binfo);
-       fprintf(stderr,"Filled Block: %d with bcnt: %d\n", binfo.block_i, netbcnt);
+       fprintf(stderr,"Filled Block: %d from bcnt: %d to bcnt: %d\n", binfo.block_i, db->block[binfo.block_i].header.bcnt[0], 
+                                                                      db->block[binfo.block_i].header.bcnt[BASELINES_PER_BLOCK-2]);
 
        // Update binfo
        cur_bcnt += BASELINES_PER_BLOCK;
@@ -264,17 +266,21 @@ static inline uint32_t process_packet(
        binfo.block_i = (binfo.block_i+1) % CATCHER_N_BLOCKS; 
 
        // Wait (hopefully not long!) to acquire the block after next.
-       if(hera_catcher_input_databuf_busywait_free(db, pkt_block_i) != HASHPIPE_OK) {
-       if (errno == EINTR) {
-           // Interrupted by signal, return -1
-           hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
-           pthread_exit(NULL);
-           return -1; // We're exiting so return value is kind of moot
-       } else {
-           hashpipe_error(__FUNCTION__, "error waiting for free databuf");
-           pthread_exit(NULL);
-           return -1; // We're exiting so return value is kind of moot
-       }
+       while((rv=hera_catcher_input_databuf_busywait_free(db, pkt_block_i)) != HASHPIPE_OK) {
+         if (rv == HASHPIPE_TIMEOUT){
+             pthread_exit(NULL);
+             return -1;
+         }
+         if (errno == EINTR) {
+             // Interrupted by signal, return -1
+             hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
+             pthread_exit(NULL);
+             return -1; // We're exiting so return value is kind of moot
+         } else {
+             hashpipe_error(__FUNCTION__, "error waiting for free databuf");
+             pthread_exit(NULL);
+             return -1; // We're exiting so return value is kind of moot
+         }
        }
 
        // Initialize the newly acquired block
@@ -285,7 +291,7 @@ static inline uint32_t process_packet(
     }
 
     // Evaluate the location in the buffer to which to copy the packet data   
-    b = pkt_header.bcnt % BASELINES_PER_BLOCK;
+    b = (pkt_header.bcnt - cur_bcnt) % BASELINES_PER_BLOCK;
     x = pkt_header.xeng_id % N_XENGINES_PER_TIME;
     t = (pkt_header.mcnt/Nt) % TIME_DEMUX;  //Nt = 2
     o = pkt_header.offset;
@@ -447,11 +453,11 @@ static void *run(hashpipe_thread_args_t * args){
   int holdoff = 1;
 
   // Force ourself into the hold off state
-  //fprintf(stderr, "Setting CNETHOLD state to 1.Waiting for someone to set it to 0\n");
-  //hashpipe_status_lock_safe(&st);
-  //hputi4(st.buf, "CNETHOLD", 1);
-  //hputs(st.buf, status_key, "holding");
-  //hashpipe_status_unlock_safe(&st);
+  fprintf(stderr, "Setting CNETHOLD state to 1.Waiting for someone to set it to 0\n");
+  hashpipe_status_lock_safe(&st);
+  hputi4(st.buf, "CNETHOLD", 1);
+  hputs(st.buf, status_key, "holding");
+  hashpipe_status_unlock_safe(&st);
 
   while(holdoff) {
     sleep(1);
