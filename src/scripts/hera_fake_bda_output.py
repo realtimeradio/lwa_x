@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 # Imitate 16 xengs, 2 times, all baselines 
 # Send packets to catcher imitating the output
 # of all the xengs in the chain.
@@ -11,7 +13,7 @@ import time
 parser = argparse.ArgumentParser(description='Generate FAKE output to test catcher pipeline with baseline dependent averaging',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('config', type=str, help='BDA config file')
-parser.add_argument('--catcher', type=str, default= '10.10.10.5',
+parser.add_argument('--catcher', type=str, default = '10.80.40.251',
                     help='IP address of the Catcher machine')
 args = parser.parse_args()
 
@@ -50,6 +52,8 @@ for b in int_bin['baselines'].keys():
 
 bcnt = 0; mcnt = 0; ctr = 0;
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sleep_time = 10e-7
+
 while True:
    ctr += 2
    mcnt = int(500e6 * ctr / (2 * 8192))
@@ -62,13 +66,13 @@ while True:
                    b = mcnt+((xeng_id//Nx)*2)
                    pkt = struct.pack('>1Q2I4H', b, bcnt, 0, a0, a1, xeng_id, 4096) + int_bin['data'][nb]
                    sock.sendto(pkt, (udp_ip, udp_port))
-                   time.sleep(1e-3)
+                   time.sleep(sleep_time)
                    pkt = struct.pack('>1Q2I4H', b, bcnt, 1, a0, a1, xeng_id, 4096) + int_bin['data'][nb]
                    sock.sendto(pkt, (udp_ip, udp_port))
-                   time.sleep(1e-3)
+                   time.sleep(sleep_time)
                    pkt = struct.pack('>1Q2I4H', b, bcnt, 2, a0, a1, xeng_id, 4096) + int_bin['data'][nb]
                    sock.sendto(pkt, (udp_ip, udp_port))
-                   time.sleep(1e-3)
+                   time.sleep(sleep_time)
                bcnt += 1
 
 #def send_xeng(xeng_id):
