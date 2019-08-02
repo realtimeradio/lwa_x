@@ -68,7 +68,8 @@ dist_bin_SCRIPTS = scripts/paper_init.sh \
 	           scripts/xtor_down.sh \
 	           scripts/xtor_up.py \
 	           scripts/hera_catcher_init.sh \
-	           scripts/hera_catcher_up.py \
+	           scripts/hera_catcher_up_bda.py \
+                   scripts/hera_fake_bda_output.py \
 	           scripts/hera_catcher_down.sh \
 	           scripts/hera_catcher_take_data.py \
 	           scripts/tweak-perf.sh \
