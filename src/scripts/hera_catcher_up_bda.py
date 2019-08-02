@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import redis
 import time
 import argparse
@@ -67,7 +69,7 @@ run_on_hosts([args.host], ['cp', config, args.bdaconfig], wait=True)
 catcher_dict = {
   'HDF5TPLT' : args.hdf5template,
   'BDACONF'  : args.bdaconfig,
-  'NFILES'   : 2,
+  'NFILES'   : 10,
   'SYNCTIME' : time.time(),
   'INTTIME'  : 64 * 2048,
   'DISKMING' : 9999,
@@ -105,4 +107,5 @@ time.sleep(0.1)
 
 # Release nethread hold
 r.publish(pubchan, 'CNETHOLD=0')
+r.publish(pubchan, 'TRIGGER=1')
 
