@@ -938,12 +938,14 @@ static void *run(hashpipe_thread_args_t * args)
                 // Create the "corr:is_taking_data" hash. This will be set to state=False
                 // when data taking is complete. Or if this pipeline exits the key will expire.
                 redisCommand(c, "HMSET corr:is_taking_data state True time %d", (int)time(NULL));
+                redisCommand(c, "EXPIRE corr:is_taking_data 60");
             }
         } else if (file_cnt >= nfiles || idle) {
             // If we're transitioning to idle state
             // Indicate via redis that we're no longer taking data
             if (!idle) {
                 redisCommand(c, "HMSET corr:is_taking_data state False time %d", (int)time(NULL));
+                redisCommand(c, "EXPIRE corr:is_taking_data 60");
             }
             idle = 1;
             // Mark input block as free and advance
