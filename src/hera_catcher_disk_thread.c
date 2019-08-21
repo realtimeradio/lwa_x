@@ -573,9 +573,9 @@ static void get_ant_pos(hdf5_id_t *id, enu_t *ant_pos) {
 /*
 Turn an mcnt into a UNIX time in double-precision.
 */
-static double mcnt2time(uint64_t mcnt, uint32_t sync_time)
+static double mcnt2time(uint64_t mcnt, uint64_t sync_time_ms)
 {
-    return sync_time + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
+    return (sync_time_ms / 1000.) + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
 }
 
 static void compute_time_array(double time, double *time_buf)
@@ -772,7 +772,7 @@ static void *run(hashpipe_thread_args_t * args)
     char hdf5_fname[128];
 
     // Variables for sync time and computed gps time / JD
-    uint32_t sync_time = 0;
+    uint64_t sync_time_ms = 0;
     double gps_time;
     double julian_time;
     // Variables for data collection parameters
@@ -904,7 +904,7 @@ static void *run(hashpipe_thread_args_t * args)
         hgets(st.buf, "HDF5TPLT", 128, template_fname);
 
         // Get time that F-engines were last sync'd
-        hgetu4(st.buf, "SYNCTIME", &sync_time);
+        hgetu8(st.buf, "SYNCTIME", &sync_time_ms);
 
         hgetu4(st.buf, "MSPERFIL", &ms_per_file);
 
@@ -973,7 +973,7 @@ static void *run(hashpipe_thread_args_t * args)
         db_in32 = (int32_t *)db_in->block[curblock_in].data;
 
         clock_gettime(CLOCK_MONOTONIC, &start);
-        gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt, sync_time);
+        gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt, sync_time_ms);
         //fprintf(stdout, "Processing new block with: mcnt: %lu (gps time: %lf)\n", db_in->block[curblock_in].header.mcnt, gps_time);
         julian_time = 2440587.5 + (gps_time / (double)(86400.0));
 

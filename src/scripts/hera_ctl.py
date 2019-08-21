@@ -55,7 +55,7 @@ if args.action == 'stop':
 
 if args.action == 'start':
     # Calculate start MCNT
-    mcnt_origin = int(rdb['corr:feng_sync_time'])
+    mcnt_origin = int(int(rdb['corr:feng_sync_time'])/1000.)
     time_delay = args.starttime - mcnt_origin
     delay_mcnts = int(time_delay * mcnts_per_second())
     # round delay_mcnts down to an acceptable value
