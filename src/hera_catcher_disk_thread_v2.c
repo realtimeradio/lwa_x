@@ -135,7 +135,7 @@ static hid_t open_hdf5_from_template(char * sourcename, char * destname)
 static void init_data_dataset(hdf5_id_t *id){
 
    hsize_t data_dims[N_DATA_DIMS] = {bcnts_per_file, 1, N_CHAN_PROCESSED, N_STOKES};
-   hsize_t chunk_dims[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
+   hsize_t chunk_dims[N_DATA_DIMS] = {N_BL_PER_WRITE, 1, N_CHAN_PROCESSED, N_STOKES};
 
    hid_t file_space = H5Screate_simple(N_DATA_DIMS, data_dims, NULL);
 
@@ -698,8 +698,8 @@ static void *run(hashpipe_thread_args_t * args)
     //uint64_t *nsamples = (uint64_t *)malloc(bcnts_per_file * sizeof(uint64_t));
 
     // Define memory space of a block
-    hsize_t dims[DIM1] = {N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES};
-    hid_t mem_space_bl_per_write = H5Screate_simple(DIM1, dims, NULL);
+    hsize_t dims[N_DATA_DIMS] = {N_BL_PER_WRITE, 1, N_CHAN_PROCESSED, N_STOKES};
+    hid_t mem_space_bl_per_write = H5Screate_simple(N_DATA_DIMS, dims, NULL);
 
     // Define the memory space used by these buffers for HDF5 access
     // We write 1[baseline] x 1[spw] x N_CHAN_PROCESSED x N_STOKES at a time
@@ -848,6 +848,8 @@ static void *run(hashpipe_thread_args_t * args)
              
         for (bctr=0 ; bctr< BASELINES_PER_BLOCK; bctr += N_BL_PER_WRITE){
 
+          // We write N_BL_PER_WRITE at a time.
+          // these variables store the baseline numbers for the start and end of these blocks
           strt_bcnt = db_in->block[curblock_in].header.bcnt[bctr];
           stop_bcnt = db_in->block[curblock_in].header.bcnt[bctr+N_BL_PER_WRITE-1]; 
           //fprintf(stderr, "Start bcnt: %d\t Stop bcnt: %d\n", strt_bcnt, stop_bcnt);
@@ -861,13 +863,16 @@ static void *run(hashpipe_thread_args_t * args)
           min_t_ns = MIN(t_ns, min_t_ns);
           max_t_ns = MAX(t_ns, max_t_ns);
 
+          // If the start and end of this block belong in the same file AND
+          // The start of this block is not the start of a new file...
           if (((strt_bcnt / bcnts_per_file) == (stop_bcnt / bcnts_per_file)) &&
                (strt_bcnt % bcnts_per_file != 0)){
 
+             // If there is a file already open...
              // Copy all contents
              if (curr_file_bcnt >= 0){
-      
                 file_offset = strt_bcnt - curr_file_bcnt;
+                //fprintf(stdout, "Writing to offset: %d\n", file_offset);
                 clock_gettime(CLOCK_MONOTONIC, &w_start);
                 write_baseline_index(&sum_file, file_offset, N_BL_PER_WRITE, mem_space_bl_per_write, (uint64_t *)bl_buf_sum);
                 //write_baseline_index(&diff_file, file_offset, N_BL_PER_WRITE, mem_space_bl_per_write, (uint64_t *)bl_buf_diff);
@@ -887,22 +892,32 @@ static void *run(hashpipe_thread_args_t * args)
                 min_w_ns = MIN(w_ns, min_w_ns);
                 max_w_ns = MAX(w_ns, max_w_ns);
              }
-          }else{
-             // the block has a file boundary. If there is an open file, copy the relevant part of the block 
-             // and close the file. Open a new file for the rest of the block.
+          } else {
+             // the block has a file boundary OR this block starts with a new file.
 
-             if (strt_bcnt % bcnts_per_file == 0) break_bcnt = strt_bcnt;
-             else break_bcnt = ((strt_bcnt / bcnts_per_file) + 1) * bcnts_per_file;
+             
+             // Calculate the bcnt where we need to start a new file.
+             // This block might start at a new file. Otherwise
+             // We need a new file at the next bcnts_per_file boundary.
+             if (strt_bcnt % bcnts_per_file == 0){
+                break_bcnt = strt_bcnt;
+             } else {
+                 break_bcnt = ((strt_bcnt / bcnts_per_file) + 1) * bcnts_per_file;
+             }
              fprintf(stderr, "Breaking at bcnt: %d\n", break_bcnt);
-             if (break_bcnt % bcnts_per_file) fprintf(stderr,"Something is wrong\n");
+             if (break_bcnt % bcnts_per_file) {
+                fprintf(stderr,"Something is wrong\n");
+             }
 
+             // If there is an open file, copy the relevant part of the block 
+             // and close the file. Open a new file for the rest of the block.
              if (curr_file_bcnt >=0){
                  // copy data
                  nbls = break_bcnt - strt_bcnt;
                  //fprintf(stderr, "Copying till bcnt: %d\t Number of baselines: %d\n", break_bcnt, nbls);
                  if (nbls > 0){
-                    hsize_t start[DIM1] = {0};
-                    hsize_t count[DIM1] = {nbls * N_CHAN_PROCESSED * N_STOKES};
+                    hsize_t start[N_DATA_DIMS] = {0, 0, 0 ,0};
+                    hsize_t count[N_DATA_DIMS] = {nbls, 1, N_CHAN_PROCESSED, N_STOKES};
                     status = H5Sselect_hyperslab(mem_space_bl_per_write, H5S_SELECT_SET, start, NULL, count, NULL);
                     if (status < 0){
                        hashpipe_error(__FUNCTION__, "Failed to select hyperslab of shared databuf\n");
@@ -1005,8 +1020,8 @@ static void *run(hashpipe_thread_args_t * args)
 
              if (nbls > 0){
                 if (nbls % N_BL_PER_WRITE){
-                   hsize_t start[DIM1] = {block_offset * N_CHAN_PROCESSED * N_STOKES};
-                   hsize_t count[DIM1] = {nbls * N_CHAN_PROCESSED * N_STOKES};
+                   hsize_t start[N_DATA_DIMS] = {block_offset, 0, 0, 0};
+                   hsize_t count[N_DATA_DIMS] = {nbls, 1, N_CHAN_PROCESSED, N_STOKES};
                    status = H5Sselect_hyperslab(mem_space_bl_per_write, H5S_SELECT_SET, start, NULL, count, NULL);
                    if (status < 0){
                       hashpipe_error(__FUNCTION__, "Failed to select hyperslab of shared databuf\n");
