@@ -829,6 +829,9 @@ static void *run(hashpipe_thread_args_t * args)
     redisCommand(c, "HMSET corr:is_taking_data state False time %d", (int)time(NULL));
     redisCommand(c, "EXPIRE corr:is_taking_data 60");
 
+    // Reinitialize the list of files taken this session
+    redisCommand(c, "DEL rtp:file_list");
+
     /* Loop(s) */
     int32_t *db_in32;
     int rv;
@@ -993,8 +996,10 @@ static void *run(hashpipe_thread_args_t * args)
                         hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
                         pthread_exit(NULL);
                     }
-                    // Have the librarian make new sessions.
-                    make_librarian_sessions();
+                    if (use_redis) {
+                      // Let RTP know we have a new session available
+                      redisCommand(c, "HMSET rtp:has_new_data state True");
+                    }
                     curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
                     curr_file_time = -1; //So the next trigger will start a new file
                     continue;
@@ -1010,9 +1015,15 @@ static void *run(hashpipe_thread_args_t * args)
             sprintf(hdf5_fname, "zen.%7.5lf.uvh5", julian_time);
             fprintf(stdout, "Opening new file %s\n", hdf5_fname);
             start_file(&sum_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
+            if (use_redis) {
+              redisCommand(c, "RPUSH rtp:file_list %s", hdf5_fname);
+            }
             sprintf(hdf5_fname, "zen.%7.5lf.diff.uvh5", julian_time);
             fprintf(stdout, "Opening new file %s\n", hdf5_fname);
             start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
+            if (use_redis) {
+              redisCommand(c, "RPUSH rtp:file_list %s", hdf5_fname);
+            }
             // Get the antenna positions and baseline orders
             // These are needed for populating the ant_[1|2]_array and uvw_array
             get_ant_pos(&sum_file, ant_pos);
