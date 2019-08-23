@@ -1,5 +1,5 @@
 /*
- * hera_catcher_disk_thread.c
+ * hera_catcher_bda_disk_thread.c
  *
  * Writes correlated data to disk as hdf5 files.
  */
@@ -550,8 +550,8 @@ static void compute_sum_diff(int32_t *in, int32_t *out_sum, int32_t *out_diff, i
     __m256i *out_diff256 = (__m256i *)out_diff;
 
     for(bcnt=0; bcnt<N_BL_PER_WRITE; bcnt++){
-       in_even256 = (__m256i *)(in + hera_catcher_input_databuf_by_bcnt_idx32(bcnt+bl, 0));
-       in_odd256 = (__m256i *)(in + hera_catcher_input_databuf_by_bcnt_idx32(bcnt+bl, 1));
+       in_even256 = (__m256i *)(in + hera_catcher_bda_input_databuf_by_bcnt_idx32(bcnt+bl, 0));
+       in_odd256 = (__m256i *)(in + hera_catcher_bda_input_databuf_by_bcnt_idx32(bcnt+bl, 1));
 
        for(chan=0; chan< N_CHAN_PROCESSED; chan++){
           val_even = _mm256_load_si256(in_even256 + chan);
@@ -589,8 +589,8 @@ static int init(hashpipe_thread_args_t *args)
 static void *run(hashpipe_thread_args_t * args)
 {
     // Local aliases to shorten access to args fields
-    // Our input buffer is a hera_catcher_input_databuf
-    hera_catcher_input_databuf_t *db_in = (hera_catcher_input_databuf_t *)args->ibuf;
+    // Our input buffer is a hera_catcher_bda_input_databuf
+    hera_catcher_bda_input_databuf_t *db_in = (hera_catcher_bda_input_databuf_t *)args->ibuf;
     hashpipe_status_t st = args->st;
     const char * status_key = args->thread_desc->skey;
 
@@ -728,7 +728,7 @@ static void *run(hashpipe_thread_args_t * args)
         redisCommand(c, "EXPIRE corr:is_taking_data 60");
 
         // Wait for new input block to be filled
-        while ((rv=hera_catcher_input_databuf_busywait_filled(db_in, curblock_in)) != HASHPIPE_OK) {
+        while ((rv=hera_catcher_bda_input_databuf_busywait_filled(db_in, curblock_in)) != HASHPIPE_OK) {
             if (rv==HASHPIPE_TIMEOUT) {
                 hashpipe_status_lock_safe(&st);
                 hputs(st.buf, status_key, "blocked_in");
@@ -817,7 +817,7 @@ static void *run(hashpipe_thread_args_t * args)
           }
           idle = 1;
           // Mark input block as free and advance
-          if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+          if(hera_catcher_bda_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
               hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
               pthread_exit(NULL);
           }
@@ -971,7 +971,7 @@ static void *run(hashpipe_thread_args_t * args)
                  // If this is the last file, mark this block done and get out of the loop
                  if (file_cnt >= nfiles) {
                      fprintf(stdout, "Catcher has written %d file and is going to sleep\n", file_cnt);
-                     if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+                     if(hera_catcher_bda_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
                          hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
                          pthread_exit(NULL);
                      }
@@ -1083,7 +1083,7 @@ static void *run(hashpipe_thread_args_t * args)
         hashpipe_status_unlock_safe(&st);
 
         // Mark input block as free and advance
-        if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
+        if(hera_catcher_bda_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
             hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
             pthread_exit(NULL);
         }
@@ -1097,16 +1097,16 @@ static void *run(hashpipe_thread_args_t * args)
     return NULL;
 }
  
-static hashpipe_thread_desc_t hera_catcher_disk_thread = {
-    name: "hera_catcher_disk_thread",
+static hashpipe_thread_desc_t hera_catcher_disk_thread_bda = {
+    name: "hera_catcher_disk_thread_bda",
     skey: "DISKSTAT",
     init: init,
     run:  run,
-    ibuf_desc: {hera_catcher_input_databuf_create},
+    ibuf_desc: {hera_catcher_bda_input_databuf_create},
     obuf_desc: {NULL}
 };
 
 static __attribute__((constructor)) void ctor()
 {
-  register_hashpipe_thread(&hera_catcher_disk_thread);
+  register_hashpipe_thread(&hera_catcher_disk_thread_bda);
 }

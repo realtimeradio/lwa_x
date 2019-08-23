@@ -206,6 +206,81 @@ hashpipe_databuf_t *hera_catcher_input_databuf_create(int instance_id, int datab
         instance_id, databuf_id, header_size, block_size, n_block);
 }
 
+// BDA versions
+int hera_catcher_bda_input_databuf_wait_free(hera_catcher_bda_input_databuf_t *d, int block_id)
+{
+    int rv;
+    SEMLOG(d, "wait free");
+    rv = hashpipe_databuf_wait_free((hashpipe_databuf_t *)d, block_id);
+    SEMLOG(d, "got  free");
+    return rv;
+}
+
+int hera_catcher_bda_input_databuf_busywait_free(hera_catcher_bda_input_databuf_t *d, int block_id)
+{
+    int rv;
+    SEMLOG(d, "busy-wait free");
+    rv = hashpipe_databuf_busywait_free((hashpipe_databuf_t *)d, block_id);
+    SEMLOG(d, "busy-got  free");
+    return rv;
+}
+
+int hera_catcher_bda_input_databuf_wait_filled(hera_catcher_bda_input_databuf_t *d, int block_id)
+{
+    int rv;
+    SEMLOG(d, "wait fill");
+    rv = hashpipe_databuf_wait_filled((hashpipe_databuf_t *)d, block_id);
+    SEMLOG(d, "got  fill");
+    return rv;
+}
+
+int hera_catcher_bda_input_databuf_busywait_filled(hera_catcher_bda_input_databuf_t *d, int block_id)
+{
+    int rv;
+    SEMLOG(d, "busy-wait fill");
+    rv = hashpipe_databuf_busywait_filled((hashpipe_databuf_t *)d, block_id);
+    SEMLOG(d, "busy-got  fill");
+    return rv;
+}
+
+int hera_catcher_bda_input_databuf_set_free(hera_catcher_bda_input_databuf_t *d, int block_id)
+{
+    SEMLOG(d, "set  free");
+    return hashpipe_databuf_set_free((hashpipe_databuf_t *)d, block_id);
+}
+
+int hera_catcher_bda_input_databuf_set_filled(hera_catcher_bda_input_databuf_t *d, int block_id)
+{
+    SEMLOG(d, "set  fill");
+    return hashpipe_databuf_set_filled((hashpipe_databuf_t *)d, block_id);
+}
+
+hashpipe_databuf_t *hera_catcher_bda_input_databuf_create(int instance_id, int databuf_id)
+{
+#ifdef DEBUG_SEMS
+    // Init clock variables
+    if(databuf_id==1) {
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        now.tv_sec = start.tv_sec;
+        now.tv_nsec = start.tv_nsec;
+    }
+#endif
+
+    /* Calc databuf sizes */
+    size_t header_size = sizeof(hashpipe_databuf_t)
+                       + sizeof(hashpipe_databuf_cache_alignment);
+    size_t block_size  = sizeof(hera_catcher_bda_input_block_t);
+    int    n_block = CATCHER_N_BLOCKS;
+    //fprintf(stderr, "size_t: %u, block size: %lu, nblocks size: %u\n", 
+    //        (uint32_t)sizeof(size_t),(uint64_t)block_size, (uint32_t)n_block);
+    //fprintf(stderr, "header size: %u, words: %lu\n", (uint32_t)header_size, 
+    //        (uint64_t)(PACKETS_PER_BLOCK*OUTPUT_BYTES_PER_PACKET));
+
+    return hashpipe_databuf_create(
+        instance_id, databuf_id, header_size, block_size, n_block);
+}
+
+
 hashpipe_databuf_t *paper_gpu_input_databuf_create(int instance_id, int databuf_id)
 {
 #ifdef DEBUG_SEMS

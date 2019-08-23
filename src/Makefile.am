@@ -29,8 +29,10 @@ paper_threads = paper_fake_net_thread.c          \
                 hera_pktsock_thread.c            \
                 hera_fake_gpu_thread.c           \
 	            paper_crc_thread.c               \
-                hera_catcher_net_thread_bda_v2.c \
-                hera_catcher_disk_thread_v2.c    \
+                hera_catcher_net_thread_bda.c    \
+                hera_catcher_net_thread.c        \
+                hera_catcher_disk_thread_bda.c   \
+                hera_catcher_disk_thread.c       \
                 hera_gpu_bda_thread.c            \
                 hera_bda_output_thread.c         \
                 hera_null_thread.c               \
@@ -63,17 +65,17 @@ paper_gpu_la_LDFLAGS += -lhdf5_hl -lhdf5 -lhiredis
 
 
 # Installed scripts
-dist_bin_SCRIPTS = scripts/paper_init.sh \
-	           scripts/paper_crc_init.sh \
-	           scripts/xtor_down.sh \
-	           scripts/xtor_up.py \
-	           scripts/hera_catcher_init.sh \
-	           scripts/hera_catcher_up_bda.py \
-                   scripts/hera_fake_bda_output.py \
-	           scripts/hera_catcher_down.sh \
+dist_bin_SCRIPTS = scripts/paper_init.sh         \
+	           scripts/paper_crc_init.sh         \
+	           scripts/xtor_down.sh              \
+	           scripts/xtor_up.py                \
+	           scripts/hera_catcher_init.sh      \
+	           scripts/hera_catcher_up_bda.py    \
+               scripts/hera_fake_bda_output.py   \
+	           scripts/hera_catcher_down.sh      \
 	           scripts/hera_catcher_take_data.py \
-	           scripts/tweak-perf.sh \
-	           scripts/hera_ctl.py \
+	           scripts/tweak-perf.sh             \
+	           scripts/hera_ctl.py               \
 	           scripts/hera_make_hdf5_template.py
 
 # Non-installed test programs

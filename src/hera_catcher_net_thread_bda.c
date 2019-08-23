@@ -1,4 +1,4 @@
-/* hera_catcher_net_thread.c
+/* hera_catcher_bda_net_thread.c
  *
  * Routine to read packets sent to the catcher from 
  * network and put them into shared memory blocks. 
@@ -82,7 +82,7 @@ static inline int block_for_bcnt(uint32_t bcnt){
 // Initialize a block by clearing its "good data" flag and saving the 
 // bcnt of the first baseline in this block. The bcnt should be a multiple 
 // of BASELINES_PER_BLOCK.
-static inline void initialize_block(hera_catcher_input_databuf_t * db, uint64_t bcnt){
+static inline void initialize_block(hera_catcher_bda_input_databuf_t * db, uint64_t bcnt){
   int block_i = block_for_bcnt(bcnt);
   db->block[block_i].header.bcnt[0]   = bcnt;
   db->block[block_i].header.good_data = 0;
@@ -103,7 +103,7 @@ static inline void get_header(unsigned char *p_frame, packet_header_t *pkt_heade
 /* Set hashpipe block to filled */
 // This sets the "current" block to be marked as filled.
 // Returns bcnt of the block being marked filled.
-static uint32_t set_block_filled(hera_catcher_input_databuf_t *db, block_info_t *binfo){
+static uint32_t set_block_filled(hera_catcher_bda_input_databuf_t *db, block_info_t *binfo){
   static int last_filled = -1; 
 
   uint64_t block_missed_pkt_cnt;
@@ -129,7 +129,7 @@ static uint32_t set_block_filled(hera_catcher_input_databuf_t *db, block_info_t 
   }
 
   // Set the block as filled
-  if(hera_catcher_input_databuf_set_filled(db, block_i) != HASHPIPE_OK){
+  if(hera_catcher_bda_input_databuf_set_filled(db, block_i) != HASHPIPE_OK){
     hashpipe_error(__FUNCTION__, "error waiting for databuf filled call");
     pthread_exit(NULL);
   }
@@ -192,13 +192,13 @@ static inline void initialize_block_info(block_info_t * binfo){
 // (i.e. when marking a block as filled)!!!
 
 //static inline uint32_t process_packet(
-//  hera_catcher_input_databuf_t *db, unsigned char *p_frame){
+//  hera_catcher_bda_input_databuf_t *db, unsigned char *p_frame){
 //  uint32_t netbcnt = 32;
 //  return netbcnt;
 //}
 
 static inline uint32_t process_packet(
-  hera_catcher_input_databuf_t *db, unsigned char *p_frame){
+  hera_catcher_bda_input_databuf_t *db, unsigned char *p_frame){
 
   static block_info_t binfo;
   packet_header_t pkt_header;
@@ -266,7 +266,7 @@ static inline uint32_t process_packet(
        binfo.block_i = (binfo.block_i+1) % CATCHER_N_BLOCKS; 
 
        // Wait (hopefully not long!) to acquire the block after next.
-       while((rv=hera_catcher_input_databuf_busywait_free(db, pkt_block_i)) != HASHPIPE_OK) {
+       while((rv=hera_catcher_bda_input_databuf_busywait_free(db, pkt_block_i)) != HASHPIPE_OK) {
          if (rv == HASHPIPE_TIMEOUT){
              pthread_exit(NULL);
              return -1;
@@ -295,7 +295,7 @@ static inline uint32_t process_packet(
     x = pkt_header.xeng_id % N_XENGINES_PER_TIME;
     t = (pkt_header.mcnt/Nt) % TIME_DEMUX;  //Nt = 2
     o = pkt_header.offset;
-    pkt_offset = hera_catcher_input_databuf_pkt_offset(b, t, x, o);
+    pkt_offset = hera_catcher_bda_input_databuf_pkt_offset(b, t, x, o);
     //fprintf(stderr, "bcnt-loc:%d\txeng:%d\ttime:%d\tpktoffset:%d\n",b,x,t,o);
     //fprintf(stderr, "offset: %d\n", pkt_offset);
     
@@ -334,7 +334,7 @@ static inline uint32_t process_packet(
   else if(pkt_bcnt_dist < 0  && pkt_bcnt_dist > -LATE_PKT_BCNT_THRESHOLD) {
     // Issue warning if not after a reset
     if (cur_bcnt >= binfo.bcnt_log_late) {
-       hashpipe_warn("hera_catcher_net_thread", 
+       hashpipe_warn("hera_catcher_bda_net_thread", 
            "Ignorning late packet (%d bcnts late)", 
             cur_bcnt - pkt_bcnt);
     }
@@ -344,7 +344,7 @@ static inline uint32_t process_packet(
   else {
     // If not at start-up and this is the first out of order packet, issue warning.
     if (cur_bcnt !=0 && binfo.out_of_seq_cnt == 0) {
-       hashpipe_warn("hera_catcher_net_thread", "out of seq bcnt %012lx (expected: %012lx <= bcnt < %012x)", 
+       hashpipe_warn("hera_catcher_bda_net_thread", "out of seq bcnt %012lx (expected: %012lx <= bcnt < %012x)", 
                       pkt_bcnt, cur_bcnt, cur_bcnt+3*BASELINES_PER_BLOCK);
     }
 
@@ -360,7 +360,7 @@ static inline uint32_t process_packet(
       binfo.block_i = block_for_bcnt(pkt_header.bcnt);
       binfo.bcnt_log_late = binfo.bcnt_start + BASELINES_PER_BLOCK;
 
-      hashpipe_warn("hera_catcher_net_thread", 
+      hashpipe_warn("hera_catcher_bda_net_thread", 
       "resetting to bcnt %012lx block %d based on packet bcnt %012lx",
                      binfo.bcnt_start, binfo.block_i, pkt_header.bcnt);
 
@@ -443,7 +443,7 @@ static int init(hashpipe_thread_args_t *args){
 static void *run(hashpipe_thread_args_t * args){
   // Local aliases to shorten access to args fields
   // Our output buffer happens to be a paper_input_databuf
-  hera_catcher_input_databuf_t *db = (hera_catcher_input_databuf_t *)args->obuf;
+  hera_catcher_bda_input_databuf_t *db = (hera_catcher_bda_input_databuf_t *)args->obuf;
   hashpipe_status_t st = args->st;
   const char *status_key = args->thread_desc->skey;
 
@@ -475,7 +475,7 @@ static void *run(hashpipe_thread_args_t * args){
   fprintf(stderr,"Waiting to acquire two blocks to start!\n");
 
   // Acquire first two blocks to start
-  if(hera_catcher_input_databuf_busywait_free(db, 0) != HASHPIPE_OK){
+  if(hera_catcher_bda_input_databuf_busywait_free(db, 0) != HASHPIPE_OK){
     if (errno == EINTR){
       // Interrupted by signal, return -1
       hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
@@ -484,7 +484,7 @@ static void *run(hashpipe_thread_args_t * args){
         hashpipe_error(__FUNCTION__, "error waiting for free databuf");
         pthread_exit(NULL);
     }
-  }if(hera_catcher_input_databuf_busywait_free(db, 1) != HASHPIPE_OK){
+  }if(hera_catcher_bda_input_databuf_busywait_free(db, 1) != HASHPIPE_OK){
     if (errno == EINTR){
       // Interrupted by signal, return -1
       hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
@@ -576,7 +576,7 @@ static void *run(hashpipe_thread_args_t * args){
     packet_count++;
     
     // Copy packet into any blocks where it belongs.
-    uint32_t bcnt = process_packet((hera_catcher_input_databuf_t *)db, p_frame);
+    uint32_t bcnt = process_packet((hera_catcher_bda_input_databuf_t *)db, p_frame);
 
     // Release frame back to kernel
     hashpipe_pktsock_release_frame(p_frame);
@@ -670,18 +670,18 @@ static void *run(hashpipe_thread_args_t * args){
   return NULL;
 }
 
-static hashpipe_thread_desc_t hera_catcher_net_thread = {
-    name: "hera_catcher_net_thread",
+static hashpipe_thread_desc_t hera_catcher_net_thread_bda = {
+    name: "hera_catcher_net_thread_bda",
     skey: "CNETSTAT",
     init: init,
     run:  run,
     ibuf_desc: {NULL},
-    obuf_desc: {hera_catcher_input_databuf_create}
+    obuf_desc: {hera_catcher_bda_input_databuf_create}
 };
 
 static __attribute__((constructor)) void ctor()
 {
-  register_hashpipe_thread(&hera_catcher_net_thread);
+  register_hashpipe_thread(&hera_catcher_net_thread_bda);
 }
 
 // vi: set ts=8 sw=4 noet :
