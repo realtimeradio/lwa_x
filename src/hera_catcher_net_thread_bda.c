@@ -136,6 +136,7 @@ static uint32_t set_block_filled(hera_catcher_bda_input_databuf_t *db, block_inf
 
   // Calculate missing packets.
   block_missed_pkt_cnt = PACKETS_PER_BLOCK - binfo->block_packet_counter[block_i];
+  
   block_missed_xengs = block_missed_pkt_cnt / (PACKETS_PER_BL_PER_X * BASELINES_PER_BLOCK);
   block_missed_mod_cnt = block_missed_xengs % N_XENGINES_PER_TIME; 
 
@@ -254,7 +255,7 @@ static inline uint32_t process_packet(
        
        netbcnt = set_block_filled(db, &binfo);
        fprintf(stderr,"Filled Block: %d from bcnt: %d to bcnt: %d\n", binfo.block_i, db->block[binfo.block_i].header.bcnt[0], 
-                                                                      db->block[binfo.block_i].header.bcnt[BASELINES_PER_BLOCK-2]);
+                                                                      db->block[binfo.block_i].header.bcnt[BASELINES_PER_BLOCK-1]);
 
        // Update binfo
        cur_bcnt += BASELINES_PER_BLOCK;
