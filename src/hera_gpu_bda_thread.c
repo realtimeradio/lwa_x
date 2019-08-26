@@ -23,10 +23,10 @@
 #include "hashpipe.h"
 #include "paper_databuf.h"
 
+#define PRINT_TEST
+
 #define LOG(x)           ((uint32_t)(log((x))/log(2))) // yields msb loc
 #define CHECK_PWR2(x)    (!((x)&((x)-1)))
-
-#define PRINT_TEST
 
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
@@ -181,8 +181,6 @@ static int init_bda_info(bda_info_t *binfo, char *config_fname){
    int j, a0, a1, inttime, bin;
    uint32_t blctr[] = {0,0,0,0,0};
 
-   fprintf(stderr,"Loading config file..\n");
-
    if((fp=fopen(config_fname,"r")) == NULL){
       printf("Cannot open the configuration file.\n");
       exit(1);
@@ -205,8 +203,6 @@ static int init_bda_info(bda_info_t *binfo, char *config_fname){
    }
    binfo[N_BDABUF_BINS-1].baselines += blctr[N_BDABUF_BINS]; // 32sec considered as 16sec integration
 
-   fprintf(stderr,"Finished loading config file. Allocating memory to store baseline pairs.\n");
-
    // malloc for storing ant pairs
    for(j=0; j<N_BDABUF_BINS; j++){
      binfo[j].ant_pair_0 = (int *)malloc(binfo[j].baselines * sizeof(int));
@@ -219,26 +215,8 @@ static int init_bda_info(bda_info_t *binfo, char *config_fname){
      if(bin>=N_BDABUF_BINS) bin=N_BDABUF_BINS-1;
      binfo[bin].ant_pair_0[blctr[bin]] = a0;
      binfo[bin].ant_pair_1[blctr[bin]++] = a1;
-     //fprintf(stderr,"Bin: %d Ctr: %d\n", bin, blctr[bin]);
    }
    fclose(fp);
-
-   // Include the autos
-   //for(a0=0;a0<N_ANTS;a0++){
-   //  binfo[0].ant_pair_0[blctr[0]] = a0;
-   //  binfo[0].ant_pair_1[blctr[0]++] = a0;
-   //}
-
-#ifdef PRINT_TEST
-   fprintf(stderr,"Finished loading config file. Allocating memory..\n");
-   
-   for(j=0; j<N_BDABUF_BINS; j++){
-     fprintf(stderr,"init_binfo(): Bin:%d\tBaselines:%d\n",j, binfo[j].baselines);
-     //for(i=0; i<binfo[j].baselines;i++){
-     //  fprintf(stderr,"%d \t",binfo[j].ant_pair_0[i]);
-     //}
-   }
-#endif
 
    // Success!   
    return 0; 
@@ -250,11 +228,7 @@ static int init_bda_block_header(hera_bda_block_t *bdablk){
 
    for(j=0; j<N_BDABUF_BINS; j++){
      bdablk->header[j].baselines = binfo[j].baselines;
-#ifdef PRINT_TEST
-   fprintf(stderr, "init_bda_block_header(): Bin: %d Baselines: %ld\n", j, bdablk->header[j].baselines);
-#endif
      for(i=0; i<binfo[j].baselines; i++){
-       //fprintf(stderr, "%d\t", i);
        bdablk->header[j].ant_pair_0[i] = binfo[j].ant_pair_0[i];
        bdablk->header[j].ant_pair_1[i] = binfo[j].ant_pair_1[i];
      }
@@ -273,9 +247,6 @@ static int init(struct hashpipe_thread_args *args)
  
    // Get sizing parameters
    xgpuInfo(&xgpu_info);
-   //bytes_per_dump = xgpu_info.triLength * sizeof(Complex);
-   //packets_per_dump = bytes_per_dump / OUTPUT_BYTES_PER_PACKET;
-   //printf("bytes_per_dump = %lu\n", bytes_per_dump);
 
    if(init_idx_map()) {
      return -1;
@@ -287,7 +258,7 @@ static int init(struct hashpipe_thread_args *args)
    hashpipe_status_unlock_safe(&st);
 
    if (config_fname!=NULL){
-      sprintf(config_fname, "bda_config_192ants_nobda.txt"); 
+      sprintf(config_fname, "/home/deepthi/paper_gpu/src/bdaconfig/test_bda_192ants_nobda.txt"); 
    }
 
    // Initialize binfo with config file params
@@ -342,8 +313,6 @@ static void *run(hashpipe_thread_args_t * args)
    hera_bda_databuf_t *odb = (hera_bda_databuf_t *)args->obuf;
    hashpipe_status_t st = args->st;
    const char *status_key = args->thread_desc->skey;
-
-   fprintf(stderr,"Initializing BDA buffers..\n");
 
    /* Main loop */
    int rv;
@@ -415,11 +384,6 @@ static void *run(hashpipe_thread_args_t * args)
 
      clock_gettime(CLOCK_MONOTONIC, &start);
 
-     #ifdef PRINT_TEST
-     fprintf(stderr,"Sample: %ld\t GPU Block In: %d\t BDA Block Out: %d\n",
-                    sample, curblock_in, curblock_out);
-     #endif
-
      // Note processing status, current input block
      hashpipe_status_lock_safe(&st);
      hputs(st.buf, status_key, "processing");
@@ -437,10 +401,6 @@ static void *run(hashpipe_thread_args_t * args)
      
      for(j=0; j<N_BDABUF_BINS; j++){ //intbuf loop
 
-       #ifdef PRINT_TEST
-          fprintf(stderr,"Sample: %ld\t Processing buffer: %d\n",sample, j);
-       #endif
-
        sample_loc = (sample/(1<<j))%(N_MAX_INTTIME/(1<<j));
        buf->header[j].mcnt[sample_loc] = idb->block[curblock_in].header.mcnt;
           
@@ -456,19 +416,11 @@ static void *run(hashpipe_thread_args_t * args)
            for(pol=0; pol<N_STOKES; pol++){
              re = pf_re[(gpu_chan*REGTILE_CHAN_LENGTH)+idx_regtile+pol];
              im = pf_im[(gpu_chan*REGTILE_CHAN_LENGTH)+idx_regtile+pol];
-             //datoffset = 0;
              datoffset = hera_bda_buf_data_idx(N_MAX_INTTIME/(1<<j), sample_loc, bl, gpu_chan, pol);
-             //fprintf(stderr,"Offset: %ld\tReal:%d\tImag:%d\n",datoffset,re,im);
              buf->data[j][datoffset] += re;
              buf->data[j][datoffset+1] += -im;
-             //fprintf(stderr,"Offset: %lld\tReal:%d\tImag:%d\n",datoffset,buf->data[j][datoffset],buf->data[j][datoffset+1]);
            }
-           //fprintf(stderr,"bl:%ld\tchan:%d\toffset:%lld\n",bl,casper_chan,datoffset);
          }
-
-         #ifdef PRINT_TEST
-            //fprintf(stderr,"bl:%ld\toffset:%lld\n",bl,datoffset);
-         #endif
        }
     
      } // intbuf

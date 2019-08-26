@@ -31,8 +31,6 @@
 
 #define CONVERT(x)        (htobe32((x)))
 
-//#define PRINT_TEST
-
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
 
@@ -155,8 +153,6 @@ static void *run(hashpipe_thread_args_t * args)
    hputu4(st.buf, "OUTDUMPS", 0);
    hashpipe_status_unlock_safe(&st);
 
-   fprintf(stderr,"Opening socket, starting main loop..\n");
-
    pkt_t pkt;
    pkt.hdr.xeng_id = XENG_ID(xengine_id);
    pkt.hdr.payload_len = PAYLOAD_LEN(OUTPUT_BYTES_PER_PACKET);
@@ -248,9 +244,6 @@ static void *run(hashpipe_thread_args_t * args)
      for(j=0; j<N_BDABUF_BINS; j++){ //intbuf loop
 
          n_samples = N_MAX_INTTIME/(1<<j);
-     #ifdef PRINT_TEST
-         fprintf(stderr,"Sending buffer: %d\n", j);         
-     #endif
          offset = 0;
          clock_gettime(CLOCK_MONOTONIC, &pkt_start);
  
@@ -267,10 +260,6 @@ static void *run(hashpipe_thread_args_t * args)
              offset = 0;
            
              for(chan=0; chan<N_CHAN_PER_X; chan+= CHAN_PER_CATCHER_PKT){
-
-             #ifdef PRINT_TEST
-               //fprintf(stderr,"Bin:%d\tBaseline:%ld\tSample:%d\tChan:%d\n",j,bl,i,chan);
-             #endif
 
                pkt.hdr.offset = OFFSET(offset);
                datoffset = 0;
