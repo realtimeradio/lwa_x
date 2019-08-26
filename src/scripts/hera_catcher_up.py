@@ -4,6 +4,7 @@ import redis
 import time
 import argparse
 import subprocess
+import numpy as np
 
 perf_tweaker = 'tweak-perf-sn.sh'
 init = 'hera_catcher_init.sh'
@@ -23,13 +24,18 @@ def run_on_hosts(hosts, cmd, user=None, wait=True):
         for pn in p:
             pn.wait()
 
-parser = argparse.ArgumentParser(description='Start the HERA X-engines',
+parser = argparse.ArgumentParser(description='Start the HERA Catcher Machine',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 parser.add_argument('host', type=str, help='Host to intialize')
 parser.add_argument('-r', dest='redishost', type=str, default='redishost', help='Host serving redis database')
 parser.add_argument('-t', dest='hdf5template', type=str, default='/tmp/template.h5', 
                     help='Place to put HDF5 header template file')
+parser.add_argument('-c', dest='bdaconfig', type=str, default='/tmp/config.h5',
+                    help='Place to put the BDA config file.\
+                          Used only with the BDA version of catcher scripts.')
+parser.add_argument('--bda', dest='bda', action='store_true', default=False,
+                    help='Use the baseline dependent averaging version')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
 
@@ -41,8 +47,12 @@ r = redis.Redis(args.redishost)
 if args.runtweak:
     run_on_hosts([args.host], perf_tweaker, user='root', wait=True)
 
+init_args = []
+if args.bda:
+   init_args += ['-a']
+
 # Start Catcher
-run_on_hosts([args.host], ['cd', '/data;', init, '0'], wait=True)
+run_on_hosts([args.host], ['cd', '/data;', init] + init_args + ['0'], wait=True)
 time.sleep(15)
 
 # Start hashpipe<->redis gateways
@@ -53,7 +63,7 @@ run_on_hosts([args.host], ['taskset', cpu_mask, 'hashpipe_redis_gateway.rb', '-g
 time.sleep(15)
 
 # Generate the meta-data template
-run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
+#run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
 
 #Configure runtime parameters
 catcher_dict = {
@@ -72,6 +82,25 @@ for key, val in catcher_dict.iteritems():
 for v in ['NETWAT', 'NETREC', 'NETPRC']:
     r.publish(pubchan, '%sMN=99999' % (v))
     r.publish(pubchan, '%sMX=0' % (v))
+r.publish(pubchan, 'MISSEDPK=0')
+
+# If BDA is requested, write distribution to redis
+if args.bda:
+   baselines = {}
+   for n in range(4):
+       baselines[n] = []
+   
+   bdaconfig = np.loadtxt(args.bdaconfig, dtype=np.int)
+   for i,t in enumerate(bdaconfig[:,2]):
+       if (t==0): continue
+       n = int(np.log(t)/np.log(2))
+       if (n==4): n = 3
+       baselines[n].append((bdaconfig[i,0], bdaconfig[i,1]))
+   
+   for i in range(4):
+       r.publish(pubchan, 'NBL%dSEC=%d'  % (2**(i+1), len(baselines[i])))
+   
+   time.sleep(0.1)
 
 # Release nethread hold
 r.publish(pubchan, 'CNETHOLD=0')
