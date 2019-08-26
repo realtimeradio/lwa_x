@@ -19,8 +19,8 @@
 
 static void *run(hashpipe_thread_args_t * args){
    // Local aliases to shorten access to args fields
-   // Our input buffer is a hera_catcher_input_databuf
-   hera_catcher_input_databuf_t *db_in = (hera_catcher_input_databuf_t *)args->ibuf;
+   // Our input buffer is a hera_catcher_bda_input_databuf
+   hera_catcher_bda_input_databuf_t *db_in = (hera_catcher_bda_input_databuf_t *)args->ibuf;
    hashpipe_status_t st = args->st;
    const char * status_key = args->thread_desc->skey;
 
@@ -36,7 +36,7 @@ static void *run(hashpipe_thread_args_t * args){
       hashpipe_status_unlock_safe(&st);
 
       /* Wait for new block to become available */
-      while ((rv=hera_catcher_input_databuf_busywait_filled(db_in, block_idx)) != HASHPIPE_OK) {
+      while ((rv=hera_catcher_bda_input_databuf_busywait_filled(db_in, block_idx)) != HASHPIPE_OK) {
           if (rv==HASHPIPE_TIMEOUT) {
               hashpipe_status_lock_safe(&st);
               hputs(st.buf, status_key, "blocked_in");
@@ -56,7 +56,7 @@ static void *run(hashpipe_thread_args_t * args){
       hashpipe_status_unlock_safe(&st);
 
       // Mark input block as free and advance
-      if(hera_catcher_input_databuf_set_free(db_in, block_idx) != HASHPIPE_OK) {
+      if(hera_catcher_bda_input_databuf_set_free(db_in, block_idx) != HASHPIPE_OK) {
           hashpipe_error(__FUNCTION__, "error marking databuf %d free", block_idx);
           pthread_exit(NULL);
       }
@@ -74,7 +74,7 @@ hashpipe_thread_desc_t hera_null_thread = {
    skey: "NULLSTAT",
    init: NULL,
    run: run,
-   ibuf_desc: {hera_catcher_input_databuf_create},
+   ibuf_desc: {hera_catcher_bda_input_databuf_create},
    obuf_desc: {NULL}
 };
 
