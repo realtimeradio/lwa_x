@@ -134,9 +134,8 @@ static void *fake_gpu_thread_run(hashpipe_thread_args_t * args){
              //printf("%d\t %d\t %ld\n", ant0, ant1, idx_regtile);
              for(chan=0; chan<N_CHAN_PER_X; chan++){
                for(pol=0; pol<N_STOKES; pol++){
-                 data_re[idx_regtile+(chan*REGTILE_CHAN_LENGTH)+pol] = fakereal;
-                 data_im[idx_regtile+(chan*REGTILE_CHAN_LENGTH)+pol] = fakeimag;
-                 //memcpy((data_im+idx_regtile+(chan*REGTILE_CHAN_LENGTH)), &fakeimag, sizeof(int32_t));
+                 data_re[idx_regtile+(chan*REGTILE_CHAN_LENGTH)+pol] = fakereal+chan;
+                 data_im[idx_regtile+(chan*REGTILE_CHAN_LENGTH)+pol] = fakeimag+chan;
                }
              }
            }
