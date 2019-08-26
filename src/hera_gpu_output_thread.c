@@ -1,62 +1,59 @@
-/* Takes the output from the GPU and 
- * averages over time for the shorter 
- * baselines according to a config file.
- * Output is stored in CASPER ordered 
- * shared memory segments.
- */
+// hera_gpu_output_thread.c
+//
+// Sends integrated GPU output to "catcher" machine for assimilation into a
+// dataset. Unlike the original PAPER output thread, this code integrates
+// over XENG_CHAN_SUM channels, and performs a channel x baseline transpose
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <unistd.h>
 #include <string.h>
-#include <pthread.h>
-#include <sys/time.h>
-#include <sys/resource.h>
-#include <sys/types.h>
+#include <time.h>
 #include <errno.h>
+#include <unistd.h>
 #include <endian.h>
-#include <arpa/inet.h>
+#include <pthread.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
 
 #include <xgpu.h>
 
 #include "hashpipe.h"
 #include "paper_databuf.h"
 
-#define LOG(x)           ((uint32_t)(log((x))/log(2))) // yields msb loc
-#define CHECK_PWR2(x)    (!((x)&((x)-1)))
+//   Correlator data are sent to a data catcher using a simple UDP packetization
+//   format:
 
-// Macros for generating values for the pkthdr_t fields
-#define TIMESTAMP(x)      (htobe64((uint64_t)(x)))
-#define BASELINE_ID(x)    (htobe32((uint32_t)(x)))
-#define OFFSET(x)         (htobe32((uint32_t)(x)))
-#define XENG_ID(x)        (htobe16((uint16_t)(x)))
-#define PAYLOAD_LEN(x)    (htobe16((uint16_t)(x)))
-#define ANTENNA(x)        (htobe16((uint16_t)(x)))
-
-#define CONVERT(x)        (htobe32((x)))
-
-//#define PRINT_TEST
-
-typedef int32_t pktdata_t;
-static XGPUInfo xgpu_info;
+//   uint64_t TIMESTAMP (set to be the MCNT provided by the databuf delivered by the upstream processor)
+//   uint32_t OFFSET (offset in bytes where this packet should be placed in memory to build the complete output)
+//   uint16_t X-ENGINE ID
+//   uint16_t PAYLOAD LENGTH (length of data payload in this packet in bytes)
 
 // Structure for packet header
+
 typedef struct pkthdr {
   uint64_t timestamp;
-  uint32_t baseline_id;
   uint32_t offset;
-  uint16_t ant0;
-  uint16_t ant1;
   uint16_t xeng_id;
   uint16_t payload_len;
 } pkthdr_t;
 
+// Macros for generating values for the pkthdr_t fields
+#define TIMESTAMP(x) (htobe64((uint64_t)x))
+#define OFFSET(x)    (htobe32((uint32_t)x))
+#define XENG_ID(x)    (htobe16((uint16_t)x))
+#define PAYLOAD_LEN(x)    (htobe16((uint16_t)x))
+
+#define CONVERT(x) (htobe32(x))
+
+typedef int32_t pktdata_t;
+
 // Structure of a packet
-typedef struct struct_pkt {
+typedef struct pkt {
   pkthdr_t hdr;
   pktdata_t data[OUTPUT_BYTES_PER_PACKET/sizeof(pktdata_t)];
 } pkt_t;
+
+static XGPUInfo xgpu_info;
 
 // PACKET_DELAY_NS is number of nanoseconds to delay between packets.  This is
 // to prevent overflowing the network interface's TX queue.
@@ -72,7 +69,7 @@ typedef struct struct_pkt {
 
 // Set to 200 Mbps -- OK for two instances per node.
 // With 16 nodes, amounts to 6.4 Gbps of data
-#define PACKET_DELAY_NS (4 * 8 * OUTPUT_BYTES_PER_PACKET)
+#define PACKET_DELAY_NS (4 * XENG_CHAN_SUM * 8*OUTPUT_BYTES_PER_PACKET)
 
 // bytes_per_dump depends on xgpu_info.triLength
 static uint64_t bytes_per_dump = 0;
@@ -126,7 +123,7 @@ open_udp_socket(const char *host, const char *port)
 
     freeaddrinfo(result);
 
-#ifdef PRINT_TEST
+#if 0
     // Print send buffer size
     int bufsize;
     unsigned int bufsizesize = sizeof(bufsize);
@@ -204,27 +201,14 @@ static off_t regtile_index(const int in0, const int in1)
 // component.  A casper ordered buffer consists of four complex values for each
 // pair of input pairs.  Thus, the number of complex values in a casper ordered
 // buffer are: 4 * (N/2 * (N/2 + 1)) / 2 = N * (N/2 + 1)
-
-// For integration buffers, change the ordering to baselines x channels x stokes
-// to make it easier to send the packets after integration.
-
-/*  Each baseline (i.e, ant pair) needs a unique index for encoding the  
- *  baseline both while packetization and while building the integration
- *  buffers. The baseline index function below is an adaption of the 
- *  CASPER index without accounting for the size of each cell or the 
- *  stokes parameters.
- */ 
-
-/*  The integration buffer location for each baseline is obtained by  
- *  multiplying the baseline_index with:
- *  (words_per_cell = 8) * (num_chan_per_x = 384)
- *  Pol offset = 2* (2*(p0^p1) + p0)
- */
-static int baseline_index(const int in0, const int in1, const int n)
-{ 
-  const int a0 = in0 >> 1; 
+static off_t casper_index(const int in0, const int in1, const int n)
+{
+  const int a0 = in0 >> 1;
   const int a1 = in1 >> 1;
+  const int p0 = in0 & 1;
+  const int p1 = in1 & 1;
   const int delta = a1-a0;
+  const int num_words_per_cell = 8;
   const int nant_2 = (n/2) / 2;
 
   // Three cases: top triangle, middle rectangle, bottom triangle
@@ -243,39 +227,46 @@ static int baseline_index(const int in0, const int in1, const int n)
     // middle rectangle
     cell_index = middle_rect_offset + (a1-nant_2)*(nant_2+1) + (nant_2-delta);
   }
-
-  return cell_index;
+  //printf("%s: a0=%d, a1=%d, delta=%d, cell_index=%d\n", __FUNCTION__, a0, a1, delta, cell_index);
+  // Pol offset
+  const int pol_offset = 2*(2*(p0^p1) + p0);
+  // Word index (in units of words (i.e. floats) of real component
+  const int index = (cell_index * num_words_per_cell) + pol_offset;
+  return index;
 }
-  
-// Redefine casper ordering to place channels next to each other (since 
-// buffers are packetized this way. Thus, the number of complex values 
-// per baselines are: 4 stokes * N_CHAN_PER_X 
-// Total buffersize: 4 * N_CHAN_PER_X * (N/2 * (N/2 + 1)) / 2
-#define N_CASPER_COMPLEX_PER_BASELINE  (N_STOKES * N_CHAN_PER_X)
 
-// Lookup table mapping baseline_idx to regtile_idx
-static off_t *regtile_idx_map;
+// For each channel, a casper ordered buffer contains four complex values for
+// each pair of input pairs.  Thus, the number of complex values in a casper
+// ordered buffer are: 4 * (N/2 * (N/2 + 1)) / 2 = N * (N/2 + 1)
+#define N_CASPER_COMPLEX_PER_CHAN (N_INPUTS * (N_INPUTS/2 + 1))
+
+// Lookup table mapping casper_idx to regtile_idx
+static off_t *idx_map;
 
 static int init_idx_map()
 {
-  int a0, a1;
-  regtile_idx_map = (off_t *)malloc(N_BASELINES * sizeof(off_t));
-  if(!regtile_idx_map) {
+  int a0, a1, p0, p1, i, j;
+  idx_map = malloc(N_CASPER_COMPLEX_PER_CHAN * sizeof(off_t));
+  if(!idx_map) {
     return -1;
   }
 
-  for(a0=0; a0<N_INPUTS/2; a0++) {
-    for(a1 = a0; a1<N_INPUTS/2; a1++) {
-      //fprintf(stderr, "(%d,%d) Baseline idx: %d Regtile index:%lld \n",
-      //        a0,a1,baseline_index(2*a0, 2*a1, N_INPUTS), regtile_index(2*a0, 2*a1));
-      regtile_idx_map[baseline_index(2*a0, 2*a1, N_INPUTS)] = regtile_index(2*a0, 2*a1);
+  for(a1=0; a1<N_INPUTS/2; a1++) {
+    for(a0=0; a0<=a1; a0++) {
+      for(p0=0; p0<2; p0++) {
+        for(p1=0; p1<2; p1++) {
+          i = 2*a0 + p0;
+          j = 2*a1 + p1;
+          idx_map[casper_index(i,j,N_INPUTS)/2] = regtile_index(i,j);
+        }
+      }
     }
   }
   return 0;
 }
 
 static int init(struct hashpipe_thread_args *args)
-{   
+{
     // Get sizing parameters
     xgpuInfo(&xgpu_info);
     bytes_per_dump = xgpu_info.triLength * sizeof(Complex);
@@ -290,144 +281,46 @@ static int init(struct hashpipe_thread_args *args)
     return 0;
 }
 
-static int init_buffer(hera_bda_buf_t *bdabuf)
-{   
-   // Load baseline averaging params from config file
-   FILE *fp;  
-   int j, bin, a0, a1, inttime;
-   unsigned long long ctr[N_BDA_BINS] = {0,0,0,0,0};
-   hera_int_bin_buf_t *intbuf;
-
-   for(j=0;j<N_BDA_BINS;j++){ 
-     bdabuf->baselines_per_bin[j] = 0;
-   }
-   // count baselines in each bin   
-   if((fp=fopen("bda_config.txt","r")) == NULL){
-      printf("Cannot open the configuration file.\n");
-      exit(1);
-   }
-   while(fscanf(fp, "%d %d %d", &a0, &a1, &inttime)!=EOF){
-      if((inttime == 0) || !CHECK_PWR2(inttime)){
-        printf("(%d,%d): Samples to integrate not power of 2!\n",a0,a1);
-        exit(1);
-      }
-      bdabuf->baselines_per_bin[LOG(inttime)]+=1;
-      //switch(inttime){
-      //  case  1: bdabuf->baselines_per_bin[0]++; break;
-      //  case  2: bdabuf->baselines_per_bin[1]++; break;
-      //  case  4: bdabuf->baselines_per_bin[2]++; break;
-      //  case  8: bdabuf->baselines_per_bin[3]++; break;
-      //  case 16: bdabuf->baselines_per_bin[4]++; break;
-      //  default: printf("(%d,%d): Samples to integrate not power of 2!\n",a0,a1); exit(1);
-      //}
-   }
-
-   // Include autos for the no-integration baselines
-   bdabuf->baselines_per_bin[0] += N_ANTS; 
-
-#ifdef PRINT_TEST
-   fprintf(stderr,"Finished loading config file. Allocating memory..\n");
-   
-   for(j=0; j<N_BDA_BINS; j++){
-     fprintf(stderr,"Bin:%d\tBaselines:%lld\n",j,bdabuf->baselines_per_bin[j]);
-   }
-#endif
-
-   // malloc for storing ant pairs
-   for(j=0; j<N_BDA_BINS; j++){
-     bdabuf->ant_pair_0[j] = (int *)malloc(bdabuf->baselines_per_bin[j]*sizeof(int));
-     bdabuf->ant_pair_1[j] = (int *)malloc(bdabuf->baselines_per_bin[j]*sizeof(int));
-   }
-   // re-read ant pairs for each integration bin
-   rewind(fp);
-   while(fscanf(fp, "%d %d %d", &a0, &a1, &inttime)!=EOF){
-     bin = LOG(inttime);
-     bdabuf->ant_pair_0[bin][ctr[bin]] = a0;
-     bdabuf->ant_pair_1[bin][ctr[bin]++] = a1; 
-   }
-   fclose(fp);
-
-   // Include the autos
-   for(a0=0;a0<N_ANTS;a0++){
-     bdabuf->ant_pair_0[0][ctr[0]] = a0;
-     bdabuf->ant_pair_1[0][ctr[0]++] = a0;
-   }
-
-   // Initialise header and malloc for data
-   bdabuf->send[0] = 1;
-   bdabuf->buf->data = NULL;
-   bdabuf->buf->header.datsize = 0;
-
-   for(j=1; j<N_BDA_BINS; j++){
-     bdabuf->send[j] = 0;
-     intbuf = bdabuf->buf+j;
-     intbuf->header.sam    = 0;
-     intbuf->header.totsam = pow(2,j);
-     intbuf->header.datsize = bdabuf->baselines_per_bin[j]*N_COMPLEX_PER_BASELINE*2*sizeof(uint32_t);
-     intbuf->data = malloc(intbuf->header.datsize);     
-     if (!intbuf->data)
-       return -1;
-     memset(intbuf->data, 0, intbuf->header.datsize);
-   }
-
-   for(j=1;j<N_BDA_BINS;j++){ 
-     fprintf(stderr,"Bin:%d\tBaselines:%lld\tBin Size:%lld\n",
-             j,bdabuf->baselines_per_bin[j],
-             bdabuf->buf[j].header.datsize);
-   }
-
-return 1;
-}
-
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
 
 static void *run(hashpipe_thread_args_t * args)
 {
+    // Local aliases to shorten access to args fields
+    // Our input buffer happens to be a paper_ouput_databuf
+    paper_output_databuf_t *db = (paper_output_databuf_t *)args->ibuf;
+    hashpipe_status_t st = args->st;
+    const char * status_key = args->thread_desc->skey;
 
-   // Local aliases to shorten access to args fields
-   // Our input buffer happens to be a paper_ouput_databuf
-   paper_output_databuf_t *db = (paper_output_databuf_t *)args->ibuf;
-   hashpipe_status_t st = args->st;
-   const char * status_key = args->thread_desc->skey;
+    // Setup socket and message structures
+    int sockfd;
+    unsigned int xengine_id = 0;
+    struct timespec packet_delay = {
+      .tv_sec = 0,
+      .tv_nsec = PACKET_DELAY_NS
+    };
 
-   fprintf(stderr,"Initializing BDA buffers..\n");
+    hashpipe_status_lock_safe(&st);
+    hgetu4(st.buf, "XID", &xengine_id); // No change if not found
+    hputu4(st.buf, "XID", xengine_id);
+    hputu4(st.buf, "OUTDUMPS", 0);
+    hashpipe_status_unlock_safe(&st);
 
-   // Initialize buffers to store averaged baselines
-   hera_bda_buf_t bdabuf;
-   init_buffer(&bdabuf); 
+    pkt_t pkt;
+    pkt.hdr.xeng_id = XENG_ID(xengine_id);
+    pkt.hdr.payload_len = PAYLOAD_LEN(OUTPUT_BYTES_PER_PACKET);
 
-   // Setup socket and message structures
-   int sockfd;
-   unsigned int xengine_id = 0;
-   struct timespec packet_delay = {
-     .tv_sec = 0,
-     .tv_nsec = PACKET_DELAY_NS
-   };
-
-   hashpipe_status_lock_safe(&st);
-   hgetu4(st.buf, "XID", &xengine_id); // No change if not found
-   hputu4(st.buf, "XID", xengine_id);
-   hputu4(st.buf, "OUTDUMPS", 0);
-   hashpipe_status_unlock_safe(&st);
-
-   fprintf(stderr,"Opening socket, starting main loop..\n");
-
-   pkt_t pkt;
-   pkt.hdr.xeng_id = XENG_ID(xengine_id);
-   pkt.hdr.payload_len = PAYLOAD_LEN(OUTPUT_BYTES_PER_PACKET);
-
-   // TODO Get catcher hostname and port from somewhere
+    // TODO Get catcher hostname and port from somewhere
 
 #define stringify2(x) #x
 #define stringify(x) stringify2(x)
 
-   // Open socket
-   sockfd = open_udp_socket("catcher", stringify(CATCHER_PORT));
-   if(sockfd == -1) {
-       hashpipe_error(__FUNCTION__, "error opening socket");
-       pthread_exit(NULL);
-   }
+    // Open socket
+    sockfd = open_udp_socket("catcher", stringify(CATCHER_PORT));
+    if(sockfd == -1) {
+        hashpipe_error(__FUNCTION__, "error opening socket");
+        pthread_exit(NULL);
+    }
 
 #ifdef TEST_INDEX_CALCS
     int i, j;
@@ -439,225 +332,144 @@ static void *run(hashpipe_thread_args_t * args)
     }
     for(i=0; i<32; i++) {
       for(j=i; j<32; j++) {
-        o = baseline_index(2*i, 2*j, N_INPUTS);
-        fprintf(stdout, "%d, %d, %d, %ld\n", i, j, (int) o, 
-                                    (long int)regtile_idx_map[o]);
+        o = casper_index(2*i, 2*j, N_INPUTS);
+        fprintf(stdout, "%d, %d, %d\n", i, j, (int) o);
       }
     }
 #endif
 
-   /* Main loop */
-   int rv;
-   unsigned int dumps = 0;
-   int block_idx = 0;
-   struct timespec start, stop;
-   uint32_t nbytes = 0;
-   int casper_chan, gpu_chan;
-   unsigned long bl;
-   int j,pol;
-   struct timespec pkt_start, pkt_stop;
-   pktdata_t re, im;    //pktdata_t is 32bits
-   int offset = 0;
-   unsigned long long datoffset = 0;
-   uint16_t ant0, ant1;
-   unsigned long long idx_baseline; 
-   int baseline_id = 0;
-   off_t idx_regtile;
-   hera_int_bin_buf_t *intbuf;
+    /* Main loop */
+    int rv;
+    int casper_chan, gpu_chan, sum_chan;
+    int baseline, pol;
+    unsigned int dumps = 0;
+    int block_idx = 0;
+    struct timespec start, stop;
+    struct timespec pkt_start, pkt_stop;
+    pktdata_t re, im;
+    while (run_threads()) {
 
-#ifdef PRINT_TEST
-   fprintf(stderr,"Number of antennas:%d\n",N_ANTS);
-   fprintf(stderr,"Number of channels per X-Eng: %d\n",N_CHAN_PER_X);
-#endif
+        hashpipe_status_lock_safe(&st);
+        hputs(st.buf, status_key, "waiting");
+        hashpipe_status_unlock_safe(&st);
 
-   while (run_threads()) {
+        // Wait for new block to be filled
+        while ((rv=paper_output_databuf_wait_filled(db, block_idx))
+                != HASHPIPE_OK) {
+            if (rv==HASHPIPE_TIMEOUT) {
+                hashpipe_status_lock_safe(&st);
+                hputs(st.buf, status_key, "blocked");
+                hashpipe_status_unlock_safe(&st);
+                continue;
+            } else {
+                hashpipe_error(__FUNCTION__, "error waiting for filled databuf");
+                pthread_exit(NULL);
+                break;
+            }
+        }
 
-     hashpipe_status_lock_safe(&st);
-     hputs(st.buf, status_key, "waiting");
-     hashpipe_status_unlock_safe(&st);
+        clock_gettime(CLOCK_MONOTONIC, &start);
 
-     // Wait for new block to be filled
-     while ((rv=paper_output_databuf_wait_filled(db, block_idx))
-           != HASHPIPE_OK) {
-       if (rv==HASHPIPE_TIMEOUT) {
-           hashpipe_status_lock_safe(&st);
-           hputs(st.buf, status_key, "blocked");
-           hashpipe_status_unlock_safe(&st);
-           continue;
-       } else {
-           hashpipe_error(__FUNCTION__, "error waiting for filled databuf");
-           pthread_exit(NULL);
-           break;
-       }
-     }
+        // Note processing status, current input block
+        hashpipe_status_lock_safe(&st);
+        hputs(st.buf, status_key, "processing");
+        hputi4(st.buf, "OUTBLKIN", block_idx);
+        hashpipe_status_unlock_safe(&st);
 
-     clock_gettime(CLOCK_MONOTONIC, &start);
+        // Update header's timestamp for this dump.
+        pkt.hdr.timestamp = TIMESTAMP(db->block[block_idx].header.mcnt);
+        // Reset packet/byte counters to 0
+        pkt.hdr.offset = OFFSET(0);
+        uint32_t nbytes = 0;
 
-     // Note processing status, current input block
-     hashpipe_status_lock_safe(&st);
-     hputs(st.buf, status_key, "processing");
-     hputi4(st.buf, "OUTBLKIN", block_idx);
-     hashpipe_status_unlock_safe(&st);
-     
-     // Unpack and convert in packet sized chunks
-     // output data in order: baseline x chan x stokes (slowest to fastest varying)
-     pktdata_t *pf_re  = db->block[block_idx].data;
-     pktdata_t *pf_im  = db->block[block_idx].data + xgpu_info.matLength;
-     pktdata_t *p_out = pkt.data;
+        // Unpack and convert in packet sized chunks
+        // output data in order: baseline x chan x stokes (slowest to fastest varying)
+        pktdata_t * pf_re  = db->block[block_idx].data;
+        pktdata_t * pf_im  = db->block[block_idx].data + xgpu_info.matLength;
+        pktdata_t * p_out = pkt.data;
+        clock_gettime(CLOCK_MONOTONIC, &pkt_start);
+        // Iterate over blocks of N_STOKES baselines. All stokes are sent in adjacent words
+        for(baseline=0; baseline<N_CASPER_COMPLEX_PER_CHAN; baseline+=N_STOKES) {
+          // Iterate over blocks of XENG_CHAN_SUM channels. An inner loop will sum these
+          for(casper_chan=0; casper_chan<N_CHAN_PER_X; casper_chan=casper_chan+XENG_CHAN_SUM) {
+            for(pol=0; pol<N_STOKES; pol++) {
+              // This used to de-interleave channels.  De-interleaving is no longer
+              // needed, but we choose to continue maintaining the distinction
+              // between casper_chan and gpu_chan.
+              gpu_chan = casper_chan;
+              off_t idx_regtile = idx_map[baseline + pol];
+              for(sum_chan=0; sum_chan<XENG_CHAN_SUM; sum_chan++) {
+                if (sum_chan == 0) {
+                  re = pf_re[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile];
+                  im = pf_im[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile];
+                } else {
+                  re += pf_re[(gpu_chan+sum_chan)*REGTILE_CHAN_LENGTH+idx_regtile];
+                  im += pf_im[(gpu_chan+sum_chan)*REGTILE_CHAN_LENGTH+idx_regtile];
+                }
+              }
+              *p_out++ = CONVERT(re);
+              *p_out++ = CONVERT(-im); // Conjugate to match downstream expectations.
+              nbytes += 2*sizeof(pktdata_t);
+              if(nbytes % OUTPUT_BYTES_PER_PACKET == 0) {
+                int bytes_sent = send(sockfd, &pkt, sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET, 0);
+                if(bytes_sent == -1) {
+                  // Send all packets even if cactcher is not listening (i.e. we
+                  // we get a connection refused error), but abort sending this
+                  // dump if we get any other error.
+                  if(errno != ECONNREFUSED) {
+                    perror("send");
+                    // Update stats
+                    hashpipe_status_lock_safe(&st);
+                    hgetu4(st.buf, "OUTDUMPS", &dumps);
+                    hputu4(st.buf, "OUTDUMPS", ++dumps);
+                    hputr4(st.buf, "OUTSECS", 0.0);
+                    hputr4(st.buf, "OUTMBPS", 0.0);
+                    hashpipe_status_unlock_safe(&st);
+                    // Break out of both for loops
+                    goto done_sending;
+                  }
+                } else if(bytes_sent != sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET) {
+                  printf("only sent %d of %lu bytes!!!\n", bytes_sent, sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET);
+                }
 
-     /* ------------------------------------------------ */
-     /* Loop through baselines and add/send the packets  */
-     /* ------------------------------------------------ */
+                // Delay to prevent overflowing network TX queue
+                clock_gettime(CLOCK_MONOTONIC, &pkt_stop);
+                packet_delay.tv_nsec = PACKET_DELAY_NS - ELAPSED_NS(pkt_start, pkt_stop);
+                if(packet_delay.tv_nsec > 0 && packet_delay.tv_nsec < 1000*1000*1000) {
+                  nanosleep(&packet_delay, NULL);
+                }
 
-     for(j=0; j<N_BDA_BINS; j++){ //intbuf loop
+                // Setup for next packet
+                p_out = pkt.data;
+                pkt_start = pkt_stop;
+                // Update header's byte_offset for this chunk
+                pkt.hdr.offset = OFFSET(nbytes);
+              }
+            }
+          }
+        }
 
-       fprintf(stderr,"Processing buffer: %d\n",j);
+        clock_gettime(CLOCK_MONOTONIC, &stop);
 
-       intbuf = &(bdabuf.buf[j]);
-       intbuf->header.mcnt = db->block[block_idx].header.mcnt;
-
-       if (bdabuf.send[j]){
-
-#ifdef PRINT_TEST
-     fprintf(stderr,"Sending buffer: %d\n", j);         
-#endif
-
-         pkt.hdr.timestamp = TIMESTAMP(intbuf->header.mcnt);
-         offset = 0; nbytes = 0;
-         p_out = pkt.data; 
-         clock_gettime(CLOCK_MONOTONIC, &pkt_start);
- 
-         for(bl=0; bl<bdabuf.baselines_per_bin[j]; bl++){
-           ant0 = bdabuf.ant_pair_0[j][bl];    // ordering set by config file 
-           ant1 = bdabuf.ant_pair_1[j][bl]; 
-           pkt.hdr.ant1 = ANTENNA(ant1);
-           pkt.hdr.ant0 = ANTENNA(ant0);
-           idx_baseline = baseline_index(2*ant0, 2*ant1, N_INPUTS); 
-           idx_regtile = regtile_idx_map[idx_baseline];
-           pkt.hdr.offset = OFFSET(0);
-           offset = 0;
-           pkt.hdr.baseline_id = BASELINE_ID(baseline_id++);
-           
-           for(casper_chan=0; casper_chan<N_CHAN_PER_X; casper_chan++){
-             // This used to de-interleave channels.  De-interleaving is no longer
-             // needed, but we choose to continue maintaining the distinction
-             // between casper_chan and gpu_chan.
-             gpu_chan = casper_chan;
-
-             for(pol=0; pol<N_STOKES; pol++){
-               re = pf_re[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile+pol];
-               im = pf_im[gpu_chan*REGTILE_CHAN_LENGTH+idx_regtile+pol];
-               if (j==0){  
-                 *p_out++ = CONVERT(re);
-                 *p_out++ = CONVERT(-im);
-               }else{ 
-                 datoffset = hera_int_bin_buf_data_idx(bl, gpu_chan, pol);
-                 *p_out++ = CONVERT(intbuf->data[datoffset] + re);
-                 *p_out++ = CONVERT(intbuf->data[datoffset+1] -im);
-               }
-               nbytes += 2*sizeof(pktdata_t);
-               
-               if(nbytes%OUTPUT_BYTES_PER_PACKET == 0){
-                 int bytes_sent = send(sockfd, &pkt, 
-                                       sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET, 0); 
-
-                 if(bytes_sent == -1){
-                   // Send all packets even if catcher is not listening (i.e. we
-                   // we get a connection refused error), but abort sending this
-                   // dump if we get any other error.
-                   if(errno != ECONNREFUSED){
-                     perror("send");
-                     // Update stats
-                     hashpipe_status_lock_safe(&st);
-                     hgetu4(st.buf, "OUTDUMPS", &dumps);
-                     hputu4(st.buf, "OUTDUMPS", ++dumps);
-                     hputr4(st.buf, "OUTSECS", 0.0);
-                     hputr4(st.buf, "OUTMBPS", 0.0);
-                     hashpipe_status_unlock_safe(&st);
-                     // Break out of both for loops
-                     goto done_sending;
-                   }
-                 }else if(bytes_sent != sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET) {
-                   printf("only sent %d of %lu bytes!!!\n", bytes_sent, 
-                           sizeof(pkt.hdr)+OUTPUT_BYTES_PER_PACKET);
-                 }
-
-                 // Delay to prevent overflowing network TX queue
-                 clock_gettime(CLOCK_MONOTONIC, &pkt_stop);
-                 packet_delay.tv_nsec = PACKET_DELAY_NS - ELAPSED_NS(pkt_start, pkt_stop);
-                 if(packet_delay.tv_nsec > 0 && packet_delay.tv_nsec < 1000*1000*1000){
-                   nanosleep(&packet_delay, NULL);
-                 }
-               
-                 // Setup for next packet
-                 p_out = pkt.data;
-                 pkt_start = pkt_stop;
-                 offset++;
-                 pkt.hdr.offset = OFFSET(offset);
-               } // done sending
-             } // pol
-           } // chan
-         } // baseline
-         
-         if(j!=0) bdabuf.send[j] = 0; 
-         intbuf->header.sam = 0;
-         memset(intbuf->data, 0, intbuf->header.datsize);
-          
-       }else{
-
-#ifdef PRINT_TEST
-     fprintf(stderr,"Copying buffer: %d\n", j);         
-#endif
-         for(bl=0; bl<bdabuf.baselines_per_bin[j]; bl++){
-           ant0 = bdabuf.ant_pair_0[j][bl]; 
-           ant1 = bdabuf.ant_pair_1[j][bl];
-           idx_baseline = baseline_index(2*ant0, 2*ant1, N_INPUTS); 
-           idx_regtile = regtile_idx_map[idx_baseline];
- 
-           for(casper_chan=0; casper_chan<N_CHAN_PER_X; casper_chan++){
-             gpu_chan = casper_chan;
-             for(pol=0; pol<N_STOKES; pol++){
-               re = pf_re[(gpu_chan*REGTILE_CHAN_LENGTH)+idx_regtile+pol];
-               im = pf_im[(gpu_chan*REGTILE_CHAN_LENGTH)+idx_regtile+pol];
-               datoffset = hera_int_bin_buf_data_idx(bl, gpu_chan, pol);
-               intbuf->data[datoffset] += re;
-               intbuf->data[datoffset+1] += -im;
-             }
-             //fprintf(stderr,"bl:%ld\tchan:%d\toffset:%lld\n",bl,casper_chan,datoffset);
-           }
-
-#ifdef PRINT_TEST
-           fprintf(stderr,"bl:%ld\toffset:%lld\n",bl,datoffset);
-#endif
-         }
- 
-        intbuf->header.sam += 1;
-        if ((intbuf->header.sam+1) == intbuf->header.totsam)
-          bdabuf.send[j] = 1;
-       }
-     }// end intbuf loop
-
-     clock_gettime(CLOCK_MONOTONIC, &stop);
-
-     hashpipe_status_lock_safe(&st);
-     hgetu4(st.buf, "OUTDUMPS", &dumps);
-     hputu4(st.buf, "OUTDUMPS", ++dumps);
-     hputu4(st.buf, "OUTBYTES", nbytes);
-     hputr4(st.buf, "OUTSECS", (float)ELAPSED_NS(start,stop)/1e9);
-     hputr4(st.buf, "OUTMBPS", (1e3*8*nbytes)/ELAPSED_NS(start,stop));
-     hashpipe_status_unlock_safe(&st);
+        hashpipe_status_lock_safe(&st);
+        hgetu4(st.buf, "OUTDUMPS", &dumps);
+        hputu4(st.buf, "OUTDUMPS", ++dumps);
+        hputu4(st.buf, "OUTBYTES", nbytes);
+        hputr4(st.buf, "OUTSECS", (float)ELAPSED_NS(start,stop)/1e9);
+        hputr4(st.buf, "OUTMBPS", (1e3*8*nbytes)/ELAPSED_NS(start,stop));
+        hashpipe_status_unlock_safe(&st);
 
 done_sending:
 
-     // Mark block as free
-     paper_output_databuf_set_free(db, block_idx);
+        // Mark block as free
+        paper_output_databuf_set_free(db, block_idx);
 
-     // Setup for next block
-     block_idx = (block_idx + 1) % db->header.n_block;
+        // Setup for next block
+        block_idx = (block_idx + 1) % db->header.n_block;
 
-     /* Will exit if thread has been cancelled */
-     pthread_testcancel();
-  }
+        /* Will exit if thread has been cancelled */
+        pthread_testcancel();
+    }
 
     // Thread success!
     return NULL;
@@ -676,4 +488,3 @@ static __attribute__((constructor)) void ctor()
 {
   register_hashpipe_thread(&gpu_output_thread);
 }
-
