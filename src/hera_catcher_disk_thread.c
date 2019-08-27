@@ -615,6 +615,7 @@ static void add_mc_obs(char *fname)
   }
 }
 
+#if 0
 /*
  Have the librarian make new sessions.
 */
@@ -635,6 +636,7 @@ static void make_librarian_sessions(void)
     exit(0);
   }
 }
+#endif
 
 static void compute_integration_time_array(double integration_time, double *integration_time_buf)
 {
