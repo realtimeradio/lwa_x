@@ -131,10 +131,10 @@ case ${hostname} in
     xid1=$(( 2*(mypx-1) + 1))
 
     instances=( 
-      #                               GPU       NET FLF GPU OUT
-      # mask  bind_host               DEV  XID  CPU CPU CPU CPU
-      "0x00ff eth3                     0  $xid0  0   1   2   3" # Instance 0, eth3
-      "0xff00 eth5                     1  $xid1  8   9   10  11" # Instance 1, eth5
+      #                               GPU       NET    FLF   GPU  OUT  BDA
+      # mask  bind_host               DEV  XID  CPU    CPU   CPU  CPU  CPU
+      "0x00ff eth3                     0  $xid0  0   0x0006   3    4    5 " # Instance 0, eth3
+      "0xff00 eth5                     1  $xid1  8   0x0600  11   12   10 " # Instance 1, eth5
     );;
 
   *)
@@ -153,6 +153,7 @@ function init() {
   flfcpu=$7
   gpucpu=$8
   outcpu=$9
+  bdacpu=$10
 
   if [ -z "${mask}" ]
   then
@@ -166,33 +167,132 @@ function init() {
     return 1
   fi
 
+  if [ $USE_IBVERBS -eq 1 ]
+  then
+    netthread=hera_ibv_thread
+  else
+    netthread=hera_pktsock_thread
+  fi
+
+  echo "Using netthread: $netthread"
+
   echo taskset $mask \
   hashpipe -p paper_gpu -I $instance \
     -o BINDHOST=$bindhost \
     -o GPUDEV=$gpudev \
     -o XID=$xid \
-    -c $netcpu hera_pktsock_thread \
-    -c $flfcpu paper_fluff_thread \
+    -c $netcpu $netthread \
+    -m $flfcpu paper_fluff_thread \
     -c $gpucpu paper_gpu_thread \
     -c $outcpu hera_gpu_output_thread
 
-  taskset $mask \
-  hashpipe -p paper_gpu -I $instance \
-    -o BINDHOST=$bindhost \
-    -o GPUDEV=$gpudev \
-    -o XID=$xid \
-    -c $netcpu hera_pktsock_thread \
-    -c $flfcpu paper_fluff_thread \
-    -c $gpucpu paper_gpu_thread \
-    -c $outcpu hera_gpu_output_thread \
-     < /dev/null \
-    1> px${mypx}.out.$instance \
-    2> px${mypx}.err.$instance &
+  if [ $USE_REDIS -eq 1 ] && [ $USE_BDA -eq 1 ]
+  then
+    echo "Using redis logger"
+    echo "Using baseline dependent averaging"
+    { taskset $mask \
+    hashpipe -p paper_gpu -I $instance \
+      -o BINDHOST=$bindhost \
+      -o GPUDEV=$gpudev \
+      -o XID=$xid \
+      -c $netcpu $netthread \
+      -m $flfcpu paper_fluff_thread \
+      -c $gpucpu paper_gpu_thread \
+      -c $bdacpu hera_gpu_bda_thread \
+      -c $outcpu hera_bda_output_thread \
+    < /dev/null 2>&3 1>px${mypx}.out.$instance; } \
+    3>&1 1>&2 | tee px${mypx}.err.$instance | \
+    stdin_to_redis.py -l WARNING > /dev/null &
+
+  elif [ $USE_REDIS -eq 1 ] && [ $USE_BDA -eq 0 ]
+  then
+    echo "Using redis logger"
+    echo "*NOT* using baseline dependent averaging"
+    { taskset $mask \
+    hashpipe -p paper_gpu -I $instance \
+      -o BINDHOST=$bindhost \
+      -o GPUDEV=$gpudev \
+      -o XID=$xid \
+      -c $netcpu $netthread \
+      -m $flfcpu paper_fluff_thread \
+      -c $gpucpu paper_gpu_thread \
+      -c $outcpu hera_gpu_output_thread \
+    < /dev/null 2>&3 1>px${mypx}.out.$instance; } \
+    3>&1 1>&2 | tee px${mypx}.err.$instance | \
+    stdin_to_redis.py -l WARNING > /dev/null &
+
+  elif [ $USE_REDIS -eq 0 ] && [ $USE_BDA -eq 1 ]
+  then
+    echo "*NOT* using redis logger"
+    echo "Using baseline dependent averaging"
+    taskset $mask \
+    hashpipe -p paper_gpu -I $instance \
+      -o BINDHOST=$bindhost \
+      -o GPUDEV=$gpudev \
+      -o XID=$xid \
+      -c $netcpu $netthread \
+      -m $flfcpu paper_fluff_thread \
+      -c $gpucpu paper_gpu_thread \
+      -c $bdacpu hera_gpu_bda_thread \
+      -c $outcpu hera_bda_output_thread \
+       < /dev/null \
+      1> px${mypx}.out.$instance \
+      2> px${mypx}.err.$instance &
+
+  else
+    echo "*NOT* using redis logger"
+    echo "*NOT* using baseline dependent averaging"
+    taskset $mask \
+    hashpipe -p paper_gpu -I $instance \
+      -o BINDHOST=$bindhost \
+      -o GPUDEV=$gpudev \
+      -o XID=$xid \
+      -c $netcpu $netthread \
+      -m $flfcpu paper_fluff_thread \
+      -c $gpucpu paper_gpu_thread \
+      -c $outcpu hera_gpu_output_thread \
+       < /dev/null \
+      1> px${mypx}.out.$instance \
+      2> px${mypx}.err.$instance &
+  fi
 }
+
+# Default to Packet sockets; No redis logging
+USE_IBVERBS=0
+USE_REDIS=0
+USE_BDA=0
+
+for arg in $@; do
+  case $arg in
+    -h)
+      echo "Usage: $(basename $0) [-r] [-i] INSTANCE_ID [...]"
+      echo "  -r : Use redis logging (in addition to log files)"
+      echo "  -i : Use IB-verbs pipeline (rather than packet sockets)"
+      echo "  -a : Use baseline dependent averaging threads"
+      exit 0
+    ;;
+
+    -i)
+      USE_IBVERBS=1
+      shift
+    ;;
+    -r)
+      USE_REDIS=1
+      shift
+    ;;
+    -a)
+      USE_BDA=1
+      shift
+    ;;
+  esac
+done
 
 if [ -z "$1" ]
 then
-  echo "Usage: $(basename $0) INSTANCE_ID [...]"
+  echo "Usage: $(basename $0) [-r] [-i] [-a] INSTANCE_ID [...]"
+  echo "  -r : Use redis logging (in addition to log files)"
+  echo "  -i : Use IB-verbs pipeline (rather than packet sockets)"
+  echo "  -a : Use baseline dependent averaging threads"
   exit 1
 fi
 

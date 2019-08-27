@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import redis
 import time
 import argparse
@@ -7,6 +8,7 @@ import subprocess
 
 perf_tweaker = 'tweak-perf.sh'
 paper_init = 'paper_init.sh'
+paper_init_ibv = 'paper_init_ibv.sh'
 
 def run_on_hosts(hosts, cmd, user=None, wait=True):
     if isinstance(cmd, str):
@@ -32,11 +34,20 @@ parser.add_argument('-i', dest='ninstances', type=int, default=2,
                     help='Number of pipeline instances per host')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
+parser.add_argument('--ibverbs', dest='ibverbs', action='store_true', default=False,
+                    help='Use the IB Verbs netthread. Experimental!')
+parser.add_argument('--redislog', dest='redislog', action='store_true', default=False,
+                    help='Use the redis logger to duplicate log messages on redishost\'s log-channel pubsub stream')
+parser.add_argument('--bda', dest='bda', action='store_true', default=False,
+                    help='Use baseline dependent averaging. (Beta)')
+parser.add_argument('--pypath', dest='pypath', type=str, default="/home/hera/hera-venv",
+                    help='The path to a python virtual environment which will be activated prior to running paper_init. ' +
+                         'Only relevant if using the --redislog flag, which uses a python redis interface')
 
 args = parser.parse_args()
 hosts = args.hosts # Too lazy to keey typing this
 nhosts = len(hosts)
-nhosts_per_timeslice = nhosts / args.timeslices
+nhosts_per_timeslice = nhosts * args.timeslices
 
 assert args.ninstances == 2, 'Sorry, anything other than ninstances=2 is not supported!'
 
@@ -47,7 +58,19 @@ if args.runtweak:
     run_on_hosts(hosts, perf_tweaker, user='root', wait=True)
 
 # Start X-Engines
-run_on_hosts(hosts, [paper_init, '0', '1'], wait=True) # two instances per host 
+init_args = []
+if args.ibverbs:
+    init_args += ['-i']
+if args.redislog:
+    init_args += ['-r']
+if args.bda:
+    init_args += ['-a']
+
+if args.redislog:
+    python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate")+";"]
+    run_on_hosts(hosts, python_source_cmd + [paper_init] + init_args + ['0', '1'], wait=True) # two instances per host
+else:
+    run_on_hosts(hosts, [paper_init] + init_args + ['0', '1'], wait=True) # two instances per host
 
 # Start hashpipe<->redis gateways
 cpu_masks = ['0x0080', '0x8000']
@@ -56,7 +79,7 @@ for host in hosts:
         run_on_hosts([host], ['taskset', cpu_masks[i], 'hashpipe_redis_gateway.rb', '-g', host, '-i', '%d'%i])
 
 # Wait for the gateways to come up
-time.sleep(1)
+time.sleep(3)
 
 # Configure the X-engines as even/odd correlators
 for hn, host in enumerate(hosts):
