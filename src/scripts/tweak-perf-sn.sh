@@ -11,7 +11,7 @@ ethtool -A eth3 rx on
 
 # Kernel buffer sizes
 sysctl net.core.rmem_max=83886080
-sysctl net.core.rmem_default=8388608
+sysctl net.core.rmem_default=83886080
 
 # Kill packets before the IP stack
 iptables -t raw -A PREROUTING -i eth3 -p udp -j DROP
