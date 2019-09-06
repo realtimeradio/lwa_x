@@ -37,14 +37,19 @@ int_bin = {}
 int_bin['baselines'] = {}
 int_bin['data']      = {}
 
+fakereal = 1
+fakeimag = 2
+
 for n in range(Nbins):
     int_bin['baselines'][n] = []
-    int_bin['data'][n] = (2**n)*np.ones(1024)
-    int_bin['data'][n][1::2] = -2*(2**n)
 
-# 32 sec integrations are only 16sec now
-int_bin['data'][4] = (2**3)*np.ones(1024)
-int_bin['data'][4][1::2] = -2*(2**3)
+    # Ramp
+    int_bin['data'][n] = (2**n)*np.repeat((np.arange(128)+fakereal),8)
+    int_bin['data'][n][1::2] = -1*(2**n) * np.repeat((np.arange(128)+fakeimag),4)
+
+    # Const
+    #int_bin['data'][n] = (2**n)*np.ones(1024)
+    #int_bin['data'][n][1::2] = -2*(2**n)
 
 bdaconfig = np.loadtxt('../bda_config_192ants_nobda.txt', dtype=np.int)
 for i,t in enumerate(bdaconfig[:,2]):
@@ -73,7 +78,7 @@ while True:
               print "Error! Received wrong antenna!"
            n = [y for y,v in int_bin['baselines'].items() if (a0,a1) in v][0]
            if not (np.all(data == int_bin['data'][n])):
-              print "Error!", int_bin['data'][n][:8], o, n, data[:8]
+              print "Error!", int_bin['data'][n][:32:8], o, n, data[:32:8]
               errors += 1
     except(KeyboardInterrupt):
        print("")

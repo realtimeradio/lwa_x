@@ -9,13 +9,21 @@ import argparse
 import struct
 import socket
 import time
+import redis
 
 parser = argparse.ArgumentParser(description='Generate FAKE output to test catcher pipeline with baseline dependent averaging',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('config', type=str, help='BDA config file')
+parser.add_argument('--config', type=str, default=None, 
+                    help='BDA config file')
 parser.add_argument('--catcher', type=str, default = '10.80.40.251',
                     help='IP address of the Catcher machine')
 args = parser.parse_args()
+
+if args.config:
+   config = args.config
+else:
+   r = redis.Redis('redishost')
+   config = r.get('bda:config')
 
 Na = 352   # antennas
 Nx = 16    # xeng
@@ -31,16 +39,28 @@ int_bin = {}
 int_bin['baselines'] = {}
 int_bin['data']      = {}
 
+fakereal = 1
+fakeimag = 2
+
 for n in range(Nbins):
     int_bin['baselines'][n] = []
-    int_bin['data'][n] = (2**n)*np.ones(1024, dtype=np.int32)
-    int_bin['data'][n][1::2] = -2*(2**n)
+
+    # Constant
+    #int_bin['data'][n] = (2**n)*np.ones(1024, dtype=np.int32)
+    #int_bin['data'][n][1::2] = -2*(2**n)
+
+    # Ramp
+    int_bin['data'][n] = (2**n)*np.repeat((np.arange(128, 
+                         dtype=np.int32)+fakereal),8)
+    int_bin['data'][n][1::2] = -1*(2**n) * np.repeat((np.arange(128, 
+                                dtype=np.int32)+fakeimag),4)
+
     # convert to binary data for speedup
     int_bin['data'][n] = np.array(int_bin['data'][n]).byteswap().tostring()
 
 
 # Populate baseline pairs from config file
-bdaconfig = np.loadtxt(args.config, dtype=np.int)
+bdaconfig = np.loadtxt(config, dtype=np.int)
 for i,t in enumerate(bdaconfig[:,2]):
     if (t==0): continue
     n = int(np.log(t)/np.log(2))
@@ -60,7 +80,7 @@ while True:
    for ns in np.logspace(1, Nbins, num=Nbins, base=2, dtype=np.int):
        if (ctr%ns == 0):
            nb = int(np.log2(ns)) - 1
-           print 'Sending: %d Baselines: %d Bcnt: %d' % (ns, len(int_bin['baselines'][nb]), bcnt)
+           print 'Sending: %d \tBaselines: %d \tBcnt: %d' % (ns, len(int_bin['baselines'][nb]), bcnt)
            for (a0,a1) in int_bin['baselines'][nb]:
                for xeng_id in range(Nx*Nt):
                    b = mcnt+((xeng_id//Nx)*2)
@@ -74,32 +94,4 @@ while True:
                    sock.sendto(pkt, (udp_ip, udp_port))
                    time.sleep(sleep_time)
                bcnt += 1
-
-#def send_xeng(xeng_id):
-#    print 'Xeng: ', xeng_id
-#    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-#    #sock.bind(("10.10.10.5",10000+xeng_id))
-#    bcnt = 0; mcnt = 0; ctr = 1;
-#    while True:
-#        for nb in np.nonzero(np.logical_not(ctr%inttimes))[0]:
-#            for (a0,a1) in int_bin['baselines'][nb]:
-#                b = mcnt+((xeng_id//Nx)*2)
-#                pkt = struct.pack('>1Q2I4H', b, bcnt, 0, a0, a1, xeng_id, 4096) + int_bin['data'][nb]
-#                sock.sendto(pkt, (udp_ip, udp_port))
-#                pkt = struct.pack('>1Q2I4H', b, bcnt, 1, a0, a1, xeng_id, 4096) + int_bin['data'][nb]
-#                sock.sendto(pkt, (udp_ip, udp_port))
-#                pkt = struct.pack('>1Q2I4H', b, bcnt, 2, a0, a1, xeng_id, 4096) + int_bin['data'][nb]
-#                sock.sendto(pkt, (udp_ip, udp_port))
-#            bcnt += 1
-#        ctr  += 1
-#
-
-#threads = []
-#for xeng_id in range(16): 
-#    t = threading.Thread(target=send_xeng, args=(xeng_id,))
-#    threads.append(t)
-#    t.start()
-
-#xeng_id = 0
-#send_xeng(xeng_id)
 
