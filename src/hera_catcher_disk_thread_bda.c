@@ -37,10 +37,10 @@
 #endif
 
 #define N_DATA_DIMS (4)
-#define N_CHAN_PROCESSED (N_CHAN_TOTAL / (CATCHER_CHAN_SUM * XENG_CHAN_SUM))
-#define N_CHAN_RECEIVED (N_CHAN_TOTAL / XENG_CHAN_SUM)
+#define N_CHAN_PROCESSED (N_CHAN_TOTAL / (CATCHER_CHAN_SUM_BDA))
+#define N_CHAN_RECEIVED (N_CHAN_TOTAL)
 #define N_BL_PER_WRITE (32)
-//#define SKIP_DIFF
+#define SKIP_DIFF
 
 #define CPTR(VAR,CONST) ((VAR)=(CONST),&(VAR))
 
@@ -80,7 +80,6 @@ typedef struct {
     hid_t flags_did;
     hid_t nsamples_did;
     hid_t time_array_did;
-    hid_t integration_time_did;
     hid_t uvw_array_did;
     hid_t ant_1_array_did;
     hid_t ant_2_array_did;
@@ -88,7 +87,6 @@ typedef struct {
     hid_t flags_fs;
     hid_t nsamples_fs;
     hid_t time_array_fs;
-    hid_t integration_time_fs;
     hid_t uvw_array_fs;
     hid_t ant_1_array_fs;
     hid_t ant_2_array_fs;
@@ -223,12 +221,6 @@ static void init_headers_dataset(hdf5_id_t *id) {
        pthread_exit(NULL);
    }
 
-   id->integration_time_did = H5Dcreate(id->header_gid, "integration_time", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
-   if (id->integration_time_did < 0) {
-       hashpipe_error(__FUNCTION__, "Failed to create integration_time dataset");
-       pthread_exit(NULL);
-   }
-
    id->ant_1_array_did = H5Dcreate(id->header_gid, "ant_1_array", H5T_NATIVE_INT, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
    if (id->ant_1_array_did < 0) {
        hashpipe_error(__FUNCTION__, "Failed to create ant_1_array dataset");
@@ -242,35 +234,11 @@ static void init_headers_dataset(hdf5_id_t *id) {
    }
 
    id->time_array_fs = H5Dget_space(id->time_array_did);
-   id->integration_time_fs = H5Dget_space(id->integration_time_did);
    id->ant_1_array_fs = H5Dget_space(id->ant_1_array_did);
    id->ant_2_array_fs = H5Dget_space(id->ant_2_array_did);
 
    H5Pclose(plist);
    H5Sclose(file_space);
-
-   // TODO: uvw array can be static for a file. See if you can encode this in python.
-   ///* And now uvw_array, which has shape Nblts x 3 */
-   //hsize_t dims2[DIM2]   = {bcnts_per_file, 3};
-   //hsize_t chunk_dims2[DIM2] = {1, 3};
-
-   //file_space = H5Screate_simple(DIM2, dims2, NULL);
-   //plist = H5Pcreate(H5P_DATASET_CREATE);
-
-   //H5Pset_layout(plist, H5D_CHUNKED);
-
-   //H5Pset_chunk(plist, DIM2, chunk_dims2);
-
-   //// Now we have the dataspace properties, create the datasets
-   //id->uvw_array_did = H5Dcreate(id->header_gid, "uvw_array", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
-   //if (id->uvw_array_did < 0) {
-   //    hashpipe_error(__FUNCTION__, "Failed to create uvw_array dataset");
-   //    pthread_exit(NULL);
-   //}
-   //id->uvw_array_fs = H5Dget_space(id->uvw_array_did);
-
-   //H5Pclose(plist);
-   //H5Sclose(file_space);
 }
 
 #define VERSION_BYTES 32
@@ -282,6 +250,8 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     char ver[VERSION_BYTES] = GIT_VERSION; // defined at compile time
 
     id->file_id = open_hdf5_from_template(template_fname, hdf5_fname);
+
+    fprintf(stdout, "Start new file!\n");
 
     // Open HDF5 header groups and create data group
     id->header_gid = H5Gopen(id->file_id, "Header", H5P_DEFAULT);
@@ -311,6 +281,7 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     init_headers_dataset(id);
 
     // Write meta-data values we know at file-open
+
     // Write data tag
     memtype = H5Tcopy(H5T_C_S1);
     stat = H5Tset_size(memtype, 128);
@@ -330,6 +301,7 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
         hashpipe_error(__FUNCTION__, "Failed to close Header/tag");
     }
 
+    // obs_id
     dataset_id = H5Dopen(id->extra_keywords_gid, "obs_id", H5P_DEFAULT);
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/obs_id");
@@ -342,6 +314,8 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/obs_id");
     }
+
+    // version
     dataset_id = H5Dopen(id->extra_keywords_gid, "corr_ver", H5P_DEFAULT);
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/corr_ver");
@@ -359,6 +333,8 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     if (stat < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/corr_ver");
     }
+
+    // startt
     dataset_id = H5Dopen(id->extra_keywords_gid, "startt", H5P_DEFAULT);
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/startt");
@@ -371,6 +347,8 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/startt");
     }
+
+    fprintf(stdout, "Finshed opening file!\n");
 }
 
 
@@ -423,67 +401,77 @@ static void close_filespaces(hdf5_id_t *id)
     H5Sclose(id->flags_fs);
     H5Sclose(id->nsamples_fs);
     H5Sclose(id->time_array_fs);
-    H5Sclose(id->integration_time_fs);
-    //H5Sclose(id->uvw_array_fs);
     H5Sclose(id->ant_1_array_fs);
     H5Sclose(id->ant_2_array_fs);
 }
 
-/* Given an array of baseline pairs, figure out the indices of the autocorrs */
-static void get_auto_indices(bl_t *bl_order, int32_t *auto_indices, uint32_t n_bls) {
-    int32_t i = 0;
-    for (i=0; i<N_ANTS; i++) {
-        auto_indices[i] = -1;
-    }
-    for (i=0; i<n_bls; i+=1) {
-        if (bl_order[i].a == bl_order[i].b) {
-            if (bl_order[i].a < N_ANTS) {
-                auto_indices[bl_order[i].a] = i;
-            }
-        }
-    }
-}
 
-/* Read the baseline order from an HDF5 file via the Header/corr_bl_order dataset */
-static void get_bl_order(hdf5_id_t *id, bl_t *bl_order) {
+///* Read the baseline order from an HDF5 file via the Header/corr_bl_order dataset */
+//static void get_bl_order(hdf5_id_t *id, bl_t *bl_order) {
+//    hid_t dataset_id;
+//    herr_t status;
+//    dataset_id = H5Dopen(id->header_gid, "corr_bl_order", H5P_DEFAULT);
+//    if (dataset_id < 0) {
+//        hashpipe_error(__FUNCTION__, "Failed to open Header/corr_bl_order dataset");
+//        pthread_exit(NULL);
+//    }
+//    status = H5Dread(dataset_id, H5T_STD_I32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, bl_order);
+//    if (status < 0) {
+//        hashpipe_error(__FUNCTION__, "Failed to read Header/corr_bl_order dataset");
+//        pthread_exit(NULL);
+//    }
+//    status = H5Dclose(dataset_id);
+//    if (status < 0) {
+//        hashpipe_error(__FUNCTION__, "Failed to close Header/corr_bl_order dataset");
+//        pthread_exit(NULL);
+//    }
+//}
+
+///* Read the antenna positions from an HDF5 file via the Header/antenna_positions_enu dataset */
+//static void get_ant_pos(hdf5_id_t *id, enu_t *ant_pos) {
+//    hid_t dataset_id;
+//    herr_t status;
+//    dataset_id = H5Dopen(id->header_gid, "antenna_positions_enu", H5P_DEFAULT);
+//    if (dataset_id < 0) {
+//        hashpipe_error(__FUNCTION__, "Failed to open Header/antenna_positions_enu dataset");
+//        pthread_exit(NULL);
+//    }
+//    status = H5Dread(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, ant_pos);
+//    if (status < 0) {
+//        hashpipe_error(__FUNCTION__, "Failed to read Header/antenna_positions_enu dataset");
+//        pthread_exit(NULL);
+//    }
+//    status = H5Dclose(dataset_id);
+//    if (status < 0) {
+//        hashpipe_error(__FUNCTION__, "Failed to close Header/antenna_positions_enu dataset");
+//        pthread_exit(NULL);
+//    }
+//}
+
+
+/* Get the integration time for each baseline from header (set by config file) */
+static void get_integration_time(hdf5_id_t *id, double *integration_time_buf) {
+
+    fprintf(stdout,"Getting integration time\n");
+
     hid_t dataset_id;
     herr_t status;
-    dataset_id = H5Dopen(id->header_gid, "corr_bl_order", H5P_DEFAULT);
+    dataset_id = H5Dopen(id->header_gid, "integration_time", H5P_DEFAULT);
     if (dataset_id < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to open Header/corr_bl_order dataset");
+        hashpipe_error(__FUNCTION__, "Failed to open Header/integration_time dataset");
         pthread_exit(NULL);
     }
-    status = H5Dread(dataset_id, H5T_STD_I32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, bl_order);
+    status = H5Dread(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, integration_time_buf);
     if (status < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to read Header/corr_bl_order dataset");
-        pthread_exit(NULL);
+       hashpipe_error(__FUNCTION__, "Failed to read Header/integration_time dataset");
+       pthread_exit(NULL);
     }
     status = H5Dclose(dataset_id);
     if (status < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to close Header/corr_bl_order dataset");
-        pthread_exit(NULL);
+        hashpipe_error(__FUNCTION__, "Failed to close Header/integration_time dataset");
     }
-}
 
-/* Read the antenna positions from an HDF5 file via the Header/antenna_positions_enu dataset */
-static void get_ant_pos(hdf5_id_t *id, enu_t *ant_pos) {
-    hid_t dataset_id;
-    herr_t status;
-    dataset_id = H5Dopen(id->header_gid, "antenna_positions_enu", H5P_DEFAULT);
-    if (dataset_id < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to open Header/antenna_positions_enu dataset");
-        pthread_exit(NULL);
-    }
-    status = H5Dread(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, ant_pos);
-    if (status < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to read Header/antenna_positions_enu dataset");
-        pthread_exit(NULL);
-    }
-    status = H5Dclose(dataset_id);
-    if (status < 0) {
-        hashpipe_error(__FUNCTION__, "Failed to close Header/antenna_positions_enu dataset");
-        pthread_exit(NULL);
-    }
+    fprintf(stdout, "Returning integration time\n");
 }
 
 /*
@@ -495,30 +483,68 @@ static double mcnt2time(uint64_t mcnt, uint32_t sync_time)
 }
 
 /* 
- * Write a bcnt to the dataset, at the right offset
- */
-static void write_baseline_index(hdf5_id_t *id, hsize_t bcnt, hsize_t nblts, hid_t mem_space, uint64_t *visdata_buf)
+ *  Compute JD for the given gps time
+ 
+static double unix2julian(double unixtime)
 {
-    hsize_t start[N_DATA_DIMS] = {bcnt, 0, 0, 0};
-    hsize_t count[N_DATA_DIMS] = {nblts, 1, N_CHAN_PROCESSED, N_STOKES};
-    H5Sselect_hyperslab(id->visdata_fs, H5S_SELECT_SET, start, NULL, count, NULL);
-    H5Dwrite(id->visdata_did, complex_id, mem_space, id->visdata_fs, H5P_DEFAULT, visdata_buf);
+    return (2440587.5 + (unixtime / (double)(86400.0)));
+}
+*/
+
+static double compute_jd_from_mcnt(uint64_t mcnt, uint32_t sync_time, double integration_time)
+{
+   double unix_time = sync_time + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
+   unix_time = unix_time - integration_time/2;
+   
+   return (2440587.5 + (unix_time / (double)(86400.0)));
 }
 
 /* 
- * Write information to the hdf5 header. The data is written in the order it comes in, so the 
- * header might not be in a particular order-- verify!
- * Write: time, ant0, ant1, integration time
+ * Write N_BL_PER_WRITE bcnts to the dataset, at the right offset
+ */
+static void write_baseline_index(hdf5_id_t *id, hsize_t bcnt, hsize_t nblts, hid_t mem_space, 
+                                 uint64_t *visdata_buf, hbool_t *flags, uint32_t *nsamples)
+{
+    hsize_t start[N_DATA_DIMS] = {bcnt, 0, 0, 0};
+    hsize_t count[N_DATA_DIMS] = {nblts, 1, N_CHAN_PROCESSED, N_STOKES};
+
+    //H5Sselect_hyperslab(id->visdata_fs, H5S_SELECT_SET, start, NULL, count, NULL);
+    //H5Dwrite(id->visdata_did, complex_id, mem_space, id->visdata_fs, H5P_DEFAULT, visdata_buf);
+
+    // Data
+    if (H5Sselect_hyperslab(id->visdata_fs, H5S_SELECT_SET, start, NULL, count, NULL) <0){
+       hashpipe_error(__FUNCTION__, "Error selecting data hyperslab");
+    }
+    if (H5Dwrite(id->visdata_did, complex_id, mem_space, id->visdata_fs, H5P_DEFAULT, visdata_buf) <0){
+       hashpipe_error(__FUNCTION__, "Error writing data to file");
+    }
+
+    // nsamples
+    if (H5Sselect_hyperslab(id->nsamples_fs, H5S_SELECT_SET, start, NULL, count, NULL) <0){
+       hashpipe_error(__FUNCTION__, "Error selecting hyperslab of nsamples");
+    }
+    if (H5Dwrite(id->nsamples_did, H5T_IEEE_F32LE, mem_space, id->nsamples_fs, H5P_DEFAULT, nsamples) <0){
+       hashpipe_error(__FUNCTION__, "Error writing nsamples to file");
+    }
+
+    // flags
+    if (H5Sselect_hyperslab(id->flags_fs, H5S_SELECT_SET, start, NULL, count, NULL) <0){
+       hashpipe_error(__FUNCTION__, "Error selecting flags hyperslab");
+    }
+    if (H5Dwrite(id->flags_did, boolenumtype, mem_space, id->flags_fs, H5P_DEFAULT, flags) <0){
+       hashpipe_error(__FUNCTION__, "Error writing flags to file");
+    }
+
+}
+
+
+/* 
+ * Write information to the hdf5 header.
+ * Write: time, ant0, ant1
  */
 
-static void write_header(hdf5_id_t *id, double *integration_time_buf, double *time_array_buf, 
-                         int *ant_0_array, int *ant_1_array)
-{
-   // integration time  
-   if (H5Dwrite(id->integration_time_did, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, integration_time_buf) < 0){
-        hashpipe_error(__FUNCTION__, "Error writing integration time");
-   }
-
+static void write_header(hdf5_id_t *id, double *time_array_buf, int *ant_0_array, int *ant_1_array)
+{  
    // time stamp of integration
    if (H5Dwrite(id->time_array_did, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, time_array_buf) < 0) {
        hashpipe_error(__FUNCTION__, "Error writing time_array");
@@ -534,13 +560,23 @@ static void write_header(hdf5_id_t *id, double *integration_time_buf, double *ti
        hashpipe_error(__FUNCTION__, "Error writing ant_2_array");
    }
 
+   fprintf(stdout, "Finished writing header\n");
+
 }
 
 // Get the even-sample / first-pol / first-complexity of the correlation buffer for chan `c` baseline `b`
-static void compute_sum_diff(int32_t *in, int32_t *out_sum, int32_t *out_diff, int bl) {
+static void compute_sum_diff(int32_t *in, int32_t *out_sum, int32_t *out_diff, uint32_t bl) {
 
+    int xchan, chan, bcnt, offset;
+
+    //Buffers for a single full-stokes baseline
     // 256 bits = 4 stokes * 2 real/imag * 32 bits == 1 channel
-    int chan, bcnt;
+
+    #if CATCHER_CHAN_SUM_BDA != 1
+      int c;
+      __m256i sum_even = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
+      __m256i sum_odd  = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
+    #endif
 
     __m256i val_even = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
     __m256i val_odd  = _mm256_set_epi64x(0ULL,0ULL,0ULL,0ULL);
@@ -550,14 +586,41 @@ static void compute_sum_diff(int32_t *in, int32_t *out_sum, int32_t *out_diff, i
     __m256i *out_diff256 = (__m256i *)out_diff;
 
     for(bcnt=0; bcnt<N_BL_PER_WRITE; bcnt++){
-       in_even256 = (__m256i *)(in + hera_catcher_bda_input_databuf_by_bcnt_idx32(bcnt+bl, 0));
-       in_odd256 = (__m256i *)(in + hera_catcher_bda_input_databuf_by_bcnt_idx32(bcnt+bl, 1));
+       offset = hera_catcher_bda_input_databuf_by_bcnt_idx32(bcnt+bl, 0);
+       in_even256 = (__m256i *)(in + offset);
+       //fprintf(stdout, "Even: bcnt: %d\t offset: %d\t val: %d\n", bcnt, offset, *(in + offset));
+       offset = hera_catcher_bda_input_databuf_by_bcnt_idx32(bcnt+bl, 1);
+       in_odd256  = (__m256i *)(in + offset);
+       //fprintf(stdout, "Odd: bcnt: %d\t offset: %d\t val: %d\n", bcnt, offset, *(in + offset));
 
-       for(chan=0; chan< N_CHAN_PROCESSED; chan++){
-          val_even = _mm256_load_si256(in_even256 + chan);
-          val_odd  = _mm256_load_si256(in_odd256 + chan);
-          _mm256_store_si256((out_sum256  + chan), _mm256_add_epi32(val_even, val_odd));
-          _mm256_store_si256((out_diff256 + chan), _mm256_sub_epi32(val_even, val_odd));
+       for(xchan=0; xchan< N_CHAN_TOTAL; xchan+= CATCHER_CHAN_SUM_BDA){
+          chan = xchan/CATCHER_CHAN_SUM_BDA;
+
+          #if CATCHER_CHAN_SUM_BDA != 1
+             // Add channels
+             for(c=0; c<CATCHER_CHAN_SUM_BDA; c++){
+                val_even = _mm256_load_si256(in_even256 + xchan + c);
+                val_odd  = _mm256_load_si256(in_odd256  + xchan + c);
+                if (c==0){
+                   sum_even = val_even;
+                   sum_odd  = val_odd;
+                }
+                else{
+                   sum_even = _mm256_add_epi32(sum_even, val_even);
+                   sum_odd  = _mm256_add_epi32(sum_odd,  val_odd);
+                }
+             }
+             // Write to output
+             _mm256_store_si256((out_sum256  + (bcnt*N_CHAN_PROCESSED + chan)), _mm256_add_epi32(sum_even, sum_odd));
+             _mm256_store_si256((out_diff256 + (bcnt*N_CHAN_PROCESSED + chan)), _mm256_sub_epi32(sum_even, sum_odd));
+
+          #else
+             // Load and write sum/diff
+             val_even = _mm256_load_si256(in_even256 + xchan);
+             val_odd  = _mm256_load_si256(in_odd256 + xchan);
+             _mm256_store_si256((out_sum256  + (bcnt*N_CHAN_PROCESSED+ chan)), _mm256_add_epi32(val_even, val_odd));
+             _mm256_store_si256((out_diff256 + (bcnt*N_CHAN_PROCESSED+ chan)), _mm256_sub_epi32(val_even, val_odd));
+          #endif
        }
     }
 return;
@@ -628,17 +691,11 @@ static void *run(hashpipe_thread_args_t * args)
     char tag[128];
     uint64_t baseline_dist[N_BDABUF_BINS];
 
-    // Variables for antenna positions and baseline orders. These should be provided
-    // via the HDF5 header template.
-    bl_t bl_order[VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES];
-    //bl_bda_t bl_bda_order[bcnts_per_file];
-    int32_t auto_indices[N_ANTS];
-    enu_t ant_pos[N_ANTS];
-
     // Init status variables
     hashpipe_status_lock_safe(&st);
     hputi8(st.buf, "DISKMCNT", 0);
     hputu4(st.buf, "TRIGGER", trigger);
+    hputu4(st.buf, "NDONEFIL", file_cnt);
     hashpipe_status_unlock_safe(&st);
 
     // Redis connection
@@ -669,7 +726,7 @@ static void *run(hashpipe_thread_args_t * args)
     int32_t *db_in32;
     int rv;
     int curblock_in=0;
-    double file_start_t, file_stop_t, file_duration; // time from bcnt
+    float file_start_t, file_stop_t, file_duration; // time from bcnt
     int64_t file_obs_id, file_nblts=0, file_nts=0;
     int32_t curr_file_bcnt = -1;
     uint32_t bctr, strt_bcnt, stop_bcnt, break_bcnt;        // bcnt variable
@@ -678,40 +735,34 @@ static void *run(hashpipe_thread_args_t * args)
     uint32_t file_offset;
     herr_t status;
 
-    hdf5_id_t sum_file, diff_file;
+    hdf5_id_t sum_file;
+    #ifndef SKIP_DIFF
+    hdf5_id_t diff_file;
+    #endif
     
     // aligned_alloc because we're going to use 256-bit AVX instructions
     int32_t *bl_buf_sum  = (int32_t *)aligned_alloc(32, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
     int32_t *bl_buf_diff = (int32_t *)aligned_alloc(32, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
 
-    memset(bl_buf_sum, 0, N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
-    memset(bl_buf_diff, 0, N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
+    memset(bl_buf_sum,  0, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
+    memset(bl_buf_diff, 0, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
 
+    // Init here, realloc after reading baseline distribution from redis
     double *integration_time_buf = (double *)malloc(1 * sizeof(double));
     double *time_array_buf       = (double *)malloc(1 * sizeof(double));
-    int *ant_0_array             = (int *)malloc(1 * sizeof(int));
-    int *ant_1_array             = (int *)malloc(1 * sizeof(int));
-    //double *uvw_array_buf        = (double *)malloc(bcnts_per_file * 3 * sizeof(double));
+    int *ant_0_array             =    (int *)malloc(1 * sizeof(int));
+    int *ant_1_array             =    (int *)malloc(1 * sizeof(int));
 
     // Allocate an array of bools for flags and n_samples
-    hbool_t *flags = (hbool_t *)calloc(1, 1 * sizeof(hbool_t));
-    //uint64_t *nsamples = (uint64_t *)malloc(bcnts_per_file * sizeof(uint64_t));
+    hbool_t *flags = (hbool_t *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED * sizeof(hbool_t));
+    uint32_t *nsamples = (uint32_t *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED * sizeof(uint32_t));
+
+    memset(flags,    1, N_BL_PER_WRITE * N_CHAN_PROCESSED * sizeof(hbool_t));
+    memset(nsamples, 0, N_BL_PER_WRITE * N_CHAN_PROCESSED * sizeof(uint32_t));
 
     // Define memory space of a block
     hsize_t dims[N_DATA_DIMS] = {N_BL_PER_WRITE, 1, N_CHAN_PROCESSED, N_STOKES};
     hid_t mem_space_bl_per_write = H5Screate_simple(N_DATA_DIMS, dims, NULL);
-
-    // Define the memory space used by these buffers for HDF5 access
-    // We write 1[baseline] x 1[spw] x N_CHAN_PROCESSED x N_STOKES at a time
-    //hsize_t dims[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
-    //hid_t mem_space_data = H5Screate_simple(N_DATA_DIMS, dims, NULL);
-
-    // Memory spaces to Nblts-element header vectors
-    //hsize_t dims1[DIM1] = {N_CHAN_PROCESSED*NSTOKES};
-    //hid_t mem_space_nblts = H5Screate_simple(DIM1, dims1, NULL);
-    // Memory spaces to (Nblts x 3)-element header vectors
-    //hsize_t dims2[DIM2] = {bcnts_per_file, 3};
-    //hid_t mem_space_uvw = H5Screate_simple(DIM2, dims2, NULL);
 
     while (run_threads()) {
         // Note waiting status,
@@ -775,17 +826,9 @@ static void *run(hashpipe_thread_args_t * args)
           file_cnt = 0;
           hashpipe_status_lock_safe(&st);
           hputu4(st.buf, "TRIGGER", 0);
-          hashpipe_status_unlock_safe(&st);
-          idle = 0;
-          if (use_redis) {
-              // Create the "corr:is_taking_data" hash. This will be set to 
-              // state=False when data taking is complete. Or if this pipeline 
-              // exits the key will expire.
-              redisCommand(c, "HMSET corr:is_taking_data state True time %d", (int)time(NULL));
-          }
-
-          // Get baseline distribution from redis.
-          hashpipe_status_lock_safe(&st);
+          
+          // Get baseline distribution from redis -- this has to be done here
+          // to ensure that redis database is updated before reading.
           hgetu8(st.buf,"NBL2SEC", &baseline_dist[0]);
           hgetu8(st.buf,"NBL4SEC", &baseline_dist[1]);
           hgetu8(st.buf,"NBL8SEC", &baseline_dist[2]);
@@ -797,17 +840,23 @@ static void *run(hashpipe_thread_args_t * args)
           fprintf(stdout,"8 x %ld\t 4 x %ld\t 2 x %ld\t 1 x %ld\n",
                   baseline_dist[0],baseline_dist[1],baseline_dist[2],baseline_dist[3]);
           fprintf(stdout,"Total Baselines: %ld\n", bcnts_per_file);
-         
-          integration_time_buf = (double *)realloc(integration_time_buf, bcnts_per_file * sizeof(double));
-          time_array_buf       = (double *)realloc(time_array_buf, bcnts_per_file * sizeof(double));
-          ant_0_array          = (int *)realloc(ant_0_array, bcnts_per_file * sizeof(int));
-          ant_1_array          = (int *)realloc(ant_1_array, bcnts_per_file * sizeof(int));
-          //double *uvw_array_buf        = (double *)malloc(bcnts_per_file * 3 * sizeof(double));
 
-          // Allocate an array of bools for flags and n_samples
-          flags = (hbool_t *)realloc(flags, bcnts_per_file * sizeof(hbool_t));
-          memset(flags, 1, bcnts_per_file* sizeof(hbool_t));
-          //uint64_t *nsamples = (uint64_t *)malloc(bcnts_per_file * sizeof(uint64_t));
+          fprintf(stdout, "N_CHAN_PROCESSED: %d\n", N_CHAN_PROCESSED);
+          fprintf(stdout, "CATCHER_CHAN_SUM_BDA: %d\n", CATCHER_CHAN_SUM_BDA);
+
+          integration_time_buf = (double *)realloc(integration_time_buf, bcnts_per_file * sizeof(double));
+          time_array_buf       = (double *)realloc(time_array_buf,       bcnts_per_file * sizeof(double));
+          ant_0_array          =    (int *)realloc(ant_0_array,          bcnts_per_file * sizeof(int));
+          ant_1_array          =    (int *)realloc(ant_1_array,          bcnts_per_file * sizeof(int));
+
+    
+          idle = 0;
+          if (use_redis) {
+              // Create the "corr:is_taking_data" hash. This will be set to 
+              // state=False when data taking is complete. Or if this pipeline 
+              // exits the key will expire.
+              redisCommand(c, "HMSET corr:is_taking_data state True time %d", (int)time(NULL));
+          }
 
         } else if (file_cnt >= nfiles) {
           // If we're transitioning to idle state
@@ -852,12 +901,11 @@ static void *run(hashpipe_thread_args_t * args)
           // these variables store the baseline numbers for the start and end of these blocks
           strt_bcnt = db_in->block[curblock_in].header.bcnt[bctr];
           stop_bcnt = db_in->block[curblock_in].header.bcnt[bctr+N_BL_PER_WRITE-1]; 
-          //fprintf(stderr, "Start bcnt: %d\t Stop bcnt: %d\n", strt_bcnt, stop_bcnt);
 
           clock_gettime(CLOCK_MONOTONIC, &t_start);
           compute_sum_diff(db_in32, bl_buf_sum, bl_buf_diff, bctr);
           clock_gettime(CLOCK_MONOTONIC, &t_stop);
-  
+
           t_ns = ELAPSED_NS(t_start, t_stop);
           elapsed_t_ns += t_ns;
           min_t_ns = MIN(t_ns, min_t_ns);
@@ -872,19 +920,25 @@ static void *run(hashpipe_thread_args_t * args)
              // Copy all contents
              if (curr_file_bcnt >= 0){
                 file_offset = strt_bcnt - curr_file_bcnt;
-                //fprintf(stdout, "Writing to offset: %d\n", file_offset);
+
                 clock_gettime(CLOCK_MONOTONIC, &w_start);
-                write_baseline_index(&sum_file, file_offset, N_BL_PER_WRITE, mem_space_bl_per_write, (uint64_t *)bl_buf_sum);
-                //write_baseline_index(&diff_file, file_offset, N_BL_PER_WRITE, mem_space_bl_per_write, (uint64_t *)bl_buf_diff);
+                write_baseline_index(&sum_file, file_offset, N_BL_PER_WRITE, mem_space_bl_per_write, 
+                                    (uint64_t *)bl_buf_sum, flags, nsamples);
+                #ifndef SKIP_DIFF
+                write_baseline_index(&diff_file, file_offset, N_BL_PER_WRITE, mem_space_bl_per_write, 
+                                    (uint64_t *)bl_buf_diff, flags, nsamples);
+                #endif
+
                 clock_gettime(CLOCK_MONOTONIC, &w_stop);
 
                 for(b=0; b< N_BL_PER_WRITE; b++){
                    ant_0_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_0[bctr+b];
                    ant_1_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_1[bctr+b];
-                   time_array_buf[file_offset+b] = mcnt2time(db_in->block[curblock_in].header.mcnt[bctr+b], sync_time);
-                   flags[file_offset+b]          = 0;
+
+                   time_array_buf[file_offset+b] = compute_jd_from_mcnt(db_in->block[curblock_in].header.mcnt[bctr+b], sync_time,  
+                                                   integration_time_buf[file_offset+b]);
                 }
-                // Update time and sample counters
+                
                 file_nblts += N_BL_PER_WRITE;
 
                 w_ns = ELAPSED_NS(w_start, w_stop);
@@ -904,7 +958,7 @@ static void *run(hashpipe_thread_args_t * args)
              } else {
                  break_bcnt = ((strt_bcnt / bcnts_per_file) + 1) * bcnts_per_file;
              }
-             fprintf(stderr, "Breaking at bcnt: %d\n", break_bcnt);
+             fprintf(stdout, "Breaking at bcnt: %d\n", break_bcnt);
              if (break_bcnt % bcnts_per_file) {
                 fprintf(stderr,"Something is wrong\n");
              }
@@ -914,27 +968,35 @@ static void *run(hashpipe_thread_args_t * args)
              if (curr_file_bcnt >=0){
                  // copy data
                  nbls = break_bcnt - strt_bcnt;
-                 //fprintf(stderr, "Copying till bcnt: %d\t Number of baselines: %d\n", break_bcnt, nbls);
+                 
                  if (nbls > 0){
+                    // select the hyperslab of the shared mem to write to file
                     hsize_t start[N_DATA_DIMS] = {0, 0, 0 ,0};
-                    hsize_t count[N_DATA_DIMS] = {nbls, 1, N_CHAN_PROCESSED, N_STOKES};
-                    status = H5Sselect_hyperslab(mem_space_bl_per_write, H5S_SELECT_SET, start, NULL, count, NULL);
+                    hsize_t count[N_DATA_DIMS] = {nbls, 1, 1, 1};
+                    hsize_t block[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
+                    status = H5Sselect_hyperslab(mem_space_bl_per_write, H5S_SELECT_SET, start, NULL, count, block);
                     if (status < 0){
                        hashpipe_error(__FUNCTION__, "Failed to select hyperslab of shared databuf\n");
                        pthread_exit(NULL);
                     }
 
                     file_offset = strt_bcnt - curr_file_bcnt;
+
                     clock_gettime(CLOCK_MONOTONIC, &w_start);
-                    write_baseline_index(&sum_file, file_offset, nbls, mem_space_bl_per_write, (uint64_t *)bl_buf_sum);
-                    //write_baseline_index(&diff_file, file_offset, nbls, mem_space_bl_per_write, (uint64_t *)bl_buf_diff);
+                    write_baseline_index(&sum_file, file_offset, nbls, mem_space_bl_per_write, 
+                                        (uint64_t *)bl_buf_sum, flags, nsamples);
+                    #ifndef SKIP_DIFF
+                      write_baseline_index(&diff_file, file_offset, nbls, mem_space_bl_per_write, 
+                                          (uint64_t *)bl_buf_diff, flags, nsamples);
+                    #endif
+
                     clock_gettime(CLOCK_MONOTONIC, &w_stop);
 
                     for(b=0; b< nbls; b++){
                        ant_0_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_0[bctr+b];
                        ant_1_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_1[bctr+b];
-                       time_array_buf[file_offset+b] = mcnt2time(db_in->block[curblock_in].header.mcnt[bctr+b], sync_time);
-                       flags[file_offset+b]          = 0;
+                       time_array_buf[file_offset+b] = compute_jd_from_mcnt(db_in->block[curblock_in].header.mcnt[bctr+b], sync_time, 
+                                                       integration_time_buf[file_offset+b]);
                     }
                     file_nblts += nbls;
 
@@ -944,7 +1006,7 @@ static void *run(hashpipe_thread_args_t * args)
                        hashpipe_error(__FUNCTION__, "Failed to reset selection\n");
                        pthread_exit(NULL);
                     }
-              
+
                     w_ns = ELAPSED_NS(w_start, w_stop);
                     elapsed_w_ns += w_ns;
                     min_w_ns = MIN(w_ns, min_w_ns);
@@ -956,16 +1018,21 @@ static void *run(hashpipe_thread_args_t * args)
                  file_duration = file_stop_t - file_start_t;
 
                  fprintf(stdout, "Closing datasets and files\n");
-                 write_header(&sum_file,  integration_time_buf, time_array_buf, ant_0_array, ant_1_array);
-                 write_header(&diff_file, integration_time_buf, time_array_buf, ant_0_array, ant_1_array);
+                 write_header(&sum_file, time_array_buf, ant_0_array, ant_1_array);
                  close_filespaces(&sum_file);
-                 close_filespaces(&diff_file);
                  close_file(&sum_file, file_stop_t, file_duration, file_nblts, file_nts);
+
+                 #ifndef SKIP_DIFF 
+                 write_header(&diff_file, time_array_buf, ant_0_array, ant_1_array);
+                 close_filespaces(&diff_file);
                  close_file(&diff_file, file_stop_t, file_duration, file_nblts, file_nts);
+                 #endif
+
                  file_cnt += 1;
 
                  hashpipe_status_lock_safe(&st);
-                 hputu8(st.buf, "FILESEC", file_duration);
+                 hputr4(st.buf, "FILESEC", (float)file_duration);
+                 hputi8(st.buf, "NDONEFIL", file_cnt);
                  hashpipe_status_unlock_safe(&st); 
 
                  // If this is the last file, mark this block done and get out of the loop
@@ -983,63 +1050,73 @@ static void *run(hashpipe_thread_args_t * args)
 
              // Open new sum and difference files
              // Init all counters to zero
+
+             fprintf(stdout, "Init arrays\n");
+
              file_nblts = 0;
              file_nts = 0;
              memset(ant_0_array,          0, bcnts_per_file * sizeof(uint16_t));
              memset(ant_1_array,          0, bcnts_per_file * sizeof(uint16_t));
              memset(time_array_buf,       0, bcnts_per_file * sizeof(double));
-             memset(integration_time_buf, 0, bcnts_per_file * sizeof(double));
 
              curr_file_bcnt = break_bcnt;
              block_offset = bctr + break_bcnt - strt_bcnt;
-             fprintf(stderr, "Curr file bcnt: %d\n", curr_file_bcnt);
-             fprintf(stderr, "Curr file mcnt: %ld\n", db_in->block[curblock_in].header.mcnt[block_offset]);
+             fprintf(stdout, "Curr file bcnt: %d\n", curr_file_bcnt);
+             fprintf(stdout, "Curr file mcnt: %ld\n", db_in->block[curblock_in].header.mcnt[block_offset]);
              gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt[block_offset], sync_time);
              julian_time = 2440587.5 + (gps_time / (double)(86400.0)); 
              file_start_t = gps_time;
              file_obs_id = (int64_t)gps_time;
 
              sprintf(hdf5_fname, "zen.%7.5lf.uvh5", julian_time);
-             fprintf(stderr, "Opening new file %s\n", hdf5_fname);
+             fprintf(stdout, "Opening new file %s\n", hdf5_fname);
              start_file(&sum_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
 
-             sprintf(hdf5_fname, "zen.%7.5lf.diff.uvh5", julian_time);
-             fprintf(stderr, "Opening new file %s\n", hdf5_fname);
-             start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
+             #ifndef SKIP_DIFF
+               sprintf(hdf5_fname, "zen.%7.5lf.diff.uvh5", julian_time);
+               fprintf(stdout, "Opening new file %s\n", hdf5_fname);
+               start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
+             #endif
 
              // Get the antenna positions and baseline orders
              // These are needed for populating the ant_[1|2]_array and uvw_array
-             get_ant_pos(&sum_file, ant_pos);
-             get_bl_order(&sum_file, bl_order);
-             //get_bl_bda_order(&sum_file, bl_bda_order);
-             get_auto_indices(bl_order, auto_indices, VIS_MATRIX_ENTRIES_PER_CHAN / N_STOKES);
+             //get_ant_pos(&sum_file, ant_pos);
+             //get_bl_order(&sum_file, bl_order);
+             get_integration_time(&sum_file, integration_time_buf);
        
              // Copy data to the right location
              nbls = stop_bcnt - break_bcnt + 1;
-             //fprintf(stderr, "Copying nbls: %d\n", nbls);
+             // fprintf(stdout, "Copying nbls: %d\n", nbls);
 
              if (nbls > 0){
                 if (nbls % N_BL_PER_WRITE){
                    hsize_t start[N_DATA_DIMS] = {block_offset, 0, 0, 0};
-                   hsize_t count[N_DATA_DIMS] = {nbls, 1, N_CHAN_PROCESSED, N_STOKES};
-                   status = H5Sselect_hyperslab(mem_space_bl_per_write, H5S_SELECT_SET, start, NULL, count, NULL);
+                   hsize_t count[N_DATA_DIMS] = {nbls, 1, 1, 1};
+                   hsize_t block[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
+                   status = H5Sselect_hyperslab(mem_space_bl_per_write, H5S_SELECT_SET, start, NULL, count, block);
                    if (status < 0){
                       hashpipe_error(__FUNCTION__, "Failed to select hyperslab of shared databuf\n");
                       pthread_exit(NULL);
                    }
                 }
                 file_offset = break_bcnt - curr_file_bcnt;
-                clock_gettime(CLOCK_MONOTONIC, &w_start);
-                write_baseline_index(&sum_file, file_offset, nbls, mem_space_bl_per_write, (uint64_t *)bl_buf_sum);
-                //write_baseline_index(&diff_file, file_offset, nbls, mem_space_bl_per_write, (uint64_t *)bl_buf_diff);
-                clock_gettime(CLOCK_MONOTONIC, &w_stop); 
 
                 for(b=0; b< nbls; b++){
                    ant_0_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_0[block_offset+b];
                    ant_1_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_1[block_offset+b];
-                   time_array_buf[file_offset+b] = mcnt2time(db_in->block[curblock_in].header.mcnt[block_offset+b], sync_time);
-                   flags[file_offset+b]          = 0;
+                   time_array_buf[file_offset+b] = compute_jd_from_mcnt(db_in->block[curblock_in].header.mcnt[block_offset+b], sync_time, 
+                                                   integration_time_buf[file_offset+b]);
                 }
+                
+                clock_gettime(CLOCK_MONOTONIC, &w_start);
+                write_baseline_index(&sum_file, file_offset, nbls, mem_space_bl_per_write, 
+                                    (uint64_t *)bl_buf_sum, flags, nsamples);
+                #ifndef SKIP_DIFF
+                  write_baseline_index(&diff_file, file_offset, nbls, mem_space_bl_per_write, 
+                                      (uint64_t *)bl_buf_diff, flags, nsamples);
+                #endif
+                clock_gettime(CLOCK_MONOTONIC, &w_stop); 
+
                 file_nblts += nbls;
 
                 //reset selection
@@ -1048,6 +1125,7 @@ static void *run(hashpipe_thread_args_t * args)
                    hashpipe_error(__FUNCTION__, "Failed to reset selection\n");
                    pthread_exit(NULL);
                 }
+
                 w_ns = ELAPSED_NS(w_start, w_stop);
                 elapsed_w_ns += w_ns;
                 min_w_ns = MIN(w_ns, min_w_ns);
@@ -1069,7 +1147,6 @@ static void *run(hashpipe_thread_args_t * args)
         hputr4(st.buf, "DISKWBNS", bl_w_ns);
         hputi8(st.buf, "DISKWMIN", min_w_ns);
         hputi8(st.buf, "DISKWMAX", max_w_ns);
-
          
         hputi8(st.buf, "DISKWBL", w_ns/BASELINES_PER_BLOCK);
 
