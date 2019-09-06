@@ -31,9 +31,9 @@ parser.add_argument('host', type=str, help='Host to intialize')
 parser.add_argument('-r', dest='redishost', type=str, default='redishost', help='Host serving redis database')
 parser.add_argument('-t', dest='hdf5template', type=str, default='/tmp/template.h5', 
                     help='Place to put HDF5 header template file')
-parser.add_argument('-c', dest='bdaconfig', type=str, default='/tmp/config.h5',
+parser.add_argument('-c', dest='bdaconfig', type=str, default='/tmp/bdaconfig.txt',
                     help='Place to put the BDA config file.\
-                          Used only with the BDA version of catcher scripts.')
+                          Used only if --bda flag is used')
 parser.add_argument('--bda', dest='bda', action='store_true', default=False,
                     help='Use the baseline dependent averaging version')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
@@ -61,6 +61,12 @@ run_on_hosts([args.host], ['taskset', cpu_mask, 'hashpipe_redis_gateway.rb', '-g
 
 # Wait for the gateways to come up
 time.sleep(15)
+
+# Upload config file location
+# NOTE: This has to come before template generation!
+if args.bda:
+   r.set('bda:config',args.bdaconfig)
+time.sleep(10)
 
 # Generate the meta-data template
 #run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
