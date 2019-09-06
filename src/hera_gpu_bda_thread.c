@@ -257,10 +257,6 @@ static int init(struct hashpipe_thread_args *args)
    hgets(st.buf, "BDACONF", 128, config_fname);
    hashpipe_status_unlock_safe(&st);
 
-   if (config_fname!=NULL){
-      sprintf(config_fname, "/home/deepthi/paper_gpu/src/bdaconfig/test_bda_192ants_nobda.txt"); 
-   }
-
    // Initialize binfo with config file params
    init_bda_info(binfo, config_fname); 
 
@@ -391,9 +387,7 @@ static void *run(hashpipe_thread_args_t * args)
      hputi4(st.buf, "BDABLKOUT", curblock_out);
      hashpipe_status_unlock_safe(&st);
      
-     /* -------------------------------------------------- */
-     /* Loop through baselines and add/buffer the packets  */
-     /* -------------------------------------------------- */
+     /* Perform the baseline dependent averaging  */
 
      buf = &(odb->block[curblock_out]); 
      int32_t *pf_re  = idb->block[curblock_in].data;
