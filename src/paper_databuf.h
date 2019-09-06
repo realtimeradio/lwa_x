@@ -301,8 +301,8 @@ typedef struct hera_bda_databuf{
 #define CATCHER_PORT            10000
 #define OUTPUT_BYTES_PER_PACKET (4096)
 #define CATCHER_N_BLOCKS        4
-#define CATCHER_CHAN_SUM        1
 #define XENG_CHAN_SUM           4
+#define CATCHER_CHAN_SUM        1
 #define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL/XENG_CHAN_SUM * (N_INPUTS * ((N_INPUTS>>1) + 1)))
 #define VIS_MATRIX_ENTRIES_PER_CHAN (N_INPUTS * ((N_INPUTS>>1) + 1))
 #define PACKETS_PER_VIS_MATRIX ((8L*TIME_DEMUX*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
@@ -343,7 +343,8 @@ typedef struct hera_catcher_input_databuf {
  * Structures and parameters
  */
 
-#define BASELINES_PER_BLOCK     8192
+#define BASELINES_PER_BLOCK     256 //8192
+#define CATCHER_CHAN_SUM_BDA     4
 #define CHAN_PER_CATCHER_PKT   (OUTPUT_BYTES_PER_PACKET/(N_STOKES * 8L))                    // 128
 #define PACKETS_PER_BASELINE   (N_CHAN_TOTAL/CHAN_PER_CATCHER_PKT)                          //  48
 #define PACKETS_PER_BL_PER_X   (PACKETS_PER_BASELINE/N_XENGINES_PER_TIME)                   //   3
@@ -367,14 +368,20 @@ typedef struct hera_catcher_input_databuf {
 //                                                  s2
 //                                                  s3
 
+
 #define hera_bda_buf_data_offset(l, s, b, o) \
   ((((l)*(b)*N_CHAN_PER_X*N_STOKES)+((s)*N_CHAN_PER_X*N_STOKES)+((o)*CHAN_PER_CATCHER_PKT*N_STOKES))*2)
 
+// b-- bcnt; t-- time_demux ; x-- xeng_id; o-- freq offset(0,1,2)
 #define  hera_catcher_bda_input_databuf_pkt_offset(b, t, x, o) \
      (((b)*TIME_DEMUX*PACKETS_PER_BASELINE) + ((t)*PACKETS_PER_BASELINE) + ((x)*PACKETS_PER_BL_PER_X) + (o))
 
-#define hera_catcher_bda_input_databuf_by_bcnt_idx32(b,s) \
-      (((b)*TIME_DEMUX + (s))*N_CHAN_TOTAL*N_STOKES*2)
+#define hera_catcher_bda_input_databuf_by_bcnt_idx32(b,p) \
+      (((b)*TIME_DEMUX*N_CHAN_TOTAL*N_STOKES*2) + ((p)*N_CHAN_TOTAL*N_STOKES*2))
+
+// b- bcnt; p- parity (even=0/odd=1); f- freq; s- stokes
+#define hera_catcher_bda_input_databuf_idx32(b,p,f,s) \
+      (((b)*TIME_DEMUX*N_CHAN_TOTAL*N_STOKES) + ((p)*N_CHAN_PROCESSED*N_STOKES) + ((f)*N_STOKES) + (s))
 
 typedef struct hera_catcher_bda_input_header{
   uint64_t good_data;
