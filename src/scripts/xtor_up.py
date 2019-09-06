@@ -32,6 +32,8 @@ parser.add_argument('-t', dest='timeslices', type=int, default=2,
                     help='Number of independent correlators. E.g. 2 => Even/odd correlator')
 parser.add_argument('-i', dest='ninstances', type=int, default=2,
                     help='Number of pipeline instances per host')
+parser.add_argument('-c', dest='bdaconf', type=str, default='/tmp/bdaconfig.txt',
+                    help='Loaction of BDA config file (used only if --bda flag is used)')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
 parser.add_argument('--ibverbs', dest='ibverbs', action='store_true', default=False,
@@ -80,6 +82,14 @@ for host in hosts:
 
 # Wait for the gateways to come up
 time.sleep(3)
+
+# Generate the BDA config file and upload to redis
+# TODO: call script to upload to redis
+if args.bda:
+   for hn,host in enumerate(hosts):
+      for i in range(args.ninstances):
+         key = 'hashpipe://%s/%d/set' % (host, i)
+         r.publish(key, 'BDACONF=%s' %(args.bdaconf))
 
 # Configure the X-engines as even/odd correlators
 for hn, host in enumerate(hosts):
