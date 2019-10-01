@@ -163,7 +163,7 @@ static void *run(hashpipe_thread_args_t * args)
 #define stringify(x) stringify2(x)
 
    // Open socket
-   sockfd = open_udp_socket("10.10.10.222",stringify(CATCHER_PORT)); //"catcher", stringify(CATCHER_PORT));
+   sockfd = open_udp_socket("catcher", stringify(CATCHER_PORT));
    if(sockfd == -1) {
        hashpipe_error(__FUNCTION__, "error opening socket");
        pthread_exit(NULL);
@@ -237,12 +237,12 @@ static void *run(hashpipe_thread_args_t * args)
      buf = &(db->block[block_idx]); 
      pktdata_t *p_out = pkt.data;
 
-     /* -------------------------------------------- */
-     /* Loop through baselines and send the packets  */
-     /* -------------------------------------------- */
+     // Loop through baselines and send the packets
+     // Send all packets of one baseline and then the next 
+     // (e.g. all 8 samples of 2s integrations) 
 
      for(j=0; j<N_BDABUF_BINS; j++){ //intbuf loop
-
+   
          n_samples = N_MAX_INTTIME/(1<<j);
          offset = 0;
          clock_gettime(CLOCK_MONOTONIC, &pkt_start);
