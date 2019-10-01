@@ -138,7 +138,7 @@ static uint32_t set_block_filled(hera_catcher_bda_input_databuf_t *db, block_inf
   block_missed_pkt_cnt = PACKETS_PER_BLOCK - binfo->block_packet_counter[block_i];
   
   block_missed_xengs = block_missed_pkt_cnt / (PACKETS_PER_BL_PER_X * BASELINES_PER_BLOCK);
-  block_missed_mod_cnt = block_missed_xengs % N_XENGINES_PER_TIME; 
+  block_missed_mod_cnt = block_missed_pkt_cnt % (PACKETS_PER_BL_PER_X * BASELINES_PER_BLOCK); 
 
   //fprintf(stderr,"Missed packets: %ld\tMissed Xengs:%ld\t", block_missed_pkt_cnt, block_missed_xengs);
 
@@ -152,8 +152,6 @@ static uint32_t set_block_filled(hera_catcher_bda_input_databuf_t *db, block_inf
     hgetu8(st_p->buf, "MISSEDPK", &missed_pkt_cnt);
     missed_pkt_cnt += block_missed_pkt_cnt;
     hputu8(st_p->buf, "MISSEDPK", missed_pkt_cnt);
-    //  fprintf(stderr, "got %d packets instead of %d\n",
-    //	    binfo->block_packet_counter[block_i], N_PACKETS_PER_BLOCK);
   }
   hashpipe_status_unlock_safe(st_p);
 
@@ -254,8 +252,8 @@ static inline uint32_t process_packet(
     if ((pkt_bcnt_dist >= 2*BASELINES_PER_BLOCK) || (binfo.block_packet_counter[binfo.block_i] == PACKETS_PER_BLOCK)){
        
        netbcnt = set_block_filled(db, &binfo);
-       fprintf(stderr,"Filled Block: %d from bcnt: %d to bcnt: %d\n", binfo.block_i, db->block[binfo.block_i].header.bcnt[0], 
-                                                                      db->block[binfo.block_i].header.bcnt[BASELINES_PER_BLOCK-1]);
+       //fprintf(stderr,"Filled Block: %d from bcnt: %d to bcnt: %d\n", binfo.block_i, db->block[binfo.block_i].header.bcnt[0], 
+       //                                                               db->block[binfo.block_i].header.bcnt[BASELINES_PER_BLOCK-1]);
 
        // Update binfo
        cur_bcnt += BASELINES_PER_BLOCK;
