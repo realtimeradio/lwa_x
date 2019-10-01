@@ -972,9 +972,9 @@ static void *run(hashpipe_thread_args_t * args)
                  if (nbls > 0){
                     // select the hyperslab of the shared mem to write to file
                     hsize_t start[N_DATA_DIMS] = {0, 0, 0 ,0};
-                    hsize_t count[N_DATA_DIMS] = {nbls, 1, 1, 1};
-                    hsize_t block[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
-                    status = H5Sselect_hyperslab(mem_space_bl_per_write, H5S_SELECT_SET, start, NULL, count, block);
+                    hsize_t count[N_DATA_DIMS] = {nbls, 1, N_CHAN_PROCESSED, N_STOKES};
+
+                    status = H5Sselect_hyperslab(mem_space_bl_per_write, H5S_SELECT_SET, start, NULL, count, NULL);
                     if (status < 0){
                        hashpipe_error(__FUNCTION__, "Failed to select hyperslab of shared databuf\n");
                        pthread_exit(NULL);
@@ -1031,7 +1031,7 @@ static void *run(hashpipe_thread_args_t * args)
                  file_cnt += 1;
 
                  hashpipe_status_lock_safe(&st);
-                 hputr4(st.buf, "FILESEC", (float)file_duration);
+                 hputr8(st.buf, "FILESEC", (float)file_duration);
                  hputi8(st.buf, "NDONEFIL", file_cnt);
                  hashpipe_status_unlock_safe(&st); 
 
@@ -1090,10 +1090,10 @@ static void *run(hashpipe_thread_args_t * args)
 
              if (nbls > 0){
                 if (nbls % N_BL_PER_WRITE){
-                   hsize_t start[N_DATA_DIMS] = {block_offset, 0, 0, 0};
-                   hsize_t count[N_DATA_DIMS] = {nbls, 1, 1, 1};
-                   hsize_t block[N_DATA_DIMS] = {1, 1, N_CHAN_PROCESSED, N_STOKES};
-                   status = H5Sselect_hyperslab(mem_space_bl_per_write, H5S_SELECT_SET, start, NULL, count, block);
+                   hsize_t start[N_DATA_DIMS] = {block_offset - bctr, 0, 0, 0};
+                   hsize_t count[N_DATA_DIMS] = {nbls, 1, N_CHAN_PROCESSED, N_STOKES};
+
+                   status = H5Sselect_hyperslab(mem_space_bl_per_write, H5S_SELECT_SET, start, NULL, count, NULL);
                    if (status < 0){
                       hashpipe_error(__FUNCTION__, "Failed to select hyperslab of shared databuf\n");
                       pthread_exit(NULL);
