@@ -69,7 +69,10 @@ if args.bda:
 time.sleep(10)
 
 # Generate the meta-data template
-#run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
+if args.bda:
+   run_on_hosts([args.host], python_source_cmd + [';'] + ['hera_make_hdf5_template_bda.py'] + [args.hdf5template], wait=True)
+else:
+   run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
 
 #Configure runtime parameters
 catcher_dict = {
