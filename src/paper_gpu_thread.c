@@ -91,7 +91,7 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
         hashpipe_status_lock_safe(&st);
         hputs(st.buf, status_key, "waiting");
         hgets(st.buf,  "INTSTAT", 16, integ_status);
-        hgeti8(st.buf, "INTSYNC", (long*)&start_mcount);
+        hgeti8(st.buf, "INTSYNC", (long int *)&start_mcount);
         hashpipe_status_unlock_safe(&st);
 
         // Wait for new input block to be filled
