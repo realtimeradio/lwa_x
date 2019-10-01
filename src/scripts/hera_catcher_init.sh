@@ -14,7 +14,7 @@ myip=$(getip $(hostname))
 function init() {
   instance=0
   mask=0x003f
-  bindhost=eth5
+  bindhost=eth3
   netcpu=0
   outcpu=3
 
