@@ -241,10 +241,6 @@ static int init_bda_block_header(hera_bda_block_t *bdablk){
 
 static int init(struct hashpipe_thread_args *args)
 { 
-   hashpipe_status_t st = args->st; 
-   const char * status_key = args->thread_desc->skey;
-   char config_fname[128];
- 
    // Get sizing parameters
    xgpuInfo(&xgpu_info);
 
@@ -252,10 +248,44 @@ static int init(struct hashpipe_thread_args *args)
      return -1;
    }
 
+   // Success!
+   return 0;
+}
+
+static void *run(hashpipe_thread_args_t * args)
+{
+   // Local aliases to shorten access to args fields
+   // Our input buffer happens to be a paper_ouput_databuf
+   paper_output_databuf_t *idb = (paper_output_databuf_t *)args->ibuf;
+   hera_bda_databuf_t *odb = (hera_bda_databuf_t *)args->obuf;
+   hashpipe_status_t st = args->st;
+   const char *status_key = args->thread_desc->skey;
+   char config_fname[128] = "";
+
+   // Flag that holds off the net thread
+   int holdoff = 1;
+ 
+   // Force this thread into holdoff until BDACONF is written
+   fprintf(stderr, "Waiting for someone to supply BDACONF\n");
    hashpipe_status_lock_safe(&st);
-   hputs(st.buf, status_key, "initing");
-   hgets(st.buf, "BDACONF", 128, config_fname);
+   hputs(st.buf, "BDACONF", "");
+   hputs(st.buf, status_key, "holding");
    hashpipe_status_unlock_safe(&st);
+ 
+   while(holdoff) {
+     sleep(1);
+     hashpipe_status_lock_safe(&st);
+     hgets(st.buf, "BDACONF", 128, config_fname);
+     if (strlen(config_fname) > 1){
+        holdoff = 0;
+     }
+     if(!holdoff) {
+       // Done holding, so delete the key
+       hputs(st.buf, status_key, "starting");
+       fprintf(stderr, "Starting...\n");
+     }
+     hashpipe_status_unlock_safe(&st);
+   }
 
    // Initialize binfo with config file params
    init_bda_info(binfo, config_fname); 
@@ -271,7 +301,6 @@ static int init(struct hashpipe_thread_args *args)
 
    // Allocate memory to the output data blocks based on the config file
    int blk_id,j;
-   hera_bda_databuf_t *odb = (hera_bda_databuf_t *)args->obuf;
    hera_bda_block_t *buf;   
 
    for(blk_id=0; blk_id < odb->header.n_block; blk_id++){
@@ -283,32 +312,15 @@ static int init(struct hashpipe_thread_args *args)
      
      init_bda_block_header(buf);
 
-     //for(j=0; j<N_BDABUF_BINS; j++){ 
-     //  fprintf(stderr,"Bin:%d\tBaselines:%ld\tBin Size:%ld\n",
-     //          j, buf->header[j].baselines,
-     //          buf->header[j].datsize);
-     //}
-
      for(j=0; j<N_BDABUF_BINS; j++){
        buf->data[j] = malloc(buf->header[j].datsize);
-       if(!buf->data[j])
-         return -1;
+       if(!buf->data[j]){
+         hashpipe_error(__FUNCTION__, "Could not allocate BDA buffer");
+         pthread_exit(NULL);
+       }
        memset(buf->data[j], 0, buf->header[j].datsize);
      }
    }
-
-   // Success!
-   return 0;
-}
-
-static void *run(hashpipe_thread_args_t * args)
-{
-   // Local aliases to shorten access to args fields
-   // Our input buffer happens to be a paper_ouput_databuf
-   paper_output_databuf_t *idb = (paper_output_databuf_t *)args->ibuf;
-   hera_bda_databuf_t *odb = (hera_bda_databuf_t *)args->obuf;
-   hashpipe_status_t st = args->st;
-   const char *status_key = args->thread_desc->skey;
 
    /* Main loop */
    int rv;
@@ -318,12 +330,11 @@ static void *run(hashpipe_thread_args_t * args)
    struct timespec start, stop;
    int casper_chan, gpu_chan;
    uint64_t bl;
-   int j,pol;
+   int pol;
    unsigned long long datoffset = 0;
    uint16_t ant0, ant1;
    unsigned long long idx_baseline; 
    off_t idx_regtile;
-   hera_bda_block_t *buf;
    int32_t re, im;    //pktdata_t is 32bits
    static uint64_t sample = 0;
    uint16_t sample_loc;
