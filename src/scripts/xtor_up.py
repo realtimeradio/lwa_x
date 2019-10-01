@@ -42,6 +42,8 @@ parser.add_argument('--redislog', dest='redislog', action='store_true', default=
                     help='Use the redis logger to duplicate log messages on redishost\'s log-channel pubsub stream')
 parser.add_argument('--bda', dest='bda', action='store_true', default=False,
                     help='Use baseline dependent averaging. (Beta)')
+parser.add_argument('--test', dest='test', action='store_true', default=False,
+                    help='Run BDA in test vector mode')
 parser.add_argument('--pypath', dest='pypath', type=str, default="/home/hera/hera-venv",
                     help='The path to a python virtual environment which will be activated prior to running paper_init. ' +
                          'Only relevant if using the --redislog flag, which uses a python redis interface')
@@ -67,10 +69,14 @@ if args.redislog:
     init_args += ['-r']
 if args.bda:
     init_args += ['-a']
+if args.test:
+    init_args += ['-t']
 
 if args.redislog:
     python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate")+";"]
     run_on_hosts(hosts, python_source_cmd + [paper_init] + init_args + ['0', '1'], wait=True) # two instances per host
+elif args.test:
+    run_on_hosts(hosts, [paper_init] + init_args + ['0'], wait=True) # two instances per host
 else:
     run_on_hosts(hosts, [paper_init] + init_args + ['0', '1'], wait=True) # two instances per host
 
@@ -84,12 +90,14 @@ for host in hosts:
 time.sleep(3)
 
 # Generate the BDA config file and upload to redis
-# TODO: call script to upload to redis
+# TODO: Replace copy command with generate script
+run_on_hosts(hosts, ["cp", args.bdaconf, "/tmp/bdaconfig.txt"], wait=True)
+
 if args.bda:
    for hn,host in enumerate(hosts):
       for i in range(args.ninstances):
          key = 'hashpipe://%s/%d/set' % (host, i)
-         r.publish(key, 'BDACONF=%s' %(args.bdaconf))
+         r.publish(key, 'BDACONF=/tmp/bdaconfig.txt')
 
 # Configure the X-engines as even/odd correlators
 for hn, host in enumerate(hosts):
