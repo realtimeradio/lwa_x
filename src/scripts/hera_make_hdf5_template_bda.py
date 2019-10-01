@@ -133,17 +133,24 @@ def create_header(h5, config, use_cm=False, use_redis=False):
     INSTRUMENT = "HERA"
 
     #Load config file
+    N_MAX_INTTIME = 8
     config = np.loadtxt(config, dtype=np.int)
     baselines = []
     integration_time = []
-    time_ctr = 0
 
-    for time_ctr in range(1,9,1):
-        for i,t in enumerate(config[:,2]):
-            if (t==0): continue
-            elif not (time_ctr % t):
-                baselines.append((config[i,0], config[i,1]))
-                integration_time.append(t * 2)
+    #for time_ctr in range(1,9,1):
+    #    for i,t in enumerate(config[:,2]):
+    #        if (t==0): continue
+    #        elif not (time_ctr % t):
+    #            baselines.append((config[i,0], config[i,1]))
+    #            integration_time.append(t * 2)
+
+    for i,t in enumerate(config[:,2]):
+        if (t!=0):
+           baselines.append([(config[i,0], config[i,1])]*(8//t))
+           integration_time.append(np.repeat(t*2, int(8//t)))
+    baselines = np.concatenate(baselines)
+    integration_time = np.asarray(np.concatenate(integration_time), dtype=np.float64)
 
     ant_1_array = np.array([x for (x,y) in baselines])
     ant_2_array = np.array([y for (x,y) in baselines])
