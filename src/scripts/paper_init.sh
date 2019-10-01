@@ -131,10 +131,10 @@ case ${hostname} in
     xid1=$(( 2*(mypx-1) + 1))
 
     instances=( 
-      #                               GPU       NET FLF GPU OUT
-      # mask  bind_host               DEV  XID  CPU CPU CPU CPU
-      "0x00ff eth3                     0  $xid0  0   0x0006   3   4" # Instance 0, eth3
-      "0xff00 eth5                     1  $xid1  8   0x0600  11  12" # Instance 1, eth5
+      #                               GPU       NET    FLF   GPU  OUT  BDA
+      # mask  bind_host               DEV  XID  CPU    CPU   CPU  CPU  CPU
+      "0x00ff eth3                     0  $xid0  0   0x0006   3    4    5 " # Instance 0, eth3
+      "0xff00 eth5                     1  $xid1  8   0x0600  11   12   10 " # Instance 1, eth5
     );;
 
   *)
@@ -153,6 +153,7 @@ function init() {
   flfcpu=$7
   gpucpu=$8
   outcpu=$9
+  bdacpu=$10
 
   if [ -z "${mask}" ]
   then
@@ -185,9 +186,41 @@ function init() {
     -c $gpucpu paper_gpu_thread \
     -c $outcpu hera_gpu_output_thread
 
-  if [ $USE_REDIS -eq 1 ]
+  if [ $USE_TEST -eq 1 ]
+  then
+    echo "launching BDA in TEST VECTOR mode"
+    taskset $mask \
+    hashpipe -p paper_gpu -I $instance \
+      -o XID=$xid \
+      -c $gpucpu hera_fake_gpu_thread \
+      -c $bdacpu hera_gpu_bda_thread \
+      -c $outcpu hera_bda_output_thread \
+       < /dev/null \
+      1> px${mypx}.out.$instance \
+      2> px${mypx}.err.$instance &
+
+  elif [ $USE_REDIS -eq 1 ] && [ $USE_BDA -eq 1 ]
   then
     echo "Using redis logger"
+    echo "Using baseline dependent averaging"
+    { taskset $mask \
+    hashpipe -p paper_gpu -I $instance \
+      -o BINDHOST=$bindhost \
+      -o GPUDEV=$gpudev \
+      -o XID=$xid \
+      -c $netcpu $netthread \
+      -m $flfcpu paper_fluff_thread \
+      -c $gpucpu paper_gpu_thread \
+      -c $bdacpu hera_gpu_bda_thread \
+      -c $outcpu hera_bda_output_thread \
+    < /dev/null 2>&3 1>px${mypx}.out.$instance; } \
+    3>&1 1>&2 | tee px${mypx}.err.$instance | \
+    stdin_to_redis.py -l WARNING > /dev/null &
+
+  elif [ $USE_REDIS -eq 1 ] && [ $USE_BDA -eq 0 ]
+  then
+    echo "Using redis logger"
+    echo "*NOT* using baseline dependent averaging"
     { taskset $mask \
     hashpipe -p paper_gpu -I $instance \
       -o BINDHOST=$bindhost \
@@ -200,8 +233,28 @@ function init() {
     < /dev/null 2>&3 1>px${mypx}.out.$instance; } \
     3>&1 1>&2 | tee px${mypx}.err.$instance | \
     stdin_to_redis.py -l WARNING > /dev/null &
+
+  elif [ $USE_REDIS -eq 0 ] && [ $USE_BDA -eq 1 ]
+  then
+    echo "*NOT* using redis logger"
+    echo "Using baseline dependent averaging"
+    taskset $mask \
+    hashpipe -p paper_gpu -I $instance \
+      -o BINDHOST=$bindhost \
+      -o GPUDEV=$gpudev \
+      -o XID=$xid \
+      -c $netcpu $netthread \
+      -m $flfcpu paper_fluff_thread \
+      -c $gpucpu paper_gpu_thread \
+      -c $bdacpu hera_gpu_bda_thread \
+      -c $outcpu hera_bda_output_thread \
+       < /dev/null \
+      1> px${mypx}.out.$instance \
+      2> px${mypx}.err.$instance &
+
   else
     echo "*NOT* using redis logger"
+    echo "*NOT* using baseline dependent averaging"
     taskset $mask \
     hashpipe -p paper_gpu -I $instance \
       -o BINDHOST=$bindhost \
@@ -220,6 +273,8 @@ function init() {
 # Default to Packet sockets; No redis logging
 USE_IBVERBS=0
 USE_REDIS=0
+USE_BDA=0
+USE_TEST=0
 
 for arg in $@; do
   case $arg in
@@ -227,6 +282,8 @@ for arg in $@; do
       echo "Usage: $(basename $0) [-r] [-i] INSTANCE_ID [...]"
       echo "  -r : Use redis logging (in addition to log files)"
       echo "  -i : Use IB-verbs pipeline (rather than packet sockets)"
+      echo "  -t : Run BDA in test vector mode"
+      echo "  -a : Use baseline dependent averaging threads"
       exit 0
     ;;
 
@@ -238,14 +295,24 @@ for arg in $@; do
       USE_REDIS=1
       shift
     ;;
+    -a)
+      USE_BDA=1
+      shift
+    ;;
+    -t)
+      USE_TEST=1
+      shift
+    ;;
   esac
 done
 
 if [ -z "$1" ]
 then
-  echo "Usage: $(basename $0) [-r] [-i] INSTANCE_ID [...]"
+  echo "Usage: $(basename $0) [-r] [-i] [-a] INSTANCE_ID [...]"
   echo "  -r : Use redis logging (in addition to log files)"
   echo "  -i : Use IB-verbs pipeline (rather than packet sockets)"
+  echo "  -a : Use baseline dependent averaging threads"
+  echo "  -t : Lauch BDA in test vector mode"
   exit 1
 fi
 

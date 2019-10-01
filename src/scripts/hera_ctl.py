@@ -16,7 +16,6 @@ def mcnts_per_second(sample_rate=500e6, spectra_len=8192):
     """
     return sample_rate / (spectra_len * 2)
 
-
 parser = argparse.ArgumentParser(description='Turn on and off the HERA correlator',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('action',type=str,

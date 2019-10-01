@@ -3,8 +3,6 @@
 
 #include "paper_databuf.h"
 
-#define N_BASELINES ((N_ANTS * (N_ANTS + 1)) / 2)
-
 // HERA HDF5 header fields, based on PLP's sample file
 // Comment descriptions are guesses
 typedef struct hdf5_extra_keywords {

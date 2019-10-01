@@ -13,32 +13,38 @@ AM_CPPFLAGS += -I/usr/include/hiredis/
 
 # AM_CFLAGS is used for all C compiles
 #AM_CFLAGS = -ggdb -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx2
-AM_CFLAGS = -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx2 -march=native -funroll-loops \
+AM_CFLAGS = -fPIC -O3 -Wall -fno-strict-aliasing -mavx2 -march=native -funroll-loops \
             -DGIT_VERSION=\"$(GIT_VERSION)\" -DBUILD_USER=\"$(BUILD_USER)\" \
             -DBUILD_HOST=\"$(BUILD_HOST)\" -DBUILD_DATE=\"$(BUILD_DATE)\"
 
 # Convenience variables to group source files
 paper_databuf = paper_databuf.h \
-	        paper_databuf.c
+	            paper_databuf.c
 
-paper_threads = paper_fake_net_thread.c       \
-		paper_gpu_cpu_output_thread.c \
-		paper_gpu_output_thread.c     \
-		paper_gpu_thread.c            \
-		paper_fluff_thread.c          \
-		hera_pktsock_thread.c         \
-		hera_ibv_thread.c             \
-		paper_crc_thread.c            \
-                hera_catcher_net_thread.c     \
-                hera_catcher_disk_thread.c    \
-                hera_gpu_output_thread.c      \
-                lzf/lzf_c.c                   \
-                lzf/lzf_d.c                   \
-                lzf_filter.c                  \
+paper_threads = paper_fake_net_thread.c          \
+                paper_gpu_cpu_output_thread.c    \
+                paper_gpu_output_thread.c        \
+                paper_gpu_thread.c               \
+                paper_fluff_thread.c             \
+                hera_pktsock_thread.c            \
+		        hera_ibv_thread.c                \
+                hera_fake_gpu_thread.c           \
+	            paper_crc_thread.c               \
+                hera_catcher_net_thread_bda.c    \
+                hera_catcher_net_thread.c        \
+                hera_catcher_disk_thread_bda.c   \
+                hera_catcher_disk_thread.c       \
+                hera_gpu_output_thread.c         \
+                hera_gpu_bda_thread.c            \
+                hera_bda_output_thread.c         \
+                hera_null_thread.c               \
+                lzf/lzf_c.c                      \
+                lzf/lzf_d.c                      \
+                lzf_filter.c                     \
                 lzf_filter.h
 
 paper_fluff = paper_fluff.h \
-	      paper_fluff.c
+	          paper_fluff.c
 
 hera_capture = hera_hdf5.h \
                hera_write_hdf5.c
@@ -61,19 +67,20 @@ paper_gpu_la_LDFLAGS += -lhdf5_hl -lhdf5 -lhiredis
 
 
 # Installed scripts
-dist_bin_SCRIPTS = scripts/paper_init.sh \
-                   scripts/paper_init_ibv.sh \
-	           scripts/paper_crc_init.sh \
-	           scripts/xtor_down.sh \
-	           scripts/xtor_up.py \
-	           scripts/hera_catcher_init.sh \
-	           scripts/hera_catcher_up.py \
-	           scripts/hera_catcher_down.sh \
-	           scripts/hera_catcher_take_data.py \
-	           scripts/hera_catcher_stop_data.py \
-	           scripts/tweak-perf.sh \
-	           scripts/hera_ctl.py \
-	           scripts/hera_make_hdf5_template.py
+dist_bin_SCRIPTS = scripts/paper_init.sh              \
+                   scripts/paper_init_ibv.sh          \
+	               scripts/paper_crc_init.sh          \
+	               scripts/xtor_down.sh               \
+	               scripts/xtor_up.py                 \
+	               scripts/hera_catcher_init.sh       \
+	               scripts/hera_catcher_up.py         \
+	               scripts/hera_catcher_down.sh       \
+	               scripts/hera_catcher_take_data.py  \
+	               scripts/hera_catcher_stop_data.py  \
+	               scripts/tweak-perf.sh              \
+	               scripts/hera_ctl.py                \
+	               scripts/hera_make_hdf5_template.py \
+	               scripts/hera_make_hdf5_template_bda.py 
 
 # Non-installed test programs
 noinst_PROGRAMS = paper_fluff_test hera_write_hdf5
