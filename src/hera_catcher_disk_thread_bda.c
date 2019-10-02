@@ -479,7 +479,7 @@ Turn an mcnt into a UNIX time in double-precision.
 */
 static double mcnt2time(uint64_t mcnt, uint32_t sync_time)
 {
-    return sync_time + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
+    return (sync_time_ms / 1000.) + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
 }
 
 /* 
