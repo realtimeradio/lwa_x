@@ -250,7 +250,10 @@ def create_header(h5, config, use_cm=False, use_redis=False):
     # time_array needs populating by receiver (should be center of integrations in JD)
     #header.create_dataset("time_array", dtype="<f8", data=np.zeros(n_bls * NTIMES))
     # uvw_needs populating by receiver: uvw = xyz(ant2) - xyz(ant1). Units, metres.
-    header.create_dataset("uvw_array",  dtype="<f8", data=np.zeros([n_bls, 3]))
+    uvw = np.zeros([n_bls, 3])
+    for i,(a,b) in enumerate(baselines):
+        uvw[i] = ant_pos_enu[a] - ant_pos_enu[b]
+    header.create_dataset("uvw_array",  dtype="<f8", data=uvw)
     # !Some! extra_keywords need to be computed for each file
     add_extra_keywords(header, cminfo, fenginfo)
 
