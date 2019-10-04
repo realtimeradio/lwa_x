@@ -17,6 +17,7 @@ function init() {
   bindhost=eth3
   netcpu=0
   outcpu=3
+  autocpu=5
 
   if [ $USE_BDA -eq 1 ]
   then
@@ -41,6 +42,7 @@ function init() {
     -o BINDHOST=$bindhost \
     -c $netcpu $netthread \
     -c $outcpu $diskthread \
+    -c $autocpu hera_catcher_autocorr_thread
      < /dev/null \
     1> ~/catcher.out.$instance \
     2> ~/catcher.err.$instance &
