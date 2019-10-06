@@ -20,7 +20,7 @@ def get_corr_to_hera_map(r, nants_data=192, nants=352):
     of correlator index (0 - Nants_data -1) to
     hera antenna number (0 - Nants).
     """
-    out_map = np.arange(nants, nants + nants_data) # use default values outside the range of real antennas
+    out_map = {k:v for k,v in enumerate(range(nants, nants+nants_data))} # use default values outside the range of real antennas
 
     # A dictionary with keys which are antenna numbers
     # of the for {<ant> :{<pol>: {'host':SNAPHOSTNAME, 'channel':INTEGER}}}
@@ -65,8 +65,8 @@ def get_ant_names():
     return ["foo"]*352
 
 def get_cm_info():
-    from hera_mc import sys_handling
-    h = sys_handling.Handling()
+    from hera_mc import cm_sysutils
+    h = cm_sysutils.Handling()
     return h.get_cminfo_correlator()
 
 def get_antpos_enu(antpos, lat, lon, alt):
@@ -167,6 +167,7 @@ def create_header(h5, config, use_cm=False, use_redis=False):
     freqs = np.linspace(0, 250e6, NCHANS_F + 1)[1536 : 1536 + (8192 // 4 * 3)]
     # average over channels
     freqs = freqs.reshape(NCHANS, NCHAN_SUM).sum(axis=1) / NCHAN_SUM
+    uvw = np.zeros([n_bls, 3])
 
     if use_cm:
         cminfo = get_cm_info()
@@ -183,7 +184,7 @@ def create_header(h5, config, use_cm=False, use_redis=False):
         fenginfo = r.hgetall("init_configuration")
         corr_to_hera_map = get_corr_to_hera_map(r, nants_data=NANTS_DATA, nants=NANTS)
         for n in range(baselines.shape[0]):
-            bls[n] = [corr_to_hera_map[bls[n,0]], corr_to_hera_map[bls[n,1]]]
+            baselines[n] = [corr_to_hera_map[baselines[n,0]], corr_to_hera_map[baselines[n,1]]]
     else:
         fenginfo = None
         # Use impossible antenna numbers to indicate they're not really valid
@@ -230,6 +231,8 @@ def create_header(h5, config, use_cm=False, use_redis=False):
             ant_names[i]   = np.string_(cminfo["antenna_names"][n])
             ant_nums[i]    = cminfo["antenna_numbers"][n]
             ant_pos_enu[i] = cminfo["antenna_positions_enu"][n]
+        for i,(a,b) in enumerate(baselines):
+            uvw[i] = ant_pos_enu[a] - ant_pos_enu[b]
         header.create_dataset("antenna_names",     dtype="|S5", shape=(NANTS,), data=ant_names)
         header.create_dataset("antenna_numbers",   dtype="<i8", shape=(NANTS,), data=ant_nums)
         header.create_dataset("antenna_positions",   dtype="<f8", shape=(NANTS,3), data=ant_pos)
@@ -250,9 +253,6 @@ def create_header(h5, config, use_cm=False, use_redis=False):
     # time_array needs populating by receiver (should be center of integrations in JD)
     #header.create_dataset("time_array", dtype="<f8", data=np.zeros(n_bls * NTIMES))
     # uvw_needs populating by receiver: uvw = xyz(ant2) - xyz(ant1). Units, metres.
-    uvw = np.zeros([n_bls, 3])
-    for i,(a,b) in enumerate(baselines):
-        uvw[i] = ant_pos_enu[a] - ant_pos_enu[b]
     header.create_dataset("uvw_array",  dtype="<f8", data=uvw)
     # !Some! extra_keywords need to be computed for each file
     add_extra_keywords(header, cminfo, fenginfo)
@@ -262,9 +262,11 @@ def add_extra_keywords(obj, cminfo=None, fenginfo=None):
     extras = obj.create_group("extra_keywords")
     if cminfo is not None:
         extras.create_dataset("cmver", data=np.string_(cminfo["cm_version"]))
-        # we need to convert antenna_positions to a list for json to play nicely
+        # Convert any numpy arrays to lists so they can be JSON encoded
         cminfo_copy = copy.deepcopy(cminfo)
-        cminfo_copy["antenna_positions"] = cminfo_copy["antenna_positions"].tolist()
+        for key in cminfo_copy.keys():
+            if isinstance(cminfo_copy[key], np.ndarray):
+                cminfo_copy[key] = cminfo_copy[key].tolist()
         extras.create_dataset("cminfo", data=np.string_(json.dumps(cminfo_copy)))
         del(cminfo_copy)
     else:
@@ -293,16 +295,12 @@ if __name__ == "__main__":
                         help ='Use this flag to get up-to-date (hopefully) array meta-data from the C+M system')
     parser.add_argument('-r', dest='use_redis', action='store_true', default=False,
                         help ='Use this flag to get up-to-date (hopefully) f-engine meta-data from a redis server at `redishost`')
-    parser.add_argument('--config', type=str, default=None, 
+    parser.add_argument('--config', type=str, default='/tmp/bdaconfig.txt', 
                         help = 'BDA Configuration file to create header (taken from redis by default)')
     args = parser.parse_args()
 
     if args.config:
        config = args.config
-    else:
-       import redis
-       r = redis.Redis('redishost')
-       config = r.get('bda:config')
 
     with h5py.File(args.output, "w") as h5:
         create_header(h5, config, use_cm=args.use_cminfo, use_redis=args.use_redis)
