@@ -477,7 +477,7 @@ static void get_integration_time(hdf5_id_t *id, double *integration_time_buf) {
 /*
 Turn an mcnt into a UNIX time in double-precision.
 */
-static double mcnt2time(uint64_t mcnt, uint32_t sync_time)
+static double mcnt2time(uint64_t mcnt, uint32_t sync_time_ms)
 {
     return (sync_time_ms / 1000.) + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
 }
@@ -491,9 +491,9 @@ static double unix2julian(double unixtime)
 }
 */
 
-static double compute_jd_from_mcnt(uint64_t mcnt, uint32_t sync_time, double integration_time)
+static double compute_jd_from_mcnt(uint64_t mcnt, uint32_t sync_time_ms, double integration_time)
 {
-   double unix_time = sync_time + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
+   double unix_time = (sync_time_ms / 1000.) + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
    unix_time = unix_time - integration_time/2;
    
    return (2440587.5 + (unix_time / (double)(86400.0)));
@@ -679,7 +679,7 @@ static void *run(hashpipe_thread_args_t * args)
     char hdf5_fname[128];
 
     // Variables for sync time and computed gps time / JD
-    uint32_t sync_time = 0;
+    uint32_t sync_time_ms = 0;
     double gps_time;
     double julian_time;
 
@@ -801,7 +801,7 @@ static void *run(hashpipe_thread_args_t * args)
         hgets(st.buf, "HDF5TPLT", 128, template_fname);
 
         // Get time that F-engines were last sync'd
-        hgetu4(st.buf, "SYNCTIME", &sync_time);
+        hgetu4(st.buf, "SYNCTIME", &sync_time_ms);
 
         // Get the integration time reported by the correlator
         hgetu4(st.buf, "INTTIME", &acc_len);
@@ -935,7 +935,7 @@ static void *run(hashpipe_thread_args_t * args)
                    ant_0_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_0[bctr+b];
                    ant_1_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_1[bctr+b];
 
-                   time_array_buf[file_offset+b] = compute_jd_from_mcnt(db_in->block[curblock_in].header.mcnt[bctr+b], sync_time,  
+                   time_array_buf[file_offset+b] = compute_jd_from_mcnt(db_in->block[curblock_in].header.mcnt[bctr+b], sync_time_ms,  
                                                    integration_time_buf[file_offset+b]);
                 }
                 
@@ -995,7 +995,7 @@ static void *run(hashpipe_thread_args_t * args)
                     for(b=0; b< nbls; b++){
                        ant_0_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_0[bctr+b];
                        ant_1_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_1[bctr+b];
-                       time_array_buf[file_offset+b] = compute_jd_from_mcnt(db_in->block[curblock_in].header.mcnt[bctr+b], sync_time, 
+                       time_array_buf[file_offset+b] = compute_jd_from_mcnt(db_in->block[curblock_in].header.mcnt[bctr+b], sync_time_ms, 
                                                        integration_time_buf[file_offset+b]);
                     }
                     file_nblts += nbls;
@@ -1013,7 +1013,7 @@ static void *run(hashpipe_thread_args_t * args)
                     max_w_ns = MAX(w_ns, max_w_ns);
                  }
                  // finish meta data and close the file
-                 gps_time = mcnt2time(break_bcnt, sync_time);
+                 gps_time = mcnt2time(break_bcnt, sync_time_ms);
                  file_stop_t = gps_time;
                  file_duration = file_stop_t - file_start_t;
 
@@ -1063,7 +1063,7 @@ static void *run(hashpipe_thread_args_t * args)
              block_offset = bctr + break_bcnt - strt_bcnt;
              fprintf(stdout, "Curr file bcnt: %d\n", curr_file_bcnt);
              fprintf(stdout, "Curr file mcnt: %ld\n", db_in->block[curblock_in].header.mcnt[block_offset]);
-             gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt[block_offset], sync_time);
+             gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt[block_offset], sync_time_ms);
              julian_time = 2440587.5 + (gps_time / (double)(86400.0)); 
              file_start_t = gps_time;
              file_obs_id = (int64_t)gps_time;
@@ -1104,7 +1104,7 @@ static void *run(hashpipe_thread_args_t * args)
                 for(b=0; b< nbls; b++){
                    ant_0_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_0[block_offset+b];
                    ant_1_array[file_offset+b]    = (int)db_in->block[curblock_in].header.ant_pair_1[block_offset+b];
-                   time_array_buf[file_offset+b] = compute_jd_from_mcnt(db_in->block[curblock_in].header.mcnt[block_offset+b], sync_time, 
+                   time_array_buf[file_offset+b] = compute_jd_from_mcnt(db_in->block[curblock_in].header.mcnt[block_offset+b], sync_time_ms, 
                                                    integration_time_buf[file_offset+b]);
                 }
                 
