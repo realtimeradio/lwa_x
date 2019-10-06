@@ -9,6 +9,7 @@ import numpy as np
 perf_tweaker = 'tweak-perf-sn.sh'
 init = 'hera_catcher_init.sh'
 python_source_cmd = ['source', '~/hera-venv/bin/activate']
+bda_config_cmd = ['hera_create_bda_config.py']
 template_cmd = ['hera_make_hdf5_template.py']
 
 def run_on_hosts(hosts, cmd, user=None, wait=True):
@@ -31,9 +32,6 @@ parser.add_argument('host', type=str, help='Host to intialize')
 parser.add_argument('-r', dest='redishost', type=str, default='redishost', help='Host serving redis database')
 parser.add_argument('-t', dest='hdf5template', type=str, default='/tmp/template.h5', 
                     help='Place to put HDF5 header template file')
-parser.add_argument('-c', dest='bdaconfig', type=str, default='/tmp/bdaconfig.txt',
-                    help='Place to put the BDA config file.\
-                          Used only if --bda flag is used')
 parser.add_argument('--bda', dest='bda', action='store_true', default=False,
                     help='Use the baseline dependent averaging version')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
@@ -64,13 +62,17 @@ time.sleep(15)
 
 # Upload config file location
 # NOTE: This has to come before template generation!
+# Generate the BDA config file and upload to redis
 if args.bda:
-   r.set('bda:config',args.bdaconfig)
-time.sleep(10)
+    print 'Create configuration file'
+    p = subprocess.Popen(python_source_cmd + [';'] + bda_config_cmd + ['-c', '-r', '/tmp/bdaconfig.txt'])
+    p.wait()
+    #run_on_hosts([args.host], python_source_cmd + [';'] + bda_config_cmd + ['-c','-r', args.bdaconfig], wait=True)
+    time.sleep(10)
 
 # Generate the meta-data template
 if args.bda:
-   run_on_hosts([args.host], python_source_cmd + [';'] + ['hera_make_hdf5_template_bda.py'] + ['c', '-r', args.hdf5template], wait=True)
+   run_on_hosts([args.host], python_source_cmd + [';'] + ['hera_make_hdf5_template_bda.py'] + ['-c', '-r', args.hdf5template], wait=True)
 else:
    run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
 
@@ -98,8 +100,8 @@ if args.bda:
    baselines = {}
    for n in range(4):
        baselines[n] = []
-   
-   bdaconfig = np.loadtxt(args.bdaconfig, dtype=np.int)
+
+   bdaconfig = np.loadtxt('/tmp/bdaconfig.txt', dtype=np.int)
    for i,t in enumerate(bdaconfig[:,2]):
        if (t==0): continue
        n = int(np.log(t)/np.log(2))
@@ -107,6 +109,7 @@ if args.bda:
        baselines[n].append((bdaconfig[i,0], bdaconfig[i,1]))
    
    for i in range(4):
+       print (i, len(baselines[i]))
        r.publish(pubchan, 'NBL%dSEC=%d'  % (2**(i+1), len(baselines[i])))
    
    time.sleep(0.1)

@@ -9,6 +9,8 @@ import subprocess
 perf_tweaker = 'tweak-perf.sh'
 paper_init = 'paper_init.sh'
 paper_init_ibv = 'paper_init_ibv.sh'
+python_source_cmd = ['source', '~/hera-venv/bin/activate']
+bda_config_cmd = ['hera_create_bda_config.py']
 
 def run_on_hosts(hosts, cmd, user=None, wait=True):
     if isinstance(cmd, str):
@@ -33,7 +35,7 @@ parser.add_argument('-t', dest='timeslices', type=int, default=2,
 parser.add_argument('-i', dest='ninstances', type=int, default=2,
                     help='Number of pipeline instances per host')
 parser.add_argument('-c', dest='bdaconf', type=str, default='/tmp/bdaconfig.txt',
-                    help='Loaction of BDA config file (used only if --bda flag is used)')
+                    help='Location of BDA config file (used only if --bda flag is used)')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
 parser.add_argument('--ibverbs', dest='ibverbs', action='store_true', default=False,
@@ -90,14 +92,14 @@ for host in hosts:
 time.sleep(3)
 
 # Generate the BDA config file and upload to redis
-# TODO: Replace copy command with generate script
-run_on_hosts(hosts, ["cp", args.bdaconf, "/tmp/bdaconfig.txt"], wait=True)
-
 if args.bda:
-   for hn,host in enumerate(hosts):
-      for i in range(args.ninstances):
-         key = 'hashpipe://%s/%d/set' % (host, i)
-         r.publish(key, 'BDACONF=/tmp/bdaconfig.txt')
+    python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate")+";"]
+    run_on_hosts(hosts, python_source_cmd + bda_config_cmd + ["-c", "-r", args.bdaconf], wait=True)
+
+    for hn,host in enumerate(hosts):
+       for i in range(args.ninstances):
+          key = 'hashpipe://%s/%d/set' % (host, i)
+          r.publish(key, 'BDACONF=/tmp/bdaconfig.txt')
 
 # Configure the X-engines as even/odd correlators
 for hn, host in enumerate(hosts):
