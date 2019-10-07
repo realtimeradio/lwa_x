@@ -176,19 +176,15 @@ function init() {
 
   echo "Using netthread: $netthread"
 
-  echo taskset $mask \
-  hashpipe -p paper_gpu -I $instance \
-    -o BINDHOST=$bindhost \
-    -o GPUDEV=$gpudev \
-    -o XID=$xid \
-    -c $netcpu $netthread \
-    -m $flfcpu paper_fluff_thread \
-    -c $gpucpu paper_gpu_thread \
-    -c $outcpu hera_gpu_output_thread
 
   if [ $USE_TEST -eq 1 ]
   then
     echo "launching BDA in TEST VECTOR mode"
+    echo taskset $mask \
+    hashpipe -p paper_gpu -I $instance \
+      -c $gpucpu hera_fake_gpu_thread \
+      -c $bdacpu hera_gpu_bda_thread \
+      -c $outcpu hera_bda_output_thread
     taskset $mask \
     hashpipe -p paper_gpu -I $instance \
       -o XID=$xid \
@@ -199,63 +195,54 @@ function init() {
       1> px${mypx}.out.$instance \
       2> px${mypx}.err.$instance &
 
-  elif [ $USE_REDIS -eq 1 ] && [ $USE_BDA -eq 1 ]
+  elif [ $USE_BDA -eq 1 ]
   then
-    echo "Using redis logger"
     echo "Using baseline dependent averaging"
-    { taskset $mask \
+    echo taskset $mask \
     hashpipe -p paper_gpu -I $instance \
       -o BINDHOST=$bindhost \
       -o GPUDEV=$gpudev \
       -o XID=$xid \
       -c $netcpu $netthread \
       -m $flfcpu paper_fluff_thread \
-      -c $gpucpu paper_gpu_thread \
-      -c $bdacpu hera_gpu_bda_thread \
-      -c $outcpu hera_bda_output_thread \
-    < /dev/null 2>&3 1>px${mypx}.out.$instance; } \
-    3>&1 1>&2 | tee px${mypx}.err.$instance | \
-    stdin_to_redis.py -l WARNING > /dev/null &
-
-  elif [ $USE_REDIS -eq 1 ] && [ $USE_BDA -eq 0 ]
-  then
-    echo "Using redis logger"
-    echo "*NOT* using baseline dependent averaging"
-    { taskset $mask \
-    hashpipe -p paper_gpu -I $instance \
-      -o BINDHOST=$bindhost \
-      -o GPUDEV=$gpudev \
-      -o XID=$xid \
-      -c $netcpu $netthread \
-      -m $flfcpu paper_fluff_thread \
-      -c $gpucpu paper_gpu_thread \
-      -c $outcpu hera_gpu_output_thread \
-    < /dev/null 2>&3 1>px${mypx}.out.$instance; } \
-    3>&1 1>&2 | tee px${mypx}.err.$instance | \
-    stdin_to_redis.py -l WARNING > /dev/null &
-
-  elif [ $USE_REDIS -eq 0 ] && [ $USE_BDA -eq 1 ]
-  then
-    echo "*NOT* using redis logger"
-    echo "Using baseline dependent averaging"
-    taskset $mask \
-    hashpipe -p paper_gpu -I $instance \
-      -o BINDHOST=$bindhost \
-      -o GPUDEV=$gpudev \
-      -o XID=$xid \
-      -c $netcpu $netthread \
-      -m $flfcpu paper_fluff_thread \
-      -c $gpucpu paper_gpu_thread \
-      -c $bdacpu hera_gpu_bda_thread \
-      -c $outcpu hera_bda_output_thread \
-       < /dev/null \
-      1> px${mypx}.out.$instance \
-      2> px${mypx}.err.$instance &
+      -c $gpucpu hera_gpu_bda_thread \
+      -c $outcpu hera_bda_output_thread
+    if [ $USE_REDIS -eq 1 ]
+    then
+      echo "Using redis logger"
+      { taskset $mask \
+      hashpipe -p paper_gpu -I $instance \
+        -o BINDHOST=$bindhost \
+        -o GPUDEV=$gpudev \
+        -o XID=$xid \
+        -c $netcpu $netthread \
+        -m $flfcpu paper_fluff_thread \
+        -c $gpucpu paper_gpu_thread \
+        -c $bdacpu hera_gpu_bda_thread \
+        -c $outcpu hera_bda_output_thread \
+      < /dev/null 2>&3 1>px${mypx}.out.$instance; } \
+      3>&1 1>&2 | tee px${mypx}.err.$instance | \
+      stdin_to_redis.py -l WARNING > /dev/null &
+    else
+      echo "*NOT* using redis logger"
+      taskset $mask \
+      hashpipe -p paper_gpu -I $instance \
+        -o BINDHOST=$bindhost \
+        -o GPUDEV=$gpudev \
+        -o XID=$xid \
+        -c $netcpu $netthread \
+        -m $flfcpu paper_fluff_thread \
+        -c $gpucpu paper_gpu_thread \
+        -c $bdacpu hera_gpu_bda_thread \
+        -c $outcpu hera_bda_output_thread \
+         < /dev/null \
+        1> px${mypx}.out.$instance \
+        2> px${mypx}.err.$instance &
+    fi
 
   else
-    echo "*NOT* using redis logger"
-    echo "*NOT* using baseline dependent averaging"
-    taskset $mask \
+    echo "NOT using BDA threads"
+    echo taskset $mask \
     hashpipe -p paper_gpu -I $instance \
       -o BINDHOST=$bindhost \
       -o GPUDEV=$gpudev \
@@ -263,10 +250,38 @@ function init() {
       -c $netcpu $netthread \
       -m $flfcpu paper_fluff_thread \
       -c $gpucpu paper_gpu_thread \
-      -c $outcpu hera_gpu_output_thread \
-       < /dev/null \
-      1> px${mypx}.out.$instance \
-      2> px${mypx}.err.$instance &
+      -c $outcpu hera_gpu_output_thread
+    if [ $USE_REDIS -eq 1 ]
+    then
+      echo "Using redis logger"
+      { taskset $mask \
+      hashpipe -p paper_gpu -I $instance \
+        -o BINDHOST=$bindhost \
+        -o GPUDEV=$gpudev \
+        -o XID=$xid \
+        -c $netcpu $netthread \
+        -m $flfcpu paper_fluff_thread \
+        -c $gpucpu paper_gpu_thread \
+        -c $outcpu hera_gpu_output_thread \
+      < /dev/null 2>&3 1>px${mypx}.out.$instance; } \
+      3>&1 1>&2 | tee px${mypx}.err.$instance | \
+      stdin_to_redis.py -l WARNING > /dev/null &
+    else
+      echo "*NOT* using redis logger"
+      echo "*NOT* using baseline dependent averaging"
+      taskset $mask \
+      hashpipe -p paper_gpu -I $instance \
+        -o BINDHOST=$bindhost \
+        -o GPUDEV=$gpudev \
+        -o XID=$xid \
+        -c $netcpu $netthread \
+        -m $flfcpu paper_fluff_thread \
+        -c $gpucpu paper_gpu_thread \
+        -c $outcpu hera_gpu_output_thread \
+         < /dev/null \
+        1> px${mypx}.out.$instance \
+        2> px${mypx}.err.$instance &
+    fi
   fi
 }
 
