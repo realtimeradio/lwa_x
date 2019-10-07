@@ -36,6 +36,8 @@ parser.add_argument('--bda', dest='bda', action='store_true', default=False,
                     help='Use the baseline dependent averaging version')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
+parser.add_argument('--redislog', dest='redislog', action='store_true', default=False,
+                    help='Use the redis logger to duplicate log messages on redishost\'s log-channel pubsub stream')
 
 args = parser.parse_args()
 
@@ -48,6 +50,8 @@ if args.runtweak:
 init_args = []
 if args.bda:
    init_args += ['-a']
+if args.redislog:
+   init_args += ['-r']
 
 # Start Catcher
 run_on_hosts([args.host], ['cd', '/data;', init] + init_args + ['0'], wait=True)
@@ -65,7 +69,7 @@ time.sleep(15)
 # Generate the BDA config file and upload to redis
 if args.bda:
     print 'Create configuration file'
-    p = subprocess.Popen(python_source_cmd + [';'] + bda_config_cmd + ['-c', '-r', '/tmp/bdaconfig.txt'])
+    p = subprocess.Popen(bda_config_cmd + ['-c', '-r', '/tmp/bdaconfig.txt'])
     p.wait()
     #run_on_hosts([args.host], python_source_cmd + [';'] + bda_config_cmd + ['-c','-r', args.bdaconfig], wait=True)
     time.sleep(10)
@@ -98,19 +102,23 @@ r.publish(pubchan, 'MISSEDPK=0')
 # If BDA is requested, write distribution to redis
 if args.bda:
    baselines = {}
+   Nants = 0
    for n in range(4):
        baselines[n] = []
 
    bdaconfig = np.loadtxt('/tmp/bdaconfig.txt', dtype=np.int)
-   for i,t in enumerate(bdaconfig[:,2]):
+   for ant0, ant1, t in bdaconfig:
        if (t==0): continue
-       n = int(np.log(t)/np.log(2))
+       n = int(np.log2(t))
        if (n==4): n = 3
-       baselines[n].append((bdaconfig[i,0], bdaconfig[i,1]))
+       baselines[n].append((ant0, ant1))
+       if(ant0 == ant1):
+         Nants += 1
    
    for i in range(4):
        print (i, len(baselines[i]))
        r.publish(pubchan, 'NBL%dSEC=%d'  % (2**(i+1), len(baselines[i])))
+   r.publish(pubchan, 'BDANANT=%d' % Nants)
    
    time.sleep(0.1)
 
