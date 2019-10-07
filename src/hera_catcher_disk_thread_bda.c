@@ -1185,7 +1185,7 @@ static void *run(hashpipe_thread_args_t * args)
            fprintf(stderr, "Marking autocorr databuf filled..");
            // Update databuf headers
            db_out->block[curblock_out].header.num_ants = Nants;
-           db_out->block[curblock_out].header.julian_time = compute_jd_from_mcnt(header.mcnt[bctr-1], sync_time, 2);
+           db_out->block[curblock_out].header.julian_time = compute_jd_from_mcnt(header.mcnt[bctr-1], sync_time_ms, 2);
            if (hera_catcher_autocorr_databuf_set_filled(db_out, curblock_out) != HASHPIPE_OK) {
               hashpipe_error(__FUNCTION__, "error marking out databuf %d full", curblock_out);
               pthread_exit(NULL);
