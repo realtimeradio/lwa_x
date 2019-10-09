@@ -477,7 +477,7 @@ static void get_integration_time(hdf5_id_t *id, double *integration_time_buf) {
 /*
 Turn an mcnt into a UNIX time in double-precision.
 */
-static double mcnt2time(uint64_t mcnt, uint32_t sync_time_ms)
+static double mcnt2time(uint64_t mcnt, uint64_t sync_time_ms)
 {
     return (sync_time_ms / 1000.) + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
 }
@@ -491,7 +491,7 @@ static double unix2julian(double unixtime)
 }
 */
 
-static double compute_jd_from_mcnt(uint64_t mcnt, uint32_t sync_time_ms, double integration_time)
+static double compute_jd_from_mcnt(uint64_t mcnt, uint64_t sync_time_ms, double integration_time)
 {
    double unix_time = (sync_time_ms / 1000.) + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
    unix_time = unix_time - integration_time/2;
@@ -680,7 +680,7 @@ static void *run(hashpipe_thread_args_t * args)
     char hdf5_fname[128];
 
     // Variables for sync time and computed gps time / JD
-    uint32_t sync_time_ms = 0;
+    uint64_t sync_time_ms = 0;
     double gps_time;
     double julian_time;
 
@@ -808,7 +808,7 @@ static void *run(hashpipe_thread_args_t * args)
         hgets(st.buf, "HDF5TPLT", 128, template_fname);
 
         // Get time that F-engines were last sync'd
-        hgetu4(st.buf, "SYNCTIME", &sync_time_ms);
+        hgetu8(st.buf, "SYNCTIME", &sync_time_ms);
 
         // Get the integration time reported by the correlator
         hgetu4(st.buf, "INTTIME", &acc_len);
@@ -1041,7 +1041,7 @@ static void *run(hashpipe_thread_args_t * args)
                  file_cnt += 1;
 
                  hashpipe_status_lock_safe(&st);
-                 hputr8(st.buf, "FILESEC", (float)file_duration);
+                 hputr4(st.buf, "FILESEC", file_duration);
                  hputi8(st.buf, "NDONEFIL", file_cnt);
                  hashpipe_status_unlock_safe(&st); 
 
