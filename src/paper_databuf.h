@@ -284,7 +284,7 @@ typedef uint8_t hera_bda_header_cache_alignment[
 typedef struct hera_bda_block{
   hera_bda_header_t header[N_BDABUF_BINS];
   hera_bda_header_cache_alignment padding;
-  uint32_t *data[N_BDABUF_BINS];
+  int32_t *data[N_BDABUF_BINS];
 } hera_bda_block_t;
 
 typedef struct hera_bda_databuf{

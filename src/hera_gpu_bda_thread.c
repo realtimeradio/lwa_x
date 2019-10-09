@@ -106,27 +106,14 @@ static off_t regtile_index(const int in0, const int in1)
 // component.  A casper ordered buffer consists of four complex values for each
 // pair of input pairs.  Thus, the number of complex values in a casper ordered
 // buffer are: 4 * (N/2 * (N/2 + 1)) / 2 = N * (N/2 + 1)
-
-// For integration buffers, change the ordering to baselines x channels x stokes
-// to make it easier to send the packets after integration.
-
-/*  Each baseline (i.e, ant pair) needs a unique index for encoding the  
- *  baseline both while packetization and while building the integration
- *  buffers. The baseline index function below is an adaption of the 
- *  CASPER index without accounting for the size of each cell or the 
- *  stokes parameters.
- */ 
-
-/*  The integration buffer location for each baseline is obtained by  
- *  multiplying the baseline_index with:
- *  (words_per_cell = 8) * (num_chan_per_x = 384)
- *  Pol offset = 2* (2*(p0^p1) + p0)
- */
-static int baseline_index(const int in0, const int in1, const int n)
-{ 
-  const int a0 = in0 >> 1; 
+static off_t casper_index(const int in0, const int in1, const int n)
+{
+  const int a0 = in0 >> 1;
   const int a1 = in1 >> 1;
+  const int p0 = in0 & 1;
+  const int p1 = in1 & 1;
   const int delta = a1-a0;
+  const int num_words_per_cell = 8;
   const int nant_2 = (n/2) / 2;
 
   // Three cases: top triangle, middle rectangle, bottom triangle
@@ -145,32 +132,39 @@ static int baseline_index(const int in0, const int in1, const int n)
     // middle rectangle
     cell_index = middle_rect_offset + (a1-nant_2)*(nant_2+1) + (nant_2-delta);
   }
-
-  return cell_index;
+  //printf("%s: a0=%d, a1=%d, delta=%d, cell_index=%d\n", __FUNCTION__, a0, a1, delta, cell_index);
+  // Pol offset
+  const int pol_offset = 2*(2*(p0^p1) + p0);
+  // Word index (in units of words (i.e. floats) of real component
+  const int index = (cell_index * num_words_per_cell) + pol_offset;
+  return index;
 }
-  
-// Redefine casper ordering to place channels next to each other (since 
-// buffers are packetized this way. Thus, the number of complex values 
-// per baselines are: 4 stokes * N_CHAN_PER_X 
-// Total buffersize: 4 * N_CHAN_PER_X * (N/2 * (N/2 + 1)) / 2
-#define N_CASPER_COMPLEX_PER_BASELINE  (N_STOKES * N_CHAN_PER_X)
+
+// For each channel, a casper ordered buffer contains four complex values for
+// each pair of input pairs.  Thus, the number of complex values in a casper
+// ordered buffer are: 4 * (N/2 * (N/2 + 1)) / 2 = N * (N/2 + 1)
+#define N_CASPER_COMPLEX_PER_CHAN (N_INPUTS * (N_INPUTS/2 + 1))
 
 // Lookup table mapping baseline_idx to regtile_idx
-static off_t *regtile_idx_map;
+static off_t *idx_map;
 
 static int init_idx_map()
 {
-  int a0, a1;
-  regtile_idx_map = (off_t *)malloc(N_BASELINES * sizeof(off_t));
-  if(!regtile_idx_map) {
+  int a0, a1, p0, p1, i, j;
+  idx_map = malloc(N_CASPER_COMPLEX_PER_CHAN * sizeof(off_t));
+  if(!idx_map) {
     return -1;
   }
 
-  for(a0=0; a0<N_INPUTS/2; a0++) {
-    for(a1 = a0; a1<N_INPUTS/2; a1++) {
-      //fprintf(stderr, "(%d,%d) Baseline idx: %d Regtile index:%lld \n",
-      //        a0,a1,baseline_index(2*a0, 2*a1, N_INPUTS), regtile_index(2*a0, 2*a1));
-      regtile_idx_map[baseline_index(2*a0, 2*a1, N_INPUTS)] = regtile_index(2*a0, 2*a1);
+  for(a1=0; a1<N_INPUTS/2; a1++) {
+    for(a0=0; a0<=a1; a0++) {
+      for(p0=0; p0<2; p0++) {
+        for(p1=0; p1<2; p1++) {
+          i = 2*a0 + p0;
+          j = 2*a1 + p1;
+          idx_map[casper_index(i,j,N_INPUTS)/2] = regtile_index(i,j);
+        }
+      }
     }
   }
   return 0;
@@ -413,14 +407,15 @@ static void *run(hashpipe_thread_args_t * args)
          //fprintf(stderr,"Bin:%d, 2**j:%d\n",j,(1<<j));
          ant0 = buf->header[j].ant_pair_0[bl]; 
          ant1 = buf->header[j].ant_pair_1[bl];
-         idx_baseline = baseline_index(2*ant0, 2*ant1, N_INPUTS); 
-         idx_regtile = regtile_idx_map[idx_baseline];
- 
-         for(casper_chan=0; casper_chan<N_CHAN_PER_X; casper_chan++){
-           gpu_chan = casper_chan;
-           for(pol=0; pol<N_STOKES; pol++){
-             re = pf_re[(gpu_chan*REGTILE_CHAN_LENGTH)+idx_regtile+pol];
-             im = pf_im[(gpu_chan*REGTILE_CHAN_LENGTH)+idx_regtile+pol];
+         idx_baseline = casper_index(2*ant0, 2*ant1, N_INPUTS); 
+
+         for(pol=0; pol<N_STOKES; pol++){
+           idx_regtile = idx_map[idx_baseline/2 + pol]; 
+
+           for(casper_chan=0; casper_chan<N_CHAN_PER_X; casper_chan++){
+             gpu_chan = casper_chan;
+             re = pf_re[(gpu_chan*REGTILE_CHAN_LENGTH)+idx_regtile];
+             im = pf_im[(gpu_chan*REGTILE_CHAN_LENGTH)+idx_regtile];
              datoffset = hera_bda_buf_data_idx(N_MAX_INTTIME/(1<<j), sample_loc, bl, gpu_chan, pol);
              buf->data[j][datoffset] += re;
              buf->data[j][datoffset+1] += -im;
