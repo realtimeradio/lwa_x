@@ -243,7 +243,7 @@ static void *run(hashpipe_thread_args_t * args)
 
      for(j=0; j<N_BDABUF_BINS; j++){ //intbuf loop
    
-         n_samples = N_MAX_INTTIME/(1<<j);
+         n_samples = N_MAX_INTTIME/(1<<j); // l in offset
          offset = 0;
          clock_gettime(CLOCK_MONOTONIC, &pkt_start);
  
@@ -262,9 +262,9 @@ static void *run(hashpipe_thread_args_t * args)
              for(chan=0; chan<N_CHAN_PER_X; chan+= CHAN_PER_CATCHER_PKT){
 
                pkt.hdr.offset = OFFSET(offset);
-               datoffset = 0;
-               //datoffset = hera_bda_buf_data_offset(n_samples, i, bl, offset);
-               // //memcpy(&pkt.data, &(buf->data[j][datoffset]), OUTPUT_BYTES_PER_PACKET);
+               //datoffset = 0;
+               // hera_bda_buf_data_idx(l,s,b,c,p)
+               datoffset = hera_bda_buf_data_idx(n_samples, i, bl, chan, 0);
                for(p=0; p<OUTPUT_BYTES_PER_PACKET/sizeof(pktdata_t); p++){
                  *p_out++ = CONVERT(buf->data[j][datoffset+p]);
                }

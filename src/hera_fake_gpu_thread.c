@@ -77,6 +77,32 @@ static void *fake_gpu_thread_run(hashpipe_thread_args_t * args){
     paper_output_databuf_t *db = (paper_output_databuf_t *)args->obuf;
     hashpipe_status_t st = args->st;
     const char *status_key = args->thread_desc->skey;
+   char config_fname[128] = "";
+
+   // Flag that holds off the net thread
+   int holdoff = 1;
+ 
+   // Force this thread into holdoff until BDACONF is written
+   fprintf(stderr, "Waiting for someone to supply BDACONF\n");
+   hashpipe_status_lock_safe(&st);
+   hputs(st.buf, "BDACONF", "");
+   hputs(st.buf, status_key, "holding");
+   hashpipe_status_unlock_safe(&st);
+ 
+   while(holdoff) {
+     sleep(1);
+     hashpipe_status_lock_safe(&st);
+     hgets(st.buf, "BDACONF", 128, config_fname);
+     if (strlen(config_fname) > 1){
+        holdoff = 0;
+     }
+     if(!holdoff) {
+       // Done holding, so delete the key
+       hputs(st.buf, status_key, "starting");
+     }
+     hashpipe_status_unlock_safe(&st);
+   }
+
 
     /* Main loop */
     int rv;              // store return of buffer status calls
