@@ -5,6 +5,7 @@ import h5py
 import argparse
 from astropy.time import Time
 import json
+import redis
 
 N_MAX_INTTIME = 8
 N_BDABUF_BINS = 4
@@ -13,6 +14,29 @@ N_STOKES = 4
 NCHANS = 1536
 N_CHAN_CATCHER = 1536
 INTSPEC = 131072*2
+
+def get_corr_to_hera_map(nants_data=192, nants=352):
+    """
+    Given a redis.Redis instance, r, containing
+    appropriate metadata - figure out the mapping
+    of correlator index (0 - Nants_data -1) to
+    hera antenna number (0 - Nants).
+    """
+    out_map = {} # use default values outside the range of real antennas
+
+    r = redis.Redis('redishost')
+    ant_to_snap = json.loads(r.hgetall("corr:map")['ant_to_snap'])
+    for ant, pol in ant_to_snap.iteritems():
+        hera_ant_number = int(ant)
+        host = pol["n"]["host"]
+        chan = pol["n"]["channel"] # runs 0-5
+        snap_ant_chans = r.hget("corr:snap_ants", host)
+        if snap_ant_chans is None:
+            continue
+        corr_ant_number = json.loads(snap_ant_chans)[chan//2] #Indexes from 0-3 (ignores pol)
+        out_map[corr_ant_number] = hera_ant_number
+
+    return out_map
 
 def signed_int(x):
     """Return two's complement interpretation 
@@ -49,9 +73,9 @@ parser.add_argument('--ramp', action='store_true', default=False,
                     help='Frequency ramp in test vectors')
 args = parser.parse_args()
 
-snap_pol_map = {'e2':0,  'n0':1,
-                'e6':2,  'n4':2,
-                'e10':4, 'n8':5}
+snap_pol_map = {u'e2':0,  u'n0':1,
+                u'e6':2,  u'n4':3,
+                u'e1':4, u'n8':5}
 
 # Compute expected baseline pairs from
 # the configuration file
@@ -69,6 +93,7 @@ for ant0,ant1,t in conf:
        bls_per_bin[int(np.log2(t))] += 1
 baselines = np.concatenate(baselines)
 inttime   = np.asarray(np.concatenate(inttime), dtype=np.float64)
+
 ant_1_array = np.array([x for (x,y) in baselines])
 ant_2_array = np.array([y for (x,y) in baselines])
 
@@ -77,20 +102,20 @@ ant_2_array = np.array([y for (x,y) in baselines])
 fp = h5py.File(args.h5fname,'r')
 header = fp['Header']
 
-print 'Integration time array...'
-assert(np.all(np.equal(header['integration_time'][:], inttime)))
-
-print 'ant_1_array..'
-assert(np.all(np.equal(header['ant_1_array'][:], ant_1_array)))
-
-print 'ant_2_array..'
-assert(np.all(np.equal(header['ant_2_array'][:], ant_2_array)))
-
-print 'Checking deltas in time array..'
-jds = Time(header['time_array'][:], format='jd')
-
-fp.close()
-
+#print 'Integration time array...'
+#assert(np.all(np.equal(header['integration_time'][:], inttime)))
+#
+#print 'ant_1_array..'
+#assert(np.all(np.equal(header['ant_1_array'][:], ant_1_array)))
+#
+#print 'ant_2_array..'
+#assert(np.all(np.equal(header['ant_2_array'][:], ant_2_array)))
+#
+#print 'Checking deltas in time array..'
+#jds = Time(header['time_array'][:], format='jd')
+#
+#fp.close()
+#
 fakereal = 1
 fakeimag = -2j
 int_bin = {}
@@ -138,25 +163,31 @@ if args.fengine:
 
    cminfo = json.loads(fp['Header']['extra_keywords']['cminfo'].value) 
    ants = cminfo['antenna_numbers']
+   out_map = get_corr_to_hera_map()
 
-   if (bls_per_bin[0] != 0):
-      print ('Checking integration 0..')
-      uv = UVData()
+   uv = UVData()
 
-      for idx_a0, a0 in enumerate(ants):
-          for idx_a1, a1 in enumerate(ants[idx_a0:]):
-              loca0 = snap_pol_map[cminfo['correlator_inputs'][idx_a0][0][:2]]
-              loca1 = snap_pol_map[cminfo['correlator_inputs'][idx_a1][0][:2]]
+   for a0, a1 in zip(ant_1_array[::2], ant_2_array[::2]):
 
-              uv.read(args.h5fname, bls=[(a0, a1)])
-              data = uv.get_data(a0, a1)
-      
-              tspec = gen_tvg_pol(loca0)*np.conj(loca1)
-              tspec = np.sum(tspec.reshape(-1,4),axis=1)[:NCHANS]
+       if(a0==a1):
 
-              print a1,a2, np.all(tspec == data[0,:,0]//INTSPEC)
+          print("({0:2d},{1:2d}) \t".format(a0,a1)),
+          uv.read(args.h5fname, bls=[(a0, a1)], run_check_acceptability=False, run_check=False)
+          data = uv.get_data(a0, a1)
 
-              tspec = gen_tvg_pol(snaploc_a1+1)*np.conj(snaploc_a2+1)
-              tspec = np.sum(tspec.reshape(-1,4),axis=1)[:NCHANS]
+          a0 = out_map[a0]; a1 = out_map[a1];
+          print("({0:2d},{1:2d}) \t".format(a0,a1)),
+          loca0 = snap_pol_map[cminfo['correlator_inputs'][ants.index(a0)][0][:2]]
+          loca1 = snap_pol_map[cminfo['correlator_inputs'][ants.index(a1)][0][:2]]
+   
+          tspec = gen_tvg_pol(loca0)*np.conj(gen_tvg_pol(loca1))
+          tspec = tspec[:N_CHAN_TOTAL]
+          #tspec = np.sum(tspec.reshape(-1,4),axis=1)[:NCHANS]
 
-              print a1,a2, np.all(tspec == data[0,:,1]//INTSPEC)
+          print np.all(np.equal(tspec, data[0,:,0]//(4*INTSPEC))), '\t',
+
+          tspec = gen_tvg_pol(loca0 +1)*np.conj(gen_tvg_pol(loca1 +1))
+          tspec = tspec[:N_CHAN_TOTAL]
+          #tspec = np.sum(tspec.reshape(-1,4),axis=1)[:NCHANS]
+
+          print np.all(np.equal(tspec, data[0,:,1]//(4*INTSPEC)))
