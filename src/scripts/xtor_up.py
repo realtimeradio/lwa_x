@@ -53,7 +53,7 @@ parser.add_argument('--pypath', dest='pypath', type=str, default="/home/hera/her
 args = parser.parse_args()
 hosts = args.hosts # Too lazy to keey typing this
 nhosts = len(hosts)
-nhosts_per_timeslice = nhosts * args.timeslices
+nhosts_per_timeslice = nhosts / args.timeslices
 
 assert args.ninstances == 2, 'Sorry, anything other than ninstances=2 is not supported!'
 
