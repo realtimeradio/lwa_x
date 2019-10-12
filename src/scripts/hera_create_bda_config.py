@@ -54,7 +54,7 @@ def create_bda_config(n_ants_data, use_cm=False, use_redis=False):
     for ant0 in range(NANTS):
         for ant1 in range(ant0, NANTS, 1):
             if (ant0 in corr_ant_nums) and (ant1 in corr_ant_nums):
-               bl_pairs.append([ant0, ant1, 1])
+               bl_pairs.append([ant0, ant1, 4])
             else:
                bl_pairs.append([ant0, ant1, 0])
 

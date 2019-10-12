@@ -405,48 +405,29 @@ static void close_filespaces(hdf5_id_t *id)
     H5Sclose(id->ant_2_array_fs);
 }
 
-
-///* Read the baseline order from an HDF5 file via the Header/corr_bl_order dataset */
-//static void get_bl_order(hdf5_id_t *id, bl_t *bl_order) {
-//    hid_t dataset_id;
-//    herr_t status;
-//    dataset_id = H5Dopen(id->header_gid, "corr_bl_order", H5P_DEFAULT);
-//    if (dataset_id < 0) {
-//        hashpipe_error(__FUNCTION__, "Failed to open Header/corr_bl_order dataset");
-//        pthread_exit(NULL);
-//    }
-//    status = H5Dread(dataset_id, H5T_STD_I32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, bl_order);
-//    if (status < 0) {
-//        hashpipe_error(__FUNCTION__, "Failed to read Header/corr_bl_order dataset");
-//        pthread_exit(NULL);
-//    }
-//    status = H5Dclose(dataset_id);
-//    if (status < 0) {
-//        hashpipe_error(__FUNCTION__, "Failed to close Header/corr_bl_order dataset");
-//        pthread_exit(NULL);
-//    }
-//}
-
-///* Read the antenna positions from an HDF5 file via the Header/antenna_positions_enu dataset */
-//static void get_ant_pos(hdf5_id_t *id, enu_t *ant_pos) {
-//    hid_t dataset_id;
-//    herr_t status;
-//    dataset_id = H5Dopen(id->header_gid, "antenna_positions_enu", H5P_DEFAULT);
-//    if (dataset_id < 0) {
-//        hashpipe_error(__FUNCTION__, "Failed to open Header/antenna_positions_enu dataset");
-//        pthread_exit(NULL);
-//    }
-//    status = H5Dread(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, ant_pos);
-//    if (status < 0) {
-//        hashpipe_error(__FUNCTION__, "Failed to read Header/antenna_positions_enu dataset");
-//        pthread_exit(NULL);
-//    }
-//    status = H5Dclose(dataset_id);
-//    if (status < 0) {
-//        hashpipe_error(__FUNCTION__, "Failed to close Header/antenna_positions_enu dataset");
-//        pthread_exit(NULL);
-//    }
-//}
+// The data in the files should be indexed in real antennas numbers, not 
+// in correlator numbers. Get the corr_to_hera map from header to get right labelling.
+/* Read the correlator to hera_antennas map from an HDF5 file via the 
+   Header/corr_to_hera_map dataset */
+static void get_corr_to_hera_map(hdf5_id_t *id, int *corr_to_hera_map) {
+    hid_t dataset_id;
+    herr_t status;
+    dataset_id = H5Dopen(id->header_gid, "corr_to_hera_map", H5P_DEFAULT);
+    if (dataset_id < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to open Header/corr_to_hera_map dataset");
+        pthread_exit(NULL);
+    }
+    status = H5Dread(dataset_id, H5T_STD_I32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, corr_to_hera_map);
+    if (status < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to read Header/corr_to_hera_map dataset");
+        pthread_exit(NULL);
+    }
+    status = H5Dclose(dataset_id);
+    if (status < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close Header/corr_to_hera_map dataset");
+        pthread_exit(NULL);
+    }
+}
 
 
 /* Get the integration time for each baseline from header (set by config file) */
@@ -692,6 +673,7 @@ static void *run(hashpipe_thread_args_t * args)
     char tag[128];
     uint64_t baseline_dist[N_BDABUF_BINS];
     uint64_t Nants;
+    int corr_to_hera_map[N_ANTS];
 
     // Init status variables
     hashpipe_status_lock_safe(&st);
@@ -942,8 +924,8 @@ static void *run(hashpipe_thread_args_t * args)
                 clock_gettime(CLOCK_MONOTONIC, &w_stop);
 
                 for(b=0; b< N_BL_PER_WRITE; b++){
-                   ant_0_array[file_offset+b]    = (int)header.ant_pair_0[bctr+b];
-                   ant_1_array[file_offset+b]    = (int)header.ant_pair_1[bctr+b];
+                   ant_0_array[file_offset+b]    = corr_to_hera_map[header.ant_pair_0[bctr+b]];
+                   ant_1_array[file_offset+b]    = corr_to_hera_map[header.ant_pair_1[bctr+b]];
 
                    time_array_buf[file_offset+b] = compute_jd_from_mcnt(header.mcnt[bctr+b], sync_time_ms,  
                                                    integration_time_buf[file_offset+b]);
@@ -1003,8 +985,8 @@ static void *run(hashpipe_thread_args_t * args)
                     clock_gettime(CLOCK_MONOTONIC, &w_stop);
 
                     for(b=0; b< nbls; b++){
-                       ant_0_array[file_offset+b]    = (int)header.ant_pair_0[bctr+b];
-                       ant_1_array[file_offset+b]    = (int)header.ant_pair_1[bctr+b];
+                       ant_0_array[file_offset+b]    = corr_to_hera_map[header.ant_pair_0[bctr+b]];
+                       ant_1_array[file_offset+b]    = corr_to_hera_map[header.ant_pair_1[bctr+b]];
                        time_array_buf[file_offset+b] = compute_jd_from_mcnt(header.mcnt[bctr+b], sync_time_ms, 
                                                        integration_time_buf[file_offset+b]);
                     }
@@ -1091,7 +1073,7 @@ static void *run(hashpipe_thread_args_t * args)
              // Get the antenna positions and baseline orders
              // These are needed for populating the ant_[1|2]_array and uvw_array
              //get_ant_pos(&sum_file, ant_pos);
-             //get_bl_order(&sum_file, bl_order);
+             get_corr_to_hera_map(&sum_file, corr_to_hera_map);
              get_integration_time(&sum_file, integration_time_buf);
        
              // Copy data to the right location
@@ -1112,8 +1094,8 @@ static void *run(hashpipe_thread_args_t * args)
                 file_offset = break_bcnt - curr_file_bcnt;
 
                 for(b=0; b< nbls; b++){
-                   ant_0_array[file_offset+b]    = (int)header.ant_pair_0[block_offset+b];
-                   ant_1_array[file_offset+b]    = (int)header.ant_pair_1[block_offset+b];
+                   ant_0_array[file_offset+b]    = corr_to_hera_map[header.ant_pair_0[block_offset+b]];
+                   ant_1_array[file_offset+b]    = corr_to_hera_map[header.ant_pair_1[block_offset+b]];
                    time_array_buf[file_offset+b] = compute_jd_from_mcnt(header.mcnt[block_offset+b], sync_time_ms, 
                                                    integration_time_buf[file_offset+b]);
                 }
@@ -1168,7 +1150,8 @@ static void *run(hashpipe_thread_args_t * args)
         }
 
         for (bctr=0; bctr < BASELINES_PER_BLOCK; bctr++){
-            ant = header.ant_pair_0[bctr];
+            // Autocorr blocks are indexed by antennas numbers (not corr numbers)
+            ant = corr_to_hera_map[header.ant_pair_0[bctr]];
             if((header.ant_pair_0[bctr] == header.ant_pair_1[bctr]) && (db_out->block[curblock_out].header.ant[ant]==0)){
                offset_in = hera_catcher_bda_input_databuf_by_bcnt_idx32(bctr, 0);
                offset_out = hera_catcher_autocorr_databuf_idx32(ant);
