@@ -172,7 +172,9 @@ static int init_idx_map()
 
 static uint64_t get_sample_from_mcnt(uint64_t curr_mcnt, uint64_t start_bda_mcnt, 
                                      int int_count){
-   return (curr_mcnt - start_bda_mcnt) % (TIME_DEMUX * int_count);
+   uint64_t sample = (curr_mcnt - start_bda_mcnt) / (TIME_DEMUX * int_count);
+   fprintf(stderr, "curr: %ld, start: %ld, acclen:%d, sample: %ld\n", curr_mcnt, start_bda_mcnt, int_count, sample);
+   return sample; 
 }
 
 static int init_bda_info(bda_info_t *binfo, char *config_fname){
@@ -296,6 +298,7 @@ static void *run(hashpipe_thread_args_t * args)
    hputu8(st.buf,"NBL4SEC",binfo[1].baselines);
    hputu8(st.buf,"NBL8SEC",binfo[2].baselines);
    hputu8(st.buf,"NBL16SEC",binfo[3].baselines);
+   hputu4(st.buf, "BDASAMP", 0);
    hashpipe_status_unlock_safe(&st);
 
    // Allocate memory to the output data blocks based on the config file
@@ -357,9 +360,6 @@ static void *run(hashpipe_thread_args_t * args)
      // and, if armed, start count
      hashpipe_status_lock_safe(&st);
      hputs(st.buf, status_key, "waiting");
-     hgets(st.buf,  "INTSTAT", 16, integ_status);
-     hgeti8(st.buf, "INTSYNC", (long int *)&start_bda_mcount);
-     hgeti4(st.buf, "INTCOUNT", &int_count);
      hashpipe_status_unlock_safe(&st);
 
      // Wait for new block to be filled
@@ -381,6 +381,7 @@ static void *run(hashpipe_thread_args_t * args)
      hashpipe_status_lock_safe(&st);
      hputi4(st.buf, "BDABLKIN", curblock_in);
      hputu8(st.buf, "BDAMCNT", idb->block[curblock_in].header.mcnt);
+     hgets(st.buf,  "INTSTAT", 16, integ_status);
      hashpipe_status_unlock_safe(&st);
 
      // If the GPU integration status is off, you 
@@ -393,43 +394,25 @@ static void *run(hashpipe_thread_args_t * args)
          // Skip to next input buffer
          continue;
      }
-     
-     if(!strcmp(integ_status, "start")) {
-        fprintf(stderr,"Waiting for mcnt: %ld\n", start_bda_mcount);
-        fprintf(stderr,"mcnt now: %ld\n", idb->block[curblock_in].header.mcnt);
-        
 
-        //// If mcount < start_bda_mcount (i.e. not there yet)
-        //if(idb->block[curblock_in].header.mcnt < start_bda_mcount) {
-        //  // Drop input buffer
-        //  // Mark input block as free and advance
-        //  hashpipe_databuf_set_free((hashpipe_databuf_t *)idb, curblock_in);
-        //  curblock_in = (curblock_in + 1) % idb->header.n_block;
-        //  // Skip to next input buffer
-        //  continue;
-        //// Else if mcount == start_bda_mcount (time to start)
-        //} else if(idb->block[curblock_in].header.mcnt == start_bda_mcount) {
-        //  // Set integration status to "on"
-        //  // Read integration count (INTCOUNT)
-        //  fprintf(stdout, "--- BDA integration on ---\n");
-        //  strcpy(integ_status, "on");
-        //  hashpipe_status_lock_safe(&st);
-        //  hgeti4(st.buf, "INTCOUNT", &int_count);
-        //  hashpipe_status_unlock_safe(&st);
-        //// Else (missed starting mcount)
-        //} else {
-        //  // Missed start of integration, can't got back in time.
-        //  fprintf(stderr, "--- mcnt=%06lx > start_bda_mcnt=%06lx ---\n",
-        //      idb->block[curblock_in].header.mcnt, start_bda_mcount);
-        //  //pthread_exit(NULL);
-        //}
-     }
-
+     // Don't need to deal with the cases where integ_status is "start"
+     // because this is handled by the gpu_thread already. Adding another
+     // INTSTAT type variable is redundant and using the same INTSTAT
+     // skips over these conditions directly to "on" because the gpu thread
+     // changes it almost immediately.
+ 
      // If integ_status is "stop" or "on"
+
+     hashpipe_status_lock_safe(&st);
+     hputs(st.buf, status_key, "processing");
+     hgeti8(st.buf, "INTSYNC", (long int *)&start_bda_mcount);
+     hgeti4(st.buf, "INTCOUNT", &int_count);
+     hashpipe_status_unlock_safe(&st);
+
      clock_gettime(CLOCK_MONOTONIC, &start);
 
      sample = get_sample_from_mcnt(idb->block[curblock_in].header.mcnt, 
-                                   start_bda_mcount, int_count);
+                                   start_bda_mcount+int_count, int_count);
 
      if (sample%N_MAX_INTTIME == 0){
         // Wait for new output block to be free
