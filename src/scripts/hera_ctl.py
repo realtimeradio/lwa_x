@@ -6,6 +6,7 @@ import argparse
 
 MCNT_STEP_SIZE = 2
 MCNT_XGPU_BLOCK_SIZE = 2048
+INTCOUNT = 131072  #number of spectra per integration
 
 def mcnts_per_second(sample_rate=500e6, spectra_len=8192):
     """
@@ -51,6 +52,7 @@ rdb = redis.Redis(args.redishost)
 
 if args.action == 'stop':
     rdb.publish("hashpipe:///set", 'INTSTAT=stop')
+    rdb.publish("hashpipe:///set", 'IBDASTAT=stop')
 
 if args.action == 'start':
     # Calculate start MCNT
@@ -75,12 +77,18 @@ if args.action == 'start':
     print 'Requested accumulation length: %d' % args.acclen
     print 'Actual accumulation length: %d' % acclen
 
+    # Compute the middle mcount on which BDA should start
+    last_mcount = trig_mcnt + args.slices*(acclen - MCNT_XGPU_BLOCK_SIZE)
+    bda_mcount = (last_mcount + trig_mcnt + args.slices*MCNT_XGPU_BLOCK_SIZE) // 2
+
+    print 'Starting BDA on mcnt: %d' % bda_mcount
+
     # Use the hashpipe publish channel to update keys in all status buffers.
     # See the docstring at https://github.com/david-macmahon/rb-hashpipe/blob/master/bin/hashpipe_redis_gateway.rb
     # for details about formatting
     
     for slice in range(args.slices):
-        msg = 'INTSYNC=%d\nINTCOUNT=%d\nINTSTAT=start\nOUTDUMPS=0' % (trig_mcnt + slice*MCNT_STEP_SIZE, acclen)
+        msg = 'INTSYNC=%d\nINTCOUNT=%d\nINTSTAT=start\nOUTDUMPS=0\nIBDASTRT=%d' % (trig_mcnt + slice*MCNT_STEP_SIZE, acclen, bda_mcount)
         for host in range(args.xhosts):
             hostname = 'px%d' % (slice * args.xhosts + host + 1)
             rdb.publish('hashpipe://%s/0/set' % hostname, msg)

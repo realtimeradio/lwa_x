@@ -33,8 +33,8 @@
 
 typedef struct {
     uint32_t baselines;
-    int *ant_pair_0;
-    int *ant_pair_1;
+    uint16_t *ant_pair_0;
+    uint16_t *ant_pair_1;
 } bda_info_t;
 
 static XGPUInfo xgpu_info;
@@ -170,6 +170,11 @@ static int init_idx_map()
   return 0;
 }
 
+static uint64_t get_sample_from_mcnt(uint64_t curr_mcnt, uint64_t start_bda_mcnt, 
+                                     int int_count){
+   return (curr_mcnt - start_bda_mcnt) % (TIME_DEMUX * int_count);
+}
+
 static int init_bda_info(bda_info_t *binfo, char *config_fname){
    FILE *fp;
    int j, a0, a1, inttime, bin;
@@ -199,8 +204,8 @@ static int init_bda_info(bda_info_t *binfo, char *config_fname){
 
    // malloc for storing ant pairs
    for(j=0; j<N_BDABUF_BINS; j++){
-     binfo[j].ant_pair_0 = (int *)malloc(binfo[j].baselines * sizeof(int));
-     binfo[j].ant_pair_1 = (int *)malloc(binfo[j].baselines * sizeof(int));
+     binfo[j].ant_pair_0 = (uint16_t *)malloc(binfo[j].baselines * sizeof(uint16_t));
+     binfo[j].ant_pair_1 = (uint16_t *)malloc(binfo[j].baselines * sizeof(uint16_t));
    }
    rewind(fp); //re-read antpairs to store them
    while(fscanf(fp, "%d %d %d", &a0, &a1, &inttime)!=EOF){
@@ -300,8 +305,8 @@ static void *run(hashpipe_thread_args_t * args)
    for(blk_id=0; blk_id < odb->header.n_block; blk_id++){
      for(j=0; j<N_BDABUF_BINS; j++){
        buf = &(odb->block[blk_id]);
-       buf->header[j].ant_pair_0 = (int *) malloc(binfo[j].baselines * sizeof(int));
-       buf->header[j].ant_pair_1 = (int *) malloc(binfo[j].baselines * sizeof(int));
+       buf->header[j].ant_pair_0 = (uint16_t *) malloc(binfo[j].baselines * sizeof(uint16_t));
+       buf->header[j].ant_pair_1 = (uint16_t *) malloc(binfo[j].baselines * sizeof(uint16_t));
      }
      
      init_bda_block_header(buf);
@@ -330,7 +335,10 @@ static void *run(hashpipe_thread_args_t * args)
    unsigned long long idx_baseline; 
    off_t idx_regtile;
    int32_t re, im;    //pktdata_t is 32bits
-   static uint64_t sample = 0;
+   char integ_status[17];
+   int int_count; // number of mcnts integrated in GPU
+   uint64_t start_bda_mcount; // mcount to start BD integration 
+   uint64_t sample = 0;
    uint16_t sample_loc;
 
    for(j=0; j<N_BDABUF_BINS;j++)
@@ -344,8 +352,14 @@ static void *run(hashpipe_thread_args_t * args)
 
    while (run_threads()) {
 
+     // Note waiting status,
+     // query integrating status
+     // and, if armed, start count
      hashpipe_status_lock_safe(&st);
      hputs(st.buf, status_key, "waiting");
+     hgets(st.buf,  "INTSTAT", 16, integ_status);
+     hgeti8(st.buf, "INTSYNC", (long int *)&start_bda_mcount);
+     hgeti4(st.buf, "INTCOUNT", &int_count);
      hashpipe_status_unlock_safe(&st);
 
      // Wait for new block to be filled
@@ -363,6 +377,60 @@ static void *run(hashpipe_thread_args_t * args)
        }
      }
 
+     // Got a new block. Decide what to do with it.
+     hashpipe_status_lock_safe(&st);
+     hputi4(st.buf, "BDABLKIN", curblock_in);
+     hputu8(st.buf, "BDAMCNT", idb->block[curblock_in].header.mcnt);
+     hashpipe_status_unlock_safe(&st);
+
+     // If the GPU integration status is off, you 
+     // can skip BDA as well. Do something only if
+     // the status is start.
+     if(!strcmp(integ_status, "off")) {
+         // Mark input block as free and advance
+         hashpipe_databuf_set_free((hashpipe_databuf_t *)idb, curblock_in);
+         curblock_in = (curblock_in + 1) % idb->header.n_block;
+         // Skip to next input buffer
+         continue;
+     }
+     
+     if(!strcmp(integ_status, "start")) {
+        fprintf(stderr,"Waiting for mcnt: %ld\n", start_bda_mcount);
+        fprintf(stderr,"mcnt now: %ld\n", idb->block[curblock_in].header.mcnt);
+        
+
+        //// If mcount < start_bda_mcount (i.e. not there yet)
+        //if(idb->block[curblock_in].header.mcnt < start_bda_mcount) {
+        //  // Drop input buffer
+        //  // Mark input block as free and advance
+        //  hashpipe_databuf_set_free((hashpipe_databuf_t *)idb, curblock_in);
+        //  curblock_in = (curblock_in + 1) % idb->header.n_block;
+        //  // Skip to next input buffer
+        //  continue;
+        //// Else if mcount == start_bda_mcount (time to start)
+        //} else if(idb->block[curblock_in].header.mcnt == start_bda_mcount) {
+        //  // Set integration status to "on"
+        //  // Read integration count (INTCOUNT)
+        //  fprintf(stdout, "--- BDA integration on ---\n");
+        //  strcpy(integ_status, "on");
+        //  hashpipe_status_lock_safe(&st);
+        //  hgeti4(st.buf, "INTCOUNT", &int_count);
+        //  hashpipe_status_unlock_safe(&st);
+        //// Else (missed starting mcount)
+        //} else {
+        //  // Missed start of integration, can't got back in time.
+        //  fprintf(stderr, "--- mcnt=%06lx > start_bda_mcnt=%06lx ---\n",
+        //      idb->block[curblock_in].header.mcnt, start_bda_mcount);
+        //  //pthread_exit(NULL);
+        //}
+     }
+
+     // If integ_status is "stop" or "on"
+     clock_gettime(CLOCK_MONOTONIC, &start);
+
+     sample = get_sample_from_mcnt(idb->block[curblock_in].header.mcnt, 
+                                   start_bda_mcount, int_count);
+
      if (sample%N_MAX_INTTIME == 0){
         // Wait for new output block to be free
         while ((rv=hera_bda_databuf_wait_free(odb, curblock_out)) != HASHPIPE_OK) {
@@ -379,25 +447,26 @@ static void *run(hashpipe_thread_args_t * args)
         }
         // Init header of newly acquired block
         init_bda_block_header(&(odb->block[curblock_out]));
-        for(j=0; j<N_BDABUF_BINS; j++) 
+        for(j=0; j<N_BDABUF_BINS; j++){ 
           memset(odb->block[curblock_out].data[j], 0, odb->block[curblock_out].header[j].datsize);
+        }
      }
-
-     clock_gettime(CLOCK_MONOTONIC, &start);
 
      // Note processing status, current input block
      hashpipe_status_lock_safe(&st);
      hputs(st.buf, status_key, "processing");
      hputi4(st.buf, "BDABLKIN", curblock_in);
      hputi4(st.buf, "BDABLKOUT", curblock_out);
+     hputu4(st.buf, "BDASAMP", sample);
      hashpipe_status_unlock_safe(&st);
      
+
      /* Perform the baseline dependent averaging  */
 
      buf = &(odb->block[curblock_out]); 
      int32_t *pf_re  = idb->block[curblock_in].data;
      int32_t *pf_im  = idb->block[curblock_in].data + xgpu_info.matLength;
-     
+      
      for(j=0; j<N_BDABUF_BINS; j++){ //intbuf loop
 
        sample_loc = (sample/(1<<j))%(N_MAX_INTTIME/(1<<j));
@@ -425,12 +494,9 @@ static void *run(hashpipe_thread_args_t * args)
     
      } // intbuf
 
-     sample++; 
-
      clock_gettime(CLOCK_MONOTONIC, &stop);
 
      hashpipe_status_lock_safe(&st);
-     hputu4(st.buf, "BDASAMP", sample);
      hputr4(st.buf, "BDASECS", (float)ELAPSED_NS(start,stop)/1e9);
      hputr4(st.buf, "BDAMBPS", (float)(total_baselines*N_CHAN_PER_X*N_STOKES*8*1e3)/ELAPSED_NS(start,stop));
      hashpipe_status_unlock_safe(&st);
