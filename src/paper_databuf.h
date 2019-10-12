@@ -273,8 +273,8 @@ typedef struct hera_bda_header{
   uint64_t datsize;               // size of buffer (from no. baselines)
   int sample;
   uint64_t baselines;
-  int *ant_pair_0;
-  int *ant_pair_1; 
+  uint16_t *ant_pair_0;
+  uint16_t *ant_pair_1; 
 } hera_bda_header_t;
 
 typedef uint8_t hera_bda_header_cache_alignment[
