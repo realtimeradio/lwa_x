@@ -274,7 +274,8 @@ typedef struct hera_bda_header{
   int sample;
   uint64_t baselines;
   uint16_t *ant_pair_0;
-  uint16_t *ant_pair_1; 
+  uint16_t *ant_pair_1;
+  uint32_t *bcnt; 
 } hera_bda_header_t;
 
 typedef uint8_t hera_bda_header_cache_alignment[
