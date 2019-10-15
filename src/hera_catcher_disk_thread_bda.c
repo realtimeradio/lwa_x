@@ -352,7 +352,7 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
 }
 
 
-static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, uint64_t file_nblts, uint64_t file_nts) {
+static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, uint64_t file_nblts) {
     hid_t dataset_id;
     dataset_id = H5Dopen(id->extra_keywords_gid, "stopt", H5P_DEFAULT);
     H5Dwrite(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_stop_t);
@@ -362,9 +362,6 @@ static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, 
     H5Dclose(dataset_id);
     dataset_id = H5Dopen(id->header_gid, "Nblts", H5P_DEFAULT);
     H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_nblts);
-    H5Dclose(dataset_id);
-    dataset_id = H5Dopen(id->header_gid, "Ntimes", H5P_DEFAULT);
-    H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_nts);
     H5Dclose(dataset_id);
     // Close datasets
     if (H5Dclose(id->visdata_did) < 0) {
@@ -712,8 +709,8 @@ static void *run(hashpipe_thread_args_t * args)
     int rv;
     int curblock_in=0;
     int curblock_out = 0;
-    float file_start_t, file_stop_t, file_duration; // time from bcnt
-    int64_t file_obs_id, file_nblts=0, file_nts=0;
+    double file_start_t, file_stop_t, file_duration; // time from bcnt
+    int64_t file_obs_id, file_nblts=0;
     int32_t curr_file_bcnt = -1;
     uint32_t bctr, strt_bcnt, stop_bcnt, break_bcnt;        // bcnt variable
     int i,b;
@@ -743,11 +740,11 @@ static void *run(hashpipe_thread_args_t * args)
     int *ant_1_array             =    (int *)malloc(1 * sizeof(int));
 
     // Allocate an array of bools for flags and n_samples
-    hbool_t *flags = (hbool_t *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED * sizeof(hbool_t));
-    uint32_t *nsamples = (uint32_t *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED * sizeof(uint32_t));
+    hbool_t *flags     = (hbool_t *) malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * sizeof(hbool_t));
+    uint32_t *nsamples = (uint32_t *)malloc(N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * sizeof(uint32_t));
 
-    memset(flags,    1, N_BL_PER_WRITE * N_CHAN_PROCESSED * sizeof(hbool_t));
-    memset(nsamples, 0, N_BL_PER_WRITE * N_CHAN_PROCESSED * sizeof(uint32_t));
+    memset(flags,    1, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * sizeof(hbool_t));
+    memset(nsamples, 0, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * sizeof(uint32_t));
 
     // Define memory space of a block
     hsize_t dims[N_DATA_DIMS] = {N_BL_PER_WRITE, 1, N_CHAN_PROCESSED, N_STOKES};
@@ -1012,12 +1009,12 @@ static void *run(hashpipe_thread_args_t * args)
                  fprintf(stdout, "Closing datasets and files\n");
                  write_header(&sum_file, time_array_buf, ant_0_array, ant_1_array);
                  close_filespaces(&sum_file);
-                 close_file(&sum_file, file_stop_t, file_duration, file_nblts, file_nts);
+                 close_file(&sum_file, file_stop_t, file_duration, file_nblts);
 
                  #ifndef SKIP_DIFF 
                  write_header(&diff_file, time_array_buf, ant_0_array, ant_1_array);
                  close_filespaces(&diff_file);
-                 close_file(&diff_file, file_stop_t, file_duration, file_nblts, file_nts);
+                 close_file(&diff_file, file_stop_t, file_duration, file_nblts);
                  #endif
 
                  file_cnt += 1;
@@ -1046,7 +1043,6 @@ static void *run(hashpipe_thread_args_t * args)
              fprintf(stdout, "Init arrays\n");
 
              file_nblts = 0;
-             file_nts = 0;
              memset(ant_0_array,          0, bcnts_per_file * sizeof(uint16_t));
              memset(ant_1_array,          0, bcnts_per_file * sizeof(uint16_t));
              memset(time_array_buf,       0, bcnts_per_file * sizeof(double));
