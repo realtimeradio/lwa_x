@@ -138,13 +138,6 @@ def create_header(h5, config, use_cm=False, use_redis=False):
     baselines = []
     integration_time = []
 
-    #for time_ctr in range(1,9,1):
-    #    for i,t in enumerate(config[:,2]):
-    #        if (t==0): continue
-    #        elif not (time_ctr % t):
-    #            baselines.append((config[i,0], config[i,1]))
-    #            integration_time.append(t * 2)
-
     for i,t in enumerate(config[:,2]):
         if (t!=0):
            baselines.append([(config[i,0], config[i,1])]*(8//t))
@@ -182,11 +175,12 @@ def create_header(h5, config, use_cm=False, use_redis=False):
     if use_redis:
         r = redis.Redis("redishost")
         fenginfo = r.hgetall("init_configuration")
-        corr_to_hera_map = get_corr_to_hera_map(r, nants_data=NANTS_DATA, nants=NANTS)
-        for n in range(baselines.shape[0]):
-            baselines[n] = [corr_to_hera_map[baselines[n,0]], corr_to_hera_map[baselines[n,1]]]
-        ant_1_array = np.array([x for (x,y) in baselines])
-        ant_2_array = np.array([y for (x,y) in baselines])
+        corr_to_hera_map = get_corr_to_hera_map(r, nants_data=192, nants=192)
+        # Baselines in the config file are already in hera antenna numbers
+        #for n in range(baselines.shape[0]):
+        #    baselines[n] = [corr_to_hera_map[baselines[n,0]], corr_to_hera_map[baselines[n,1]]]
+        #ant_1_array = np.array([x for (x,y) in baselines])
+        #ant_2_array = np.array([y for (x,y) in baselines])
 
     else:
         fenginfo = None
