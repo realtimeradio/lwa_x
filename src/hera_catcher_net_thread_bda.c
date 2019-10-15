@@ -223,7 +223,7 @@ static inline uint32_t process_packet(
     fprintf(stderr,"Initializing binfo..!\n");
     initialize_block_info(&binfo);
 
-    first_bcnt = pkt_bcnt;
+    first_bcnt = 0; //pkt_bcnt;
     binfo.bcnt_start = pkt_bcnt;
 
     fprintf(stderr,"Initializing the first blocks..\n");
