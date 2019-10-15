@@ -35,6 +35,7 @@ typedef struct {
     uint32_t baselines;
     uint16_t *ant_pair_0;
     uint16_t *ant_pair_1;
+    uint32_t *bcnt;
 } bda_info_t;
 
 static XGPUInfo xgpu_info;
@@ -181,6 +182,7 @@ static int init_bda_info(bda_info_t *binfo, char *config_fname){
    FILE *fp;
    int j, a0, a1, inttime, bin;
    uint32_t blctr[] = {0,0,0,0,0};
+   uint32_t bctr = 0;
 
    if((fp=fopen(config_fname,"r")) == NULL){
       printf("Cannot open the configuration file.\n");
@@ -195,27 +197,24 @@ static int init_bda_info(bda_info_t *binfo, char *config_fname){
       blctr[LOG(inttime)]+=1;
    }
 
-   // Config file should contain auto-corrs as well.
-   //blctr[0] += N_ANTS;
-
    for(j=0; j<N_BDABUF_BINS; j++){ 
      binfo[j].baselines = blctr[j];
      blctr[j] = 0;
    }
-   binfo[N_BDABUF_BINS-1].baselines += blctr[N_BDABUF_BINS]; // 32sec considered as 16sec integration
 
    // malloc for storing ant pairs
    for(j=0; j<N_BDABUF_BINS; j++){
      binfo[j].ant_pair_0 = (uint16_t *)malloc(binfo[j].baselines * sizeof(uint16_t));
      binfo[j].ant_pair_1 = (uint16_t *)malloc(binfo[j].baselines * sizeof(uint16_t));
+     binfo[j].bcnt       = (uint32_t *)malloc(binfo[j].baselines * sizeof(uint32_t));
    }
    rewind(fp); //re-read antpairs to store them
    while(fscanf(fp, "%d %d %d", &a0, &a1, &inttime)!=EOF){
      if (inttime == 0) continue;
      bin = LOG(inttime); 
-     if(bin>=N_BDABUF_BINS) bin=N_BDABUF_BINS-1;
      binfo[bin].ant_pair_0[blctr[bin]] = a0;
-     binfo[bin].ant_pair_1[blctr[bin]++] = a1;
+     binfo[bin].ant_pair_1[blctr[bin]] = a1;
+     binfo[bin].bcnt[blctr[bin]++]     = bctr++;
    }
    fclose(fp);
 
@@ -232,6 +231,7 @@ static int init_bda_block_header(hera_bda_block_t *bdablk){
      for(i=0; i<binfo[j].baselines; i++){
        bdablk->header[j].ant_pair_0[i] = binfo[j].ant_pair_0[i];
        bdablk->header[j].ant_pair_1[i] = binfo[j].ant_pair_1[i];
+       bdablk->header[j].bcnt[i]       = binfo[j].bcnt[i];
      }
      bdablk->header[j].sample = 0;
      bdablk->header[j].datsize = N_MAX_INTTIME/(1<<j) * bdablk->header[j].baselines * N_COMPLEX_PER_BASELINE * 2 * sizeof(uint32_t);
@@ -310,6 +310,7 @@ static void *run(hashpipe_thread_args_t * args)
        buf = &(odb->block[blk_id]);
        buf->header[j].ant_pair_0 = (uint16_t *) malloc(binfo[j].baselines * sizeof(uint16_t));
        buf->header[j].ant_pair_1 = (uint16_t *) malloc(binfo[j].baselines * sizeof(uint16_t));
+       buf->header[j].bcnt       = (uint32_t *) malloc(binfo[j].baselines * sizeof(uint32_t));
      }
      
      init_bda_block_header(buf);
@@ -355,9 +356,6 @@ static void *run(hashpipe_thread_args_t * args)
 
    while (run_threads()) {
 
-     // Note waiting status,
-     // query integrating status
-     // and, if armed, start count
      hashpipe_status_lock_safe(&st);
      hputs(st.buf, status_key, "waiting");
      hashpipe_status_unlock_safe(&st);
@@ -378,6 +376,9 @@ static void *run(hashpipe_thread_args_t * args)
      }
 
      // Got a new block. Decide what to do with it.
+     // Note waiting status,
+     // query integrating status
+     // and, if armed, start count
      hashpipe_status_lock_safe(&st);
      hputi4(st.buf, "BDABLKIN", curblock_in);
      hputu8(st.buf, "BDAMCNT", idb->block[curblock_in].header.mcnt);
@@ -460,6 +461,11 @@ static void *run(hashpipe_thread_args_t * args)
          ant0 = buf->header[j].ant_pair_0[bl]; 
          ant1 = buf->header[j].ant_pair_1[bl];
          idx_baseline = casper_index(2*ant0, 2*ant1, N_INPUTS); 
+
+         // offset all bcnts by the sample currently being processed. 
+         // This ensures that bcnt is always increasing while the 
+         // correlator is running. It also ties bcnt to mcnt.
+         buf->header[j].bcnt[bl] += (sample/N_MAX_INTTIME)*total_baselines;
 
          for(pol=0; pol<N_STOKES; pol++){
            idx_regtile = idx_map[idx_baseline/2 + pol]; 

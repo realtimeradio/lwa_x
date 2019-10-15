@@ -198,7 +198,6 @@ static void *run(hashpipe_thread_args_t * args)
    struct timespec pkt_start, pkt_stop;
    int offset = 0;
    uint16_t ant0, ant1;
-   int baseline_id = 0;
    hera_bda_block_t *buf;
    unsigned int n_samples;
    uint64_t datoffset;
@@ -231,7 +230,7 @@ static void *run(hashpipe_thread_args_t * args)
      hashpipe_status_lock_safe(&st);
      hputs(st.buf, status_key, "processing");
      hputi4(st.buf, "OUTBLKIN", block_idx);
-     hputu4(st.buf, "OUTBCNT",  baseline_id);
+     hputu4(st.buf, "OUTBCNT",  db->block[block_idx].header[0].bcnt[0]);
      hashpipe_status_unlock_safe(&st);
      
      buf = &(db->block[block_idx]); 
@@ -255,7 +254,7 @@ static void *run(hashpipe_thread_args_t * args)
 
            for(i=0; i<n_samples; i++){ // Number of time samples of one baseline
 
-             pkt.hdr.baseline_id = BASELINE_ID(baseline_id++); //free running cntr like mcnt
+             pkt.hdr.baseline_id = BASELINE_ID(buf->header[j].bcnt[i]); //free running cntr like mcnt
              pkt.hdr.timestamp = TIMESTAMP(buf->header[j].mcnt[i]);
              offset = 0;
            
