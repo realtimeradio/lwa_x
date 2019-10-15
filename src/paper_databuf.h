@@ -257,21 +257,19 @@ typedef struct paper_output_databuf {
 
 #define N_BASELINES               (N_ANTS * (N_ANTS + 1)/2)
 #define N_COMPLEX_PER_BASELINE    (N_STOKES * N_CHAN_PER_X)
-//#define N_BLTS_BDA                (8*387 + 4*1533 + 2*7168 + 21571 + 30768) // (((N_ANTS-2)*(N_ANTS-1)/2) + 2)
 
 #define N_BDABUF_BLOCKS 2
 #define N_BDABUF_BINS   4
 #define N_MAX_INTTIME   8  // The longest baselines are collected for 8 time samples
 
 // integration bin indexing
-#define hera_bda_buf_data_idx(l, s, b, c, p) \
-  ((((l)*(b)*N_CHAN_PER_X*N_STOKES)+((s)*N_CHAN_PER_X*N_STOKES)+((c)*N_STOKES)+(p))*2)
+#define hera_bda_buf_data_idx(o, c, p) \
+  ((((o)*N_CHAN_PER_X*N_STOKES)+((c)*N_STOKES)+(p))*2)
 
 
 typedef struct hera_bda_header{
   uint64_t mcnt[8];               // mcnt of the first time sample in the data
   uint64_t datsize;               // size of buffer (from no. baselines)
-  int sample;
   uint64_t baselines;
   uint16_t *ant_pair_0;
   uint16_t *ant_pair_1;

@@ -254,7 +254,7 @@ static void *run(hashpipe_thread_args_t * args)
 
            for(i=0; i<n_samples; i++){ // Number of time samples of one baseline
 
-             pkt.hdr.baseline_id = BASELINE_ID(buf->header[j].bcnt[i]); //free running cntr like mcnt
+             pkt.hdr.baseline_id = BASELINE_ID(buf->header[j].bcnt[bl*n_samples + i]);
              pkt.hdr.timestamp = TIMESTAMP(buf->header[j].mcnt[i]);
              offset = 0;
            
@@ -263,7 +263,7 @@ static void *run(hashpipe_thread_args_t * args)
                pkt.hdr.offset = OFFSET(offset);
                //datoffset = 0;
                // hera_bda_buf_data_idx(l,s,b,c,p)
-               datoffset = hera_bda_buf_data_idx(n_samples, i, bl, chan, 0);
+               datoffset = hera_bda_buf_data_idx((bl*n_samples + i), chan, 0);
                for(p=0; p<OUTPUT_BYTES_PER_PACKET/sizeof(pktdata_t); p++){
                  *p_out++ = CONVERT(buf->data[j][datoffset+p]);
                }

@@ -32,7 +32,8 @@
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
 
 typedef struct {
-    uint32_t baselines;
+    uint32_t baselines;   // Num baselines in bin
+    uint16_t samp_in_bin; // Num samples per baseline
     uint16_t *ant_pair_0;
     uint16_t *ant_pair_1;
     uint32_t *bcnt;
@@ -174,13 +175,13 @@ static int init_idx_map()
 static uint64_t get_sample_from_mcnt(uint64_t curr_mcnt, uint64_t start_bda_mcnt, 
                                      int int_count){
    uint64_t sample = (curr_mcnt - start_bda_mcnt) / (TIME_DEMUX * int_count);
-   fprintf(stderr, "curr: %ld, start: %ld, acclen:%d, sample: %ld\n", curr_mcnt, start_bda_mcnt, int_count, sample);
+   //fprintf(stderr, "curr: %ld, start: %ld, acclen:%d, sample: %ld\n", curr_mcnt, start_bda_mcnt, int_count, sample);
    return sample; 
 }
 
 static int init_bda_info(bda_info_t *binfo, char *config_fname){
    FILE *fp;
-   int j, a0, a1, inttime, bin;
+   int i,j,k, a0, a1, inttime, bin;
    uint32_t blctr[] = {0,0,0,0,0};
    uint32_t bctr = 0;
 
@@ -199,42 +200,64 @@ static int init_bda_info(bda_info_t *binfo, char *config_fname){
 
    for(j=0; j<N_BDABUF_BINS; j++){ 
      binfo[j].baselines = blctr[j];
+     binfo[j].samp_in_bin = N_MAX_INTTIME/(1<<j);
      blctr[j] = 0;
    }
 
-   // malloc for storing ant pairs
+   // malloc for storing ant pairs and bcnt values
    for(j=0; j<N_BDABUF_BINS; j++){
      binfo[j].ant_pair_0 = (uint16_t *)malloc(binfo[j].baselines * sizeof(uint16_t));
      binfo[j].ant_pair_1 = (uint16_t *)malloc(binfo[j].baselines * sizeof(uint16_t));
-     binfo[j].bcnt       = (uint32_t *)malloc(binfo[j].baselines * sizeof(uint32_t));
+     binfo[j].bcnt       = (uint32_t *)malloc(binfo[j].baselines * binfo[j].samp_in_bin * sizeof(uint32_t));
    }
    rewind(fp); //re-read antpairs to store them
    while(fscanf(fp, "%d %d %d", &a0, &a1, &inttime)!=EOF){
      if (inttime == 0) continue;
      bin = LOG(inttime); 
      binfo[bin].ant_pair_0[blctr[bin]] = a0;
-     binfo[bin].ant_pair_1[blctr[bin]] = a1;
-     binfo[bin].bcnt[blctr[bin]++]     = bctr++;
+     binfo[bin].ant_pair_1[blctr[bin]++] = a1;
    }
    fclose(fp);
+
+   // Init the bcnt values (just an incremental counter)
+   for(j=0; j<N_BDABUF_BINS; j++){
+     for(i=0; i<binfo[j].baselines; i++){
+       for(k=0; k<binfo[j].samp_in_bin; k++){
+         binfo[j].bcnt[i*binfo[j].samp_in_bin + k] = bctr++;
+       }
+     }
+   }
 
    // Success!   
    return 0; 
 } 
 
 /* Initialize the header with config params in binfo */
-static int init_bda_block_header(hera_bda_block_t *bdablk){
+static int init_bda_block_header(hera_bda_block_t *bdablk, int bcnt_offset){
    int i,j;
 
    for(j=0; j<N_BDABUF_BINS; j++){
      bdablk->header[j].baselines = binfo[j].baselines;
-     for(i=0; i<binfo[j].baselines; i++){
-       bdablk->header[j].ant_pair_0[i] = binfo[j].ant_pair_0[i];
-       bdablk->header[j].ant_pair_1[i] = binfo[j].ant_pair_1[i];
-       bdablk->header[j].bcnt[i]       = binfo[j].bcnt[i];
+     memcpy(bdablk->header[j].ant_pair_0, binfo[j].ant_pair_0, binfo[j].baselines * sizeof(uint16_t));
+     memcpy(bdablk->header[j].ant_pair_1, binfo[j].ant_pair_1, binfo[j].baselines * sizeof(uint16_t));
+     memcpy(bdablk->header[j].bcnt, binfo[j].bcnt, binfo[j].baselines * binfo[j].samp_in_bin * sizeof(uint32_t));
+     bdablk->header[j].datsize = binfo[j].samp_in_bin*binfo[j].baselines * N_COMPLEX_PER_BASELINE * 2 * sizeof(uint32_t);
+
+     // offset all bcnts by the sample currently being processed. 
+     // This ensures that bcnt is always increasing while the 
+     // correlator is running. It also ties bcnt to mcnt.
+     for(i=0; i< binfo[j].baselines*binfo[j].samp_in_bin; i++){
+       bdablk->header[j].bcnt[i] += bcnt_offset;
      }
-     bdablk->header[j].sample = 0;
-     bdablk->header[j].datsize = N_MAX_INTTIME/(1<<j) * bdablk->header[j].baselines * N_COMPLEX_PER_BASELINE * 2 * sizeof(uint32_t);
+
+     //for(i=0; i<binfo[j].baselines; i++){
+     //  bdablk->header[j].ant_pair_0[i] = binfo[j].ant_pair_0[i];
+     //  bdablk->header[j].ant_pair_1[i] = binfo[j].ant_pair_1[i];
+
+     //  for(k=0; k<binfo[j].samp_in_bin; k++){
+     //    bdablk->header[j].bcnt[i*binfo[j].samp_in_bin + k] = binfo[j].bcnt[i*binfo[j].samp_in_bin+k] + bcnt_offset;
+     //  }
+     //}
    }
  
    return 0; 
@@ -291,18 +314,29 @@ static void *run(hashpipe_thread_args_t * args)
    // Initialize binfo with config file params
    init_bda_info(binfo, config_fname); 
 
+   int j;
+   uint64_t total_baselines = 0;
+   for(j=0; j<N_BDABUF_BINS;j++)
+      total_baselines += binfo[j].samp_in_bin * binfo[j].baselines; 
+
+#ifdef PRINT_TEST
+   fprintf(stderr,"N_ANTS:%d\n", N_ANTS);
+   fprintf(stderr,"Number of channels per X-Eng: %d\n",N_CHAN_PER_X);
+   fprintf(stderr,"Number of BCNTS in a buffer: %ld\n", total_baselines);
+#endif
+
    // Write the number of baselines per integration
    // bin to redis for downstream stuff
    hashpipe_status_lock_safe(&st);
-   hputu8(st.buf,"NBL2SEC",binfo[0].baselines);
-   hputu8(st.buf,"NBL4SEC",binfo[1].baselines);
-   hputu8(st.buf,"NBL8SEC",binfo[2].baselines);
-   hputu8(st.buf,"NBL16SEC",binfo[3].baselines);
+   hputu8(st.buf, "NBL2SEC", binfo[0].baselines);
+   hputu8(st.buf, "NBL4SEC", binfo[1].baselines);
+   hputu8(st.buf, "NBL8SEC", binfo[2].baselines);
+   hputu8(st.buf, "NBL16SEC",binfo[3].baselines);
    hputu4(st.buf, "BDASAMP", 0);
    hashpipe_status_unlock_safe(&st);
 
    // Allocate memory to the output data blocks based on the config file
-   int blk_id,j;
+   int blk_id;
    hera_bda_block_t *buf;   
 
    for(blk_id=0; blk_id < odb->header.n_block; blk_id++){
@@ -310,10 +344,10 @@ static void *run(hashpipe_thread_args_t * args)
        buf = &(odb->block[blk_id]);
        buf->header[j].ant_pair_0 = (uint16_t *) malloc(binfo[j].baselines * sizeof(uint16_t));
        buf->header[j].ant_pair_1 = (uint16_t *) malloc(binfo[j].baselines * sizeof(uint16_t));
-       buf->header[j].bcnt       = (uint32_t *) malloc(binfo[j].baselines * sizeof(uint32_t));
+       buf->header[j].bcnt       = (uint32_t *) malloc(binfo[j].baselines * binfo[j].samp_in_bin * sizeof(uint32_t));
      }
      
-     init_bda_block_header(buf);
+     init_bda_block_header(buf, 0);
 
      for(j=0; j<N_BDABUF_BINS; j++){
        buf->data[j] = malloc(buf->header[j].datsize);
@@ -327,7 +361,6 @@ static void *run(hashpipe_thread_args_t * args)
 
    /* Main loop */
    int rv;
-   uint64_t total_baselines = 0;
    int curblock_in = 0;
    int curblock_out = 0;
    struct timespec start, stop;
@@ -343,16 +376,7 @@ static void *run(hashpipe_thread_args_t * args)
    int int_count; // number of mcnts integrated in GPU
    uint64_t start_bda_mcount; // mcount to start BD integration 
    uint64_t sample = 0;
-   uint16_t sample_loc;
-
-   for(j=0; j<N_BDABUF_BINS;j++)
-      total_baselines += N_MAX_INTTIME/(1<<j) * binfo[j].baselines; 
-
-#ifdef PRINT_TEST
-   fprintf(stderr,"Number of antennas:%d\n",N_ANTS);
-   fprintf(stderr,"Number of channels per X-Eng: %d\n",N_CHAN_PER_X);
-   fprintf(stderr,"Number of baselines stored in a buffer: %ld\n", total_baselines);
-#endif
+   int sample_loc, bl_samp_loc;
 
    while (run_threads()) {
 
@@ -430,10 +454,11 @@ static void *run(hashpipe_thread_args_t * args)
             }
         }
         // Init header of newly acquired block
-        init_bda_block_header(&(odb->block[curblock_out]));
+        init_bda_block_header(&(odb->block[curblock_out]), (sample/N_MAX_INTTIME)*total_baselines);
         for(j=0; j<N_BDABUF_BINS; j++){ 
           memset(odb->block[curblock_out].data[j], 0, odb->block[curblock_out].header[j].datsize);
         }
+        buf = &(odb->block[curblock_out]); 
      }
 
      // Note processing status, current input block
@@ -447,13 +472,13 @@ static void *run(hashpipe_thread_args_t * args)
 
      /* Perform the baseline dependent averaging  */
 
-     buf = &(odb->block[curblock_out]); 
      int32_t *pf_re  = idb->block[curblock_in].data;
      int32_t *pf_im  = idb->block[curblock_in].data + xgpu_info.matLength;
       
      for(j=0; j<N_BDABUF_BINS; j++){ //intbuf loop
 
-       sample_loc = (sample/(1<<j))%(N_MAX_INTTIME/(1<<j));
+       // Location of this sample within the bin: sample_loc
+       sample_loc = (sample/(1<<j)) % binfo[j].samp_in_bin;
        buf->header[j].mcnt[sample_loc] = idb->block[curblock_in].header.mcnt;
           
        for(bl=0; bl< buf->header[j].baselines; bl++){
@@ -462,10 +487,10 @@ static void *run(hashpipe_thread_args_t * args)
          ant1 = buf->header[j].ant_pair_1[bl];
          idx_baseline = casper_index(2*ant0, 2*ant1, N_INPUTS); 
 
-         // offset all bcnts by the sample currently being processed. 
-         // This ensures that bcnt is always increasing while the 
-         // correlator is running. It also ties bcnt to mcnt.
-         buf->header[j].bcnt[bl] += (sample/N_MAX_INTTIME)*total_baselines;
+         // baseline dependent offset of this sample
+         bl_samp_loc = bl*binfo[j].samp_in_bin + sample_loc;
+
+         //fprintf(stderr, "blk:%d\tant0:%d\tant1:%d\tbcnt:%d\n",curblock_out,ant0,ant1,buf->header[j].bcnt[bl_samp_loc]);
 
          for(pol=0; pol<N_STOKES; pol++){
            idx_regtile = idx_map[idx_baseline/2 + pol]; 
@@ -474,7 +499,7 @@ static void *run(hashpipe_thread_args_t * args)
              gpu_chan = casper_chan;
              re = pf_re[(gpu_chan*REGTILE_CHAN_LENGTH)+idx_regtile];
              im = pf_im[(gpu_chan*REGTILE_CHAN_LENGTH)+idx_regtile];
-             datoffset = hera_bda_buf_data_idx(N_MAX_INTTIME/(1<<j), sample_loc, bl, gpu_chan, pol);
+             datoffset = hera_bda_buf_data_idx(bl_samp_loc, gpu_chan, pol);
              buf->data[j][datoffset] += re;
              buf->data[j][datoffset+1] += -im;
            }
@@ -494,7 +519,7 @@ static void *run(hashpipe_thread_args_t * args)
      paper_output_databuf_set_free(idb, curblock_in);
      curblock_in = (curblock_in + 1) % idb->header.n_block;
 
-     if(sample%N_MAX_INTTIME == 0){
+     if(sample%N_MAX_INTTIME == N_MAX_INTTIME-1){
        // Mark output databuf as filled as advance
        hera_bda_databuf_set_filled(odb, curblock_out);
        curblock_out = (curblock_out + 1) % odb->header.n_block;
