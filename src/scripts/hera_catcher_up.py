@@ -71,7 +71,7 @@ if args.bda:
     print 'Create configuration file'
     p = subprocess.Popen(bda_config_cmd + ['-c', '-r', '/tmp/bdaconfig.txt'])
     p.wait()
-    #run_on_hosts([args.host], python_source_cmd + [';'] + bda_config_cmd + ['-c','-r', args.bdaconfig], wait=True)
+    run_on_hosts([args.host], python_source_cmd + [';'] + bda_config_cmd + ['-c','-r', '/tmp/bdaconfig.txt'], wait=True)
     time.sleep(10)
 
 # Generate the meta-data template
