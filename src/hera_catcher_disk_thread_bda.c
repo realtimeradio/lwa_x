@@ -347,8 +347,6 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/startt");
     }
-
-    fprintf(stdout, "Finshed opening file!\n");
 }
 
 
@@ -430,8 +428,6 @@ static void get_corr_to_hera_map(hdf5_id_t *id, int *corr_to_hera_map) {
 /* Get the integration time for each baseline from header (set by config file) */
 static void get_integration_time(hdf5_id_t *id, double *integration_time_buf) {
 
-    fprintf(stdout,"Getting integration time\n");
-
     hid_t dataset_id;
     herr_t status;
     dataset_id = H5Dopen(id->header_gid, "integration_time", H5P_DEFAULT);
@@ -448,8 +444,6 @@ static void get_integration_time(hdf5_id_t *id, double *integration_time_buf) {
     if (status < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close Header/integration_time dataset");
     }
-
-    fprintf(stdout, "Returning integration time\n");
 }
 
 /*
@@ -537,9 +531,6 @@ static void write_header(hdf5_id_t *id, double *time_array_buf, int *ant_0_array
    if (H5Dwrite(id->ant_2_array_did, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, ant_1_array) < 0) {
        hashpipe_error(__FUNCTION__, "Error writing ant_2_array");
    }
-
-   fprintf(stdout, "Finished writing header\n");
-
 }
 
 // Get the even-sample / first-pol / first-complexity of the correlation buffer for chan `c` baseline `b`
@@ -908,6 +899,7 @@ static void *run(hashpipe_thread_args_t * args)
              // If there is a file already open...
              // Copy all contents
              if (curr_file_bcnt >= 0){
+
                 file_offset = strt_bcnt - curr_file_bcnt;
 
                 clock_gettime(CLOCK_MONOTONIC, &w_start);
@@ -955,6 +947,9 @@ static void *run(hashpipe_thread_args_t * args)
              // If there is an open file, copy the relevant part of the block 
              // and close the file. Open a new file for the rest of the block.
              if (curr_file_bcnt >=0){
+
+                 //fprintf(stdout,"Copying to an existing file from %d:%d\n",strt_bcnt,break_bcnt);
+
                  // copy data
                  nbls = break_bcnt - strt_bcnt;
                  
@@ -1001,12 +996,14 @@ static void *run(hashpipe_thread_args_t * args)
                     min_w_ns = MIN(w_ns, min_w_ns);
                     max_w_ns = MAX(w_ns, max_w_ns);
                  }
+
                  // finish meta data and close the file
-                 gps_time = mcnt2time(break_bcnt, sync_time_ms);
+                 gps_time = mcnt2time(header.mcnt[bctr+nbls], sync_time_ms);
                  file_stop_t = gps_time;
                  file_duration = file_stop_t - file_start_t;
 
-                 fprintf(stdout, "Closing datasets and files\n");
+                 //fprintf(stdout,"Closing the file at time: %f\n", file_stop_t);
+
                  write_header(&sum_file, time_array_buf, ant_0_array, ant_1_array);
                  close_filespaces(&sum_file);
                  close_file(&sum_file, file_stop_t, file_duration, file_nblts);
@@ -1040,7 +1037,7 @@ static void *run(hashpipe_thread_args_t * args)
              // Open new sum and difference files
              // Init all counters to zero
 
-             fprintf(stdout, "Init arrays\n");
+             //fprintf(stdout,"Opening new file from %d:%d\n",break_bcnt,stop_bcnt);
 
              file_nblts = 0;
              memset(ant_0_array,          0, bcnts_per_file * sizeof(uint16_t));
@@ -1065,6 +1062,8 @@ static void *run(hashpipe_thread_args_t * args)
                fprintf(stdout, "Opening new file %s\n", hdf5_fname);
                start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
              #endif
+
+             //fprintf(stderr,"File start time: %f\n", file_start_t);
 
              // Get the antenna positions and baseline orders
              // These are needed for populating the ant_[1|2]_array and uvw_array
@@ -1124,9 +1123,7 @@ static void *run(hashpipe_thread_args_t * args)
 
         /* Copy auto correlations to autocorr buffer */
 
-        fprintf (stderr, "Processing auto correlations\n");
         if (auto_ants_filled == 0){
-           fprintf(stderr, "Waiting for a free databuf\n");
            // Wait for next buffer to get free
            while ((rv= hera_catcher_autocorr_databuf_wait_free(db_out, curblock_out)) != HASHPIPE_OK) {
                if (rv==HASHPIPE_TIMEOUT) {
@@ -1157,11 +1154,9 @@ static void *run(hashpipe_thread_args_t * args)
             } 
         }
 
-        fprintf(stderr, "Autocorr: ants filled: %d\n", auto_ants_filled);
         // If you have autocorrs of all antennas
         // Mark output block as full and advance
         if (auto_ants_filled == Nants){
-           fprintf(stderr, "Marking autocorr databuf filled..");
            // Update databuf headers
            db_out->block[curblock_out].header.num_ants = Nants;
            db_out->block[curblock_out].header.julian_time = compute_jd_from_mcnt(header.mcnt[bctr-1], sync_time_ms, 2);
