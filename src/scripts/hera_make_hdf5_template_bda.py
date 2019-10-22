@@ -195,7 +195,9 @@ def create_header(h5, config, use_cm=False, use_redis=False):
     header.create_dataset("Nfreqs", dtype="<i8", data=NCHANS)
     header.create_dataset("Npols",  dtype="<i8", data=4)
     header.create_dataset("Nspws",  dtype="<i8", data=1)
-    header.create_dataset("Ntimes", dtype="<i8", data=n_bls) 
+    # For BDA, Ntimes needs to be n_bls long
+    #header.create_dataset("Ntimes", dtype="<i8", data=n_bls) 
+    header.create_dataset("Ntimes", dtype="<i8", data=8)
     header.create_dataset("corr_bl_order", dtype="<i8", data=np.array(baselines))
     header.create_dataset("corr_to_hera_map", dtype="<i8", data=np.array(corr_to_hera_map))
     header.create_dataset("ant_1_array_conf", dtype="<i8", data=ant_1_array)
@@ -247,7 +249,7 @@ def create_header(h5, config, use_cm=False, use_redis=False):
         header.create_dataset("longitude",   dtype="<f8", data=0.0)
 
     # lst_array needs populating by receiver. Should be center of integrations in radians
-    header.create_dataset("lst_array",   dtype="<f8", data=np.zeros(n_bls))
+    #header.create_dataset("lst_array",   dtype="<f8", data=np.zeros(n_bls))
     # time_array needs populating by receiver (should be center of integrations in JD)
     #header.create_dataset("time_array", dtype="<f8", data=np.zeros(n_bls * NTIMES))
     # uvw_needs populating by receiver: uvw = xyz(ant2) - xyz(ant1). Units, metres.
