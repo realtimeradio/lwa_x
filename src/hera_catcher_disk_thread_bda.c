@@ -480,12 +480,11 @@ static void write_baseline_index(hdf5_id_t *id, hsize_t bcnt, hsize_t nblts, hid
     hsize_t start[N_DATA_DIMS] = {bcnt, 0, 0, 0};
     hsize_t count[N_DATA_DIMS] = {nblts, 1, N_CHAN_PROCESSED, N_STOKES};
 
-    //H5Sselect_hyperslab(id->visdata_fs, H5S_SELECT_SET, start, NULL, count, NULL);
-    //H5Dwrite(id->visdata_did, complex_id, mem_space, id->visdata_fs, H5P_DEFAULT, visdata_buf);
+    fprintf(stderr,"Start: %lld\t Nbls: %lld\n", bcnt, nblts);
 
     // Data
     if (H5Sselect_hyperslab(id->visdata_fs, H5S_SELECT_SET, start, NULL, count, NULL) <0){
-       hashpipe_error(__FUNCTION__, "Error selecting data hyperslab");
+       hashpipe_error(__FUNCTION__, "Error selecting data hyperslab from: %d to %d", bcnt, nblts);
     }
     if (H5Dwrite(id->visdata_did, complex_id, mem_space, id->visdata_fs, H5P_DEFAULT, visdata_buf) <0){
        hashpipe_error(__FUNCTION__, "Error writing data to file");
@@ -939,7 +938,7 @@ static void *run(hashpipe_thread_args_t * args)
              } else {
                  break_bcnt = ((strt_bcnt / bcnts_per_file) + 1) * bcnts_per_file;
              }
-             fprintf(stdout, "Breaking at bcnt: %d\n", break_bcnt);
+             fprintf(stderr, "Breaking at bcnt: %d\n", break_bcnt);
              if (break_bcnt % bcnts_per_file) {
                 fprintf(stderr,"Something is wrong\n");
              }
@@ -1046,20 +1045,20 @@ static void *run(hashpipe_thread_args_t * args)
 
              curr_file_bcnt = break_bcnt;
              block_offset = bctr + break_bcnt - strt_bcnt;
-             fprintf(stdout, "Curr file bcnt: %d\n", curr_file_bcnt);
-             fprintf(stdout, "Curr file mcnt: %ld\n", header.mcnt[block_offset]);
+             fprintf(stderr, "Curr file bcnt: %d\n", curr_file_bcnt);
+             fprintf(stderr, "Curr file mcnt: %ld\n", header.mcnt[block_offset]);
              gps_time = mcnt2time(header.mcnt[block_offset], sync_time_ms);
              julian_time = 2440587.5 + (gps_time / (double)(86400.0)); 
              file_start_t = gps_time;
              file_obs_id = (int64_t)gps_time;
 
              sprintf(hdf5_fname, "zen.%7.5lf.uvh5", julian_time);
-             fprintf(stdout, "Opening new file %s\n", hdf5_fname);
+             fprintf(stderr, "Opening new file %s\n", hdf5_fname);
              start_file(&sum_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
 
              #ifndef SKIP_DIFF
                sprintf(hdf5_fname, "zen.%7.5lf.diff.uvh5", julian_time);
-               fprintf(stdout, "Opening new file %s\n", hdf5_fname);
+               fprintf(stderr, "Opening new file %s\n", hdf5_fname);
                start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
              #endif
 
