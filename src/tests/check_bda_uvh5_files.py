@@ -13,7 +13,7 @@ N_CHAN_TOTAL = 6144
 N_STOKES = 4
 NCHANS = 1536
 N_CHAN_CATCHER = 1536
-INTSPEC = 131072*2
+INTSPEC = 64*512*2
 
 def get_corr_to_hera_map(nants_data=192, nants=352):
     """
@@ -161,33 +161,41 @@ if args.paper_gpu and args.ramp:
 if args.fengine:
    print 'Checking data for SNAPS in test vec mode' 
 
+   factor = 16
+
+   uv = UVData()
+   uv.read(args.h5fname, run_check=False) #, read_data=False)
+
    cminfo = json.loads(fp['Header']['extra_keywords']['cminfo'].value) 
    ants = cminfo['antenna_numbers']
    out_map = get_corr_to_hera_map()
 
-   uv = UVData()
+   for a0, a1 in zip(uv.ant_1_array, uv.ant_2_array):
 
-   for a0, a1 in zip(ant_1_array[::2], ant_2_array[::2]):
+       #if(a0==a1):
 
-       if(a0==a1):
+       #print("({0:2d},{1:2d}) \t".format(a0,a1)),
+       #a0 = out_map[a0]; a1 = out_map[a1];
+       print("({0:2d},{1:2d}) \t".format(a0,a1)),
 
-          print("({0:2d},{1:2d}) \t".format(a0,a1)),
-          uv.read(args.h5fname, bls=[(a0, a1)], run_check_acceptability=False, run_check=False)
-          data = uv.get_data(a0, a1)
+       try:
+           data = uv.get_data(a1, a0)
+       except (ValueError):
+           print 'Antenna pair (%d,%d) has no data!!!'%(a0,a1)
+           continue
+  
 
-          a0 = out_map[a0]; a1 = out_map[a1];
-          print("({0:2d},{1:2d}) \t".format(a0,a1)),
-          loca0 = snap_pol_map[cminfo['correlator_inputs'][ants.index(a0)][0][:2]]
-          loca1 = snap_pol_map[cminfo['correlator_inputs'][ants.index(a1)][0][:2]]
+       loca0 = snap_pol_map[cminfo['correlator_inputs'][ants.index(a0)][0][:2]]
+       loca1 = snap_pol_map[cminfo['correlator_inputs'][ants.index(a1)][0][:2]]
    
-          tspec = gen_tvg_pol(loca0)*np.conj(gen_tvg_pol(loca1))
-          tspec = tspec[:N_CHAN_TOTAL]
-          #tspec = np.sum(tspec.reshape(-1,4),axis=1)[:NCHANS]
+       tspec = gen_tvg_pol(loca0)*np.conj(gen_tvg_pol(loca1))
+       #tspec = tspec[:N_CHAN_TOTAL]
+       tspec = np.sum(tspec.reshape(-1,4),axis=1)[:NCHANS]
 
-          print np.all(np.equal(tspec, data[0,:,0]//(4*INTSPEC))), '\t',
+       print np.all(np.equal(tspec, data[0,:,0]/(factor*INTSPEC))), '\t',
 
-          tspec = gen_tvg_pol(loca0 +1)*np.conj(gen_tvg_pol(loca1 +1))
-          tspec = tspec[:N_CHAN_TOTAL]
-          #tspec = np.sum(tspec.reshape(-1,4),axis=1)[:NCHANS]
+       tspec = gen_tvg_pol(loca0 +1)*np.conj(gen_tvg_pol(loca1 +1))
+       #tspec = tspec[:N_CHAN_TOTAL]
+       tspec = np.sum(tspec.reshape(-1,4),axis=1)[:NCHANS]
 
-          print np.all(np.equal(tspec, data[0,:,1]//(4*INTSPEC)))
+       print np.all(np.equal(tspec, data[0,:,1]/(factor*INTSPEC)))
