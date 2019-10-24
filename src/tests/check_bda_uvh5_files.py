@@ -164,7 +164,7 @@ if args.fengine:
    factor = 16
 
    uv = UVData()
-   uv.read(args.h5fname, run_check=False) #, read_data=False)
+   uv.read(args.h5fname) 
 
    cminfo = json.loads(fp['Header']['extra_keywords']['cminfo'].value) 
    ants = cminfo['antenna_numbers']
@@ -172,10 +172,6 @@ if args.fengine:
 
    for a0, a1 in zip(uv.ant_1_array, uv.ant_2_array):
 
-       #if(a0==a1):
-
-       #print("({0:2d},{1:2d}) \t".format(a0,a1)),
-       #a0 = out_map[a0]; a1 = out_map[a1];
        print("({0:2d},{1:2d}) \t".format(a0,a1)),
 
        try:
