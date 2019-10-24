@@ -249,15 +249,6 @@ static int init_bda_block_header(hera_bda_block_t *bdablk, int bcnt_offset){
      for(i=0; i< binfo[j].baselines*binfo[j].samp_in_bin; i++){
        bdablk->header[j].bcnt[i] += bcnt_offset;
      }
-
-     //for(i=0; i<binfo[j].baselines; i++){
-     //  bdablk->header[j].ant_pair_0[i] = binfo[j].ant_pair_0[i];
-     //  bdablk->header[j].ant_pair_1[i] = binfo[j].ant_pair_1[i];
-
-     //  for(k=0; k<binfo[j].samp_in_bin; k++){
-     //    bdablk->header[j].bcnt[i*binfo[j].samp_in_bin + k] = binfo[j].bcnt[i*binfo[j].samp_in_bin+k] + bcnt_offset;
-     //  }
-     //}
    }
  
    return 0; 
