@@ -161,7 +161,7 @@ if args.paper_gpu and args.ramp:
 if args.fengine:
    print 'Checking data for SNAPS in test vec mode' 
 
-   factor = 16
+   factor = 4
 
    uv = UVData()
    uv.read(args.h5fname) 

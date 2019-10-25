@@ -20,7 +20,7 @@ parser = argparse.ArgumentParser(description='Turn on and off the HERA correlato
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('action',type=str,
                     help = 'Action: "start"|"stop": start|stop the correlator.')
-parser.add_argument('-n', dest='acclen', type=int, default=64*2048,
+parser.add_argument('-n', dest='acclen', type=int, default=64*512,
                     help ='Number of spectra to accumulate')
 parser.add_argument('-s', dest='slices', type=int, default=2,
                     help ='Number of slices. Eg. for HERA\'s ever/odd correlator, slices=2. \
