@@ -5,6 +5,7 @@ import time
 import argparse
 import subprocess
 import numpy as np
+import os
 
 perf_tweaker = 'tweak-perf-sn.sh'
 init = 'hera_catcher_init.sh'
@@ -71,8 +72,10 @@ if args.bda:
     print 'Create configuration file'
     p = subprocess.Popen(bda_config_cmd + ['-c', '-r', '/tmp/bdaconfig.txt'])
     p.wait()
-    run_on_hosts([args.host], python_source_cmd + [';'] + bda_config_cmd + ['-c','-r', '/tmp/bdaconfig.txt'], wait=True)
-    time.sleep(10)
+    #run_on_hosts([args.host], python_source_cmd + [';'] + bda_config_cmd + ['-c','-r', '/tmp/bdaconfig.txt'], wait=True)
+    os.system('scp "%s" "%s:%s"' % ('/tmp/bdaconfig.txt','hera-sn1', '/tmp/bdaconfig.txt') )
+    
+time.sleep(10)
 
 # Generate the meta-data template
 if args.bda:
