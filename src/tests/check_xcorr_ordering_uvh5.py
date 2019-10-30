@@ -2,7 +2,7 @@ import numpy as np
 from pyuvdata import UVData
 import argparse
 import h5py
-import pickle
+import json
 
 NCHANS = 1536
 INTSPEC = 131072*2
@@ -36,14 +36,14 @@ parser.add_argument('-d','--check_data',action='store_true',default=False,
 args=parser.parse_args()
 
 fp = h5py.File(args.uvh5_file)
-cminfo = pickle.loads(fp['Header']['extra_keywords']['cminfo'].value)
+cminfo = json.loads(fp['Header']['extra_keywords']['cminfo'].value)
 fp.close()
 
 uvd = UVData()
 uvd.read_uvh5(args.uvh5_file, run_check=False)
 ant_pairs = uvd.get_antpairs()
 
-shape = list(np.shape(uvd.get_data(0,0)))
+shape = list(np.shape(uvd.get_data(ant_pairs[0])))
 zeros_all = np.zeros(shape)
 zeros_pol = np.zeros(shape[0:-1])
 pols = ['xx','yy','xy','yx']
@@ -56,9 +56,9 @@ for (a1,a2) in ant_pairs:
     try:
         if not np.all(uvd.get_data(a1,a2) == zeros_all):
             ants.append((a1,a2))
-            for i in range(4):
-                if np.all(np.imag(uvd.get_data(a1,a2)[:,:,i]) == zeros_pol):
-                    print pols[i], a1, a2
+            #for i in range(4):
+            #    if np.all(np.imag(uvd.get_data(a1,a2)[:,:,i]) == zeros_pol):
+            #        print pols[i], a1, a2
     except(KeyError):
         pass
 
@@ -72,12 +72,12 @@ if args.check_data:
             snaploc_a1 = snap_pol_map[cminfo['correlator_inputs'][idx_a1][0][:-11]]
             snaploc_a2 = snap_pol_map[cminfo['correlator_inputs'][idx_a2][0][:-11]]
 
-            tspec = gen_tvg_pol(snaploc_a1)*np.conj(snaploc_a2)
+            tspec = gen_tvg_pol(snaploc_a1)*np.conj(gen_tvg_pol(snaploc_a2))
             tspec = np.sum(tspec.reshape(-1,4),axis=1)[:NCHANS]
 
-            print a1,a2, np.all(tspec == uvd.get_data(a1,a2)[0,:,0]/INTSPEC)
+            print a1,a2, np.all(np.equal(tspec, uvd.get_data(a2,a1)[0,:,0]/INTSPEC))
 
-            tspec = gen_tvg_pol(snaploc_a1+1)*np.conj(snaploc_a2+1)
+            tspec = gen_tvg_pol(snaploc_a1+1)*np.conj(gen_tvg_pol(snaploc_a2+1))
             tspec = np.sum(tspec.reshape(-1,4),axis=1)[:NCHANS]
 
-            print a1,a2, np.all(tspec == uvd.get_data(a1,a2)[0,:,1]/INTSPEC)
+            print a1,a2, np.all(np.equal(tspec, uvd.get_data(a2,a1)[0,:,1]/INTSPEC))
