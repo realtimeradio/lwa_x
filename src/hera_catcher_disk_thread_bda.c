@@ -251,8 +251,6 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
 
     id->file_id = open_hdf5_from_template(template_fname, hdf5_fname);
 
-    fprintf(stdout, "Start new file!\n");
-
     // Open HDF5 header groups and create data group
     id->header_gid = H5Gopen(id->file_id, "Header", H5P_DEFAULT);
     if (id->header_gid < 0) {
@@ -480,8 +478,6 @@ static void write_baseline_index(hdf5_id_t *id, hsize_t bcnt, hsize_t nblts, hid
     hsize_t start[N_DATA_DIMS] = {bcnt, 0, 0, 0};
     hsize_t count[N_DATA_DIMS] = {nblts, 1, N_CHAN_PROCESSED, N_STOKES};
 
-    fprintf(stderr,"Start: %lld\t Nbls: %lld\n", bcnt, nblts);
-
     // Data
     if (H5Sselect_hyperslab(id->visdata_fs, H5S_SELECT_SET, start, NULL, count, NULL) <0){
        hashpipe_error(__FUNCTION__, "Error selecting data hyperslab from: %d to %d", bcnt, nblts);
@@ -556,10 +552,8 @@ static void compute_sum_diff(int32_t *in, int32_t *out_sum, int32_t *out_diff, u
     for(bcnt=0; bcnt<N_BL_PER_WRITE; bcnt++){
        offset = hera_catcher_bda_input_databuf_by_bcnt_idx32(bcnt+bl, 0);
        in_even256 = (__m256i *)(in + offset);
-       //fprintf(stdout, "Even: bcnt: %d\t offset: %d\t val: %d\n", bcnt, offset, *(in + offset));
        offset = hera_catcher_bda_input_databuf_by_bcnt_idx32(bcnt+bl, 1);
        in_odd256  = (__m256i *)(in + offset);
-       //fprintf(stdout, "Odd: bcnt: %d\t offset: %d\t val: %d\n", bcnt, offset, *(in + offset));
 
        for(xchan=0; xchan< N_CHAN_TOTAL; xchan+= CATCHER_CHAN_SUM_BDA){
           chan = xchan/CATCHER_CHAN_SUM_BDA;
@@ -755,7 +749,7 @@ static void *run(hashpipe_thread_args_t * args)
         redisCommand(c, "EXPIRE corr:is_taking_data 60");
 
         // Wait for new input block to be filled
-        while ((rv=hera_catcher_bda_input_databuf_busywait_filled(db_in, curblock_in)) != HASHPIPE_OK) {
+        while ((rv=hera_catcher_bda_input_databuf_wait_filled(db_in, curblock_in)) != HASHPIPE_OK) {
             if (rv==HASHPIPE_TIMEOUT) {
                 hashpipe_status_lock_safe(&st);
                 hputs(st.buf, status_key, "blocked_in");
@@ -768,6 +762,64 @@ static void *run(hashpipe_thread_args_t * args)
             }
         }
 
+        db_in32 = (int32_t *)db_in->block[curblock_in].data;
+        header = db_in->block[curblock_in].header;
+
+        // Got a new data block, update status
+        hashpipe_status_lock_safe(&st);
+        hputs(st.buf, status_key, "writing");
+        hputi4(st.buf, "DISKBKIN", curblock_in);
+        hputu8(st.buf, "DISKMCNT", header.mcnt[0]);
+        hputu8(st.buf, "DISKBCNT", header.bcnt[0]);
+        hashpipe_status_unlock_safe(&st);
+
+        /* Copy auto correlations to autocorr buffer */
+
+        if (auto_ants_filled == 0){
+           // Wait for next buffer to get free
+           while ((rv= hera_catcher_autocorr_databuf_wait_free(db_out, curblock_out)) != HASHPIPE_OK) {
+               if (rv==HASHPIPE_TIMEOUT) {
+                   hashpipe_status_lock_safe(&st);
+                   hputs(st.buf, status_key, "blocked redis thread");
+                   hashpipe_status_unlock_safe(&st);
+                   continue;
+               } else {
+                   hashpipe_error(__FUNCTION__, "error waiting for free databuf");
+                   pthread_exit(NULL);
+                   break;
+               }
+           }
+           for (i=0; i<N_ANTS; i++){
+               db_out->block[curblock_out].header.ant[i] = 0;
+           }
+        }
+
+        for (bctr=0; bctr < BASELINES_PER_BLOCK; bctr++){
+            // Autocorr blocks are indexed by antennas numbers (not corr numbers)
+            ant = corr_to_hera_map[header.ant_pair_0[bctr]];
+            if((header.ant_pair_0[bctr] == header.ant_pair_1[bctr]) && (db_out->block[curblock_out].header.ant[ant]==0)){
+               offset_in = hera_catcher_bda_input_databuf_by_bcnt_idx32(bctr, 0);
+               offset_out = hera_catcher_autocorr_databuf_idx32(ant);
+               memcpy((db_out->block[curblock_out].data + offset_out), (db_in32 + offset_in), N_CHAN_TOTAL*N_STOKES*2*sizeof(uint32_t));
+               auto_ants_filled++;
+               db_out->block[curblock_out].header.ant[ant] = 1;
+            } 
+        }
+
+        // If you have autocorrs of all antennas
+        // Mark output block as full and advance
+        if (auto_ants_filled == Nants){
+           // Update databuf headers
+           db_out->block[curblock_out].header.num_ants = Nants;
+           db_out->block[curblock_out].header.julian_time = compute_jd_from_mcnt(header.mcnt[bctr-1], sync_time_ms, 2);
+           if (hera_catcher_autocorr_databuf_set_filled(db_out, curblock_out) != HASHPIPE_OK) {
+              hashpipe_error(__FUNCTION__, "error marking out databuf %d full", curblock_out);
+              pthread_exit(NULL);
+           }
+           curblock_out = (curblock_out + 1) % AUTOCORR_N_BLOCKS;
+           auto_ants_filled = 0; 
+        }
+        
         // reset elapsed time counters
         elapsed_w_ns = 0.0;
         elapsed_t_ns = 0.0;
@@ -802,6 +854,7 @@ static void *run(hashpipe_thread_args_t * args)
           file_cnt = 0;
           hashpipe_status_lock_safe(&st);
           hputu4(st.buf, "TRIGGER", 0);
+          hputu4(st.buf, "NDONEFIL", file_cnt);
             
           // Get baseline distribution from redis -- this has to be done here
           // to ensure that redis database is updated before reading.
@@ -835,7 +888,7 @@ static void *run(hashpipe_thread_args_t * args)
               redisCommand(c, "HMSET corr:is_taking_data state True time %d", (int)time(NULL));
           }
 
-        } else if (file_cnt >= nfiles) {
+        } else if (file_cnt >= nfiles || idle) {
           // If we're transitioning to idle state
           // Indicate via redis that we're no longer taking data
           if (!idle) {
@@ -862,17 +915,6 @@ static void *run(hashpipe_thread_args_t * args)
         // to a new intergation arrives, close the old file and start a new file.
 
         clock_gettime(CLOCK_MONOTONIC, &start);
-        db_in32 = (int32_t *)db_in->block[curblock_in].data;
-        header = db_in->block[curblock_in].header;
-
-        // Got a new data block, update status
-        hashpipe_status_lock_safe(&st);
-        hputs(st.buf, status_key, "writing");
-        hputi4(st.buf, "DISKBKIN", curblock_in);
-        hputu8(st.buf, "DISKMCNT", header.mcnt[0]);
-        hputu8(st.buf, "DISKBCNT", header.bcnt[0]);
-        hashpipe_status_unlock_safe(&st);
-
              
         for (bctr=0 ; bctr< BASELINES_PER_BLOCK; bctr += N_BL_PER_WRITE){
 
@@ -938,16 +980,10 @@ static void *run(hashpipe_thread_args_t * args)
              } else {
                  break_bcnt = ((strt_bcnt / bcnts_per_file) + 1) * bcnts_per_file;
              }
-             fprintf(stderr, "Breaking at bcnt: %d\n", break_bcnt);
-             if (break_bcnt % bcnts_per_file) {
-                fprintf(stderr,"Something is wrong\n");
-             }
 
              // If there is an open file, copy the relevant part of the block 
              // and close the file. Open a new file for the rest of the block.
              if (curr_file_bcnt >=0){
-
-                 //fprintf(stdout,"Copying to an existing file from %d:%d\n",strt_bcnt,break_bcnt);
 
                  // copy data
                  nbls = break_bcnt - strt_bcnt;
@@ -1001,8 +1037,6 @@ static void *run(hashpipe_thread_args_t * args)
                  file_stop_t = gps_time;
                  file_duration = file_stop_t - file_start_t;
 
-                 //fprintf(stdout,"Closing the file at time: %f\n", file_stop_t);
-
                  write_header(&sum_file, time_array_buf, ant_0_array, ant_1_array);
                  close_filespaces(&sum_file);
                  close_file(&sum_file, file_stop_t, file_duration, file_nblts);
@@ -1023,11 +1057,6 @@ static void *run(hashpipe_thread_args_t * args)
                  // If this is the last file, mark this block done and get out of the loop
                  if (file_cnt >= nfiles) {
                      fprintf(stdout, "Catcher has written %d file and is going to sleep\n", file_cnt);
-                     if(hera_catcher_bda_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
-                         hashpipe_error(__FUNCTION__, "error marking catcher bda input databuf %d free", curblock_in);
-                         pthread_exit(NULL);
-                     }
-                     curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
                      curr_file_bcnt = -1; //So the next trigger will start a new file
                      break;
                  }
@@ -1036,8 +1065,6 @@ static void *run(hashpipe_thread_args_t * args)
              // Open new sum and difference files
              // Init all counters to zero
 
-             //fprintf(stdout,"Opening new file from %d:%d\n",break_bcnt,stop_bcnt);
-
              file_nblts = 0;
              memset(ant_0_array,          0, bcnts_per_file * sizeof(uint16_t));
              memset(ant_1_array,          0, bcnts_per_file * sizeof(uint16_t));
@@ -1045,24 +1072,22 @@ static void *run(hashpipe_thread_args_t * args)
 
              curr_file_bcnt = break_bcnt;
              block_offset = bctr + break_bcnt - strt_bcnt;
-             fprintf(stderr, "Curr file bcnt: %d\n", curr_file_bcnt);
-             fprintf(stderr, "Curr file mcnt: %ld\n", header.mcnt[block_offset]);
+             fprintf(stdout, "Curr file bcnt: %d\n", curr_file_bcnt);
+             fprintf(stdout, "Curr file mcnt: %ld\n", header.mcnt[block_offset]);
              gps_time = mcnt2time(header.mcnt[block_offset], sync_time_ms);
              julian_time = 2440587.5 + (gps_time / (double)(86400.0)); 
              file_start_t = gps_time;
              file_obs_id = (int64_t)gps_time;
 
              sprintf(hdf5_fname, "zen.%7.5lf.uvh5", julian_time);
-             fprintf(stderr, "Opening new file %s\n", hdf5_fname);
+             fprintf(stdout, "Opening new file %s\n", hdf5_fname);
              start_file(&sum_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
 
              #ifndef SKIP_DIFF
                sprintf(hdf5_fname, "zen.%7.5lf.diff.uvh5", julian_time);
-               fprintf(stderr, "Opening new file %s\n", hdf5_fname);
+               fprintf(stdout, "Opening new file %s\n", hdf5_fname);
                start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
              #endif
-
-             //fprintf(stderr,"File start time: %f\n", file_start_t);
 
              // Get the antenna positions and baseline orders
              // These are needed for populating the ant_[1|2]_array and uvw_array
@@ -1072,7 +1097,6 @@ static void *run(hashpipe_thread_args_t * args)
        
              // Copy data to the right location
              nbls = stop_bcnt - break_bcnt + 1;
-             // fprintf(stdout, "Copying nbls: %d\n", nbls);
 
              if (nbls > 0){
                 if (nbls % N_BL_PER_WRITE){
@@ -1120,53 +1144,6 @@ static void *run(hashpipe_thread_args_t * args)
           }
         }
 
-        /* Copy auto correlations to autocorr buffer */
-
-        if (auto_ants_filled == 0){
-           // Wait for next buffer to get free
-           while ((rv= hera_catcher_autocorr_databuf_wait_free(db_out, curblock_out)) != HASHPIPE_OK) {
-               if (rv==HASHPIPE_TIMEOUT) {
-                   hashpipe_status_lock_safe(&st);
-                   hputs(st.buf, status_key, "blocked redis thread");
-                   hashpipe_status_unlock_safe(&st);
-                   continue;
-               } else {
-                   hashpipe_error(__FUNCTION__, "error waiting for free databuf");
-                   pthread_exit(NULL);
-                   break;
-               }
-           }
-           for (i=0; i<N_ANTS; i++){
-               db_out->block[curblock_out].header.ant[i] = 0;
-           }
-        }
-
-        for (bctr=0; bctr < BASELINES_PER_BLOCK; bctr++){
-            // Autocorr blocks are indexed by antennas numbers (not corr numbers)
-            ant = corr_to_hera_map[header.ant_pair_0[bctr]];
-            if((header.ant_pair_0[bctr] == header.ant_pair_1[bctr]) && (db_out->block[curblock_out].header.ant[ant]==0)){
-               offset_in = hera_catcher_bda_input_databuf_by_bcnt_idx32(bctr, 0);
-               offset_out = hera_catcher_autocorr_databuf_idx32(ant);
-               memcpy((db_out->block[curblock_out].data + offset_out), (db_in32 + offset_in), N_CHAN_TOTAL*N_STOKES*2*sizeof(uint32_t));
-               auto_ants_filled++;
-               db_out->block[curblock_out].header.ant[ant] = 1;
-            } 
-        }
-
-        // If you have autocorrs of all antennas
-        // Mark output block as full and advance
-        if (auto_ants_filled == Nants){
-           // Update databuf headers
-           db_out->block[curblock_out].header.num_ants = Nants;
-           db_out->block[curblock_out].header.julian_time = compute_jd_from_mcnt(header.mcnt[bctr-1], sync_time_ms, 2);
-           if (hera_catcher_autocorr_databuf_set_filled(db_out, curblock_out) != HASHPIPE_OK) {
-              hashpipe_error(__FUNCTION__, "error marking out databuf %d full", curblock_out);
-              pthread_exit(NULL);
-           }
-           curblock_out = (curblock_out + 1) % AUTOCORR_N_BLOCKS;
-           auto_ants_filled = 0; 
-        }
-        
         clock_gettime(CLOCK_MONOTONIC, &finish);
 
         // Compute processing time for this block
