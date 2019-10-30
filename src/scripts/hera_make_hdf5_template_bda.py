@@ -176,11 +176,10 @@ def create_header(h5, config, use_cm=False, use_redis=False):
         r = redis.Redis("redishost")
         fenginfo = r.hgetall("init_configuration")
         corr_to_hera_map = get_corr_to_hera_map(r, nants_data=192, nants=192)
-        # Baselines in the config file are already in hera antenna numbers
-        #for n in range(baselines.shape[0]):
-        #    baselines[n] = [corr_to_hera_map[baselines[n,0]], corr_to_hera_map[baselines[n,1]]]
-        #ant_1_array = np.array([x for (x,y) in baselines])
-        #ant_2_array = np.array([y for (x,y) in baselines])
+        for n in range(baselines.shape[0]):
+            baselines[n] = [corr_to_hera_map[baselines[n,0]], corr_to_hera_map[baselines[n,1]]]
+        ant_1_array = np.array([x for (x,y) in baselines])
+        ant_2_array = np.array([y for (x,y) in baselines])
 
     else:
         fenginfo = None
@@ -197,7 +196,7 @@ def create_header(h5, config, use_cm=False, use_redis=False):
     header.create_dataset("Nspws",  dtype="<i8", data=1)
     # For BDA, Ntimes needs to be n_bls long
     #header.create_dataset("Ntimes", dtype="<i8", data=n_bls) 
-    header.create_dataset("Ntimes", dtype="<i8", data=8)
+    header.create_dataset("Ntimes", dtype="<i8", data=2)
     header.create_dataset("corr_bl_order", dtype="<i8", data=np.array(baselines))
     header.create_dataset("corr_to_hera_map", dtype="<i8", data=np.array(corr_to_hera_map))
     header.create_dataset("ant_1_array_conf", dtype="<i8", data=ant_1_array)
