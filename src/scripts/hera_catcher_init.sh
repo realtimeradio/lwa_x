@@ -15,8 +15,8 @@ function init() {
   instance=0
   mask=0x003f
   bindhost=eth4
-  netcpu=0
-  outcpu=3
+  netcpu=6
+  outcpu=8
   autocpu=5
 
   if [ $USE_BDA -eq 1 ]
