@@ -71,7 +71,7 @@ typedef struct struct_pkt {
 
 // Set to 200 Mbps -- OK for two instances per node.
 // With 16 nodes, amounts to 6.4 Gbps of data
-#define PACKET_DELAY_NS (8 * 8 * OUTPUT_BYTES_PER_PACKET)
+#define PACKET_DELAY_NS (32 * 8 * OUTPUT_BYTES_PER_PACKET)
 
 // Open and connect a UDP socket to the given host and port.  Note that port is
 // a string and can be a stringified integer (e.g. "7148") or a service name
