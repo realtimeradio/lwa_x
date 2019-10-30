@@ -470,8 +470,11 @@ static void *run(hashpipe_thread_args_t * args)
 
        // Location of this sample within the bin: sample_loc
        sample_loc = (sample/(1<<j)) % binfo[j].samp_in_bin;
-       buf->header[j].mcnt[sample_loc] = idb->block[curblock_in].header.mcnt;
-          
+       if (buf->header[j].baselines > 0){
+          buf->header[j].mcnt[sample_loc] = idb->block[curblock_in].header.mcnt;
+          fprintf(stdout,"sample: %ld\t Sample_loc: %d\t mcnt:%ld\n", sample, sample_loc, buf->header[j].mcnt[sample_loc]);
+       }
+
        for(bl=0; bl< buf->header[j].baselines; bl++){
          //fprintf(stderr,"Bin:%d, 2**j:%d\n",j,(1<<j));
          ant0 = buf->header[j].ant_pair_0[bl]; 
