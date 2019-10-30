@@ -207,14 +207,22 @@ static inline uint32_t process_packet(
   uint32_t *dest_p;
   int32_t pkt_bcnt_dist;
   uint32_t pkt_bcnt;
+  uint64_t pkt_mcnt;
   uint32_t cur_bcnt;
   uint32_t netbcnt = -1; // Value to return if a block is filled
   int b, x, t, o;
   int rv;
   uint32_t pkt_offset;
+  int time_demux_block;
 
   // Parse packet header
   get_header(p_frame, &pkt_header);
+
+  // Split the mcnt into a "pkt_mcnt" which is the same for all even/odd samples,
+  // and "time_demux_block", which indicates which even/odd block this packet came from
+  time_demux_block = (pkt_header.mcnt / Nt) % TIME_DEMUX;
+  pkt_mcnt = pkt_header.mcnt - (Nt*time_demux_block);
+
   pkt_bcnt = pkt_header.bcnt;
 
   // Lazy init binfo
@@ -309,7 +317,7 @@ static inline uint32_t process_packet(
 
     // If this is the first packet of this baseline, update header
     if(!binfo.baselines[pkt_block_i][b]){
-      db->block[pkt_block_i].header.mcnt[b] = pkt_header.mcnt;
+      db->block[pkt_block_i].header.mcnt[b] = pkt_mcnt;
       db->block[pkt_block_i].header.ant_pair_0[b] = pkt_header.ant0;
       db->block[pkt_block_i].header.ant_pair_1[b] = pkt_header.ant1;
       db->block[pkt_block_i].header.bcnt[b] = pkt_header.bcnt;
