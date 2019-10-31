@@ -6,7 +6,7 @@ import argparse
 import subprocess
 
 python_source_cmd = ['source', '~/hera-venv/bin/activate']
-template_cmd = ['hera_make_hdf5_template.py']
+template_cmd = ['hera_make_hdf5_template_bda.py']
 
 def run_on_hosts(hosts, cmd, user=None, wait=True):
     if isinstance(cmd, str):

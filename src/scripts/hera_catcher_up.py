@@ -32,7 +32,7 @@ parser.add_argument('host', type=str, help='Host to intialize')
 parser.add_argument('-r', dest='redishost', type=str, default='redishost', help='Host serving redis database')
 parser.add_argument('-t', dest='hdf5template', type=str, default='/tmp/template.h5', 
                     help='Place to put HDF5 header template file')
-parser.add_argument('--bda', dest='bda', action='store_true', default=False,
+parser.add_argument('--nobda', dest='bda', action='store_false', default=True,
                     help='Use the baseline dependent averaging version')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)

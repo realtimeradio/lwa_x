@@ -42,7 +42,7 @@ parser.add_argument('--ibverbs', dest='ibverbs', action='store_true', default=Fa
                     help='Use the IB Verbs netthread. Experimental!')
 parser.add_argument('--redislog', dest='redislog', action='store_true', default=False,
                     help='Use the redis logger to duplicate log messages on redishost\'s log-channel pubsub stream')
-parser.add_argument('--bda', dest='bda', action='store_true', default=False,
+parser.add_argument('--nobda', dest='bda', action='store_false', default=True,
                     help='Use baseline dependent averaging. (Beta)')
 parser.add_argument('--test', dest='test', action='store_true', default=False,
                     help='Run BDA in test vector mode')
