@@ -472,7 +472,6 @@ static void *run(hashpipe_thread_args_t * args)
        sample_loc = (sample/(1<<j)) % binfo[j].samp_in_bin;
        if (buf->header[j].baselines > 0){
           buf->header[j].mcnt[sample_loc] = idb->block[curblock_in].header.mcnt;
-          fprintf(stdout,"sample: %ld\t Sample_loc: %d\t mcnt:%ld\n", sample, sample_loc, buf->header[j].mcnt[sample_loc]);
        }
 
        for(bl=0; bl< buf->header[j].baselines; bl++){
