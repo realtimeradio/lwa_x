@@ -9,7 +9,6 @@ import os
 
 perf_tweaker = 'tweak-perf-sn.sh'
 init = 'hera_catcher_init.sh'
-python_source_cmd = ['source', '~/hera-venv/bin/activate']
 bda_config_cmd = ['hera_create_bda_config.py']
 template_cmd = ['hera_make_hdf5_template.py']
 
@@ -39,8 +38,14 @@ parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
 parser.add_argument('--redislog', dest='redislog', action='store_true', default=False,
                     help='Use the redis logger to duplicate log messages on redishost\'s log-channel pubsub stream')
+parser.add_argument('--pypath', dest='pypath', type=str, default="/home/hera/hera-venv",
+                    help='The path to a python virtual environment which will be activated prior to running paper_init. ' +
+                         'Only relevant if using the --redislog flag, which uses a python redis interface')
 
 args = parser.parse_args()
+
+# Environment sourcing command required to run remote python jobs
+python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate")+";"]
 
 r = redis.Redis(args.redishost)
 
@@ -55,7 +60,7 @@ if args.redislog:
    init_args += ['-r']
 
 # Start Catcher
-run_on_hosts([args.host], ['cd', '/data;', init] + init_args + ['0'], wait=True)
+run_on_hosts([args.host], python_source_cmd + ['cd', '/data;', init] + init_args + ['0'], wait=True)
 time.sleep(15)
 
 # Start hashpipe<->redis gateways
@@ -79,9 +84,9 @@ time.sleep(10)
 
 # Generate the meta-data template
 if args.bda:
-   run_on_hosts([args.host], python_source_cmd + [';'] + ['hera_make_hdf5_template_bda.py'] + ['-c', '-r', args.hdf5template], wait=True)
+   run_on_hosts([args.host], python_source_cmd + ['hera_make_hdf5_template_bda.py'] + ['-c', '-r', args.hdf5template], wait=True)
 else:
-   run_on_hosts([args.host], python_source_cmd + [';'] + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
+   run_on_hosts([args.host], python_source_cmd + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
 
 #Configure runtime parameters
 catcher_dict = {
