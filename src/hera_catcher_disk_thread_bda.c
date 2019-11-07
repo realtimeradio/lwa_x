@@ -777,7 +777,7 @@ static void *run(hashpipe_thread_args_t * args)
 
         if (auto_ants_filled == 0){
            // Wait for next buffer to get free
-           while ((rv= hera_catcher_autocorr_databuf_wait_free(db_out, curblock_out)) != HASHPIPE_OK) {
+           while ((rv= hera_catcher_autocorr_databuf_busywait_free(db_out, curblock_out)) != HASHPIPE_OK) {
                if (rv==HASHPIPE_TIMEOUT) {
                    hashpipe_status_lock_safe(&st);
                    hputs(st.buf, status_key, "blocked redis thread");
@@ -808,7 +808,7 @@ static void *run(hashpipe_thread_args_t * args)
 
         // If you have autocorrs of all antennas
         // Mark output block as full and advance
-        if (auto_ants_filled == Nants){
+        if (auto_ants_filled >= Nants){
            // Update databuf headers
            db_out->block[curblock_out].header.num_ants = Nants;
            db_out->block[curblock_out].header.julian_time = compute_jd_from_mcnt(header.mcnt[bctr-1], sync_time_ms, 2);
