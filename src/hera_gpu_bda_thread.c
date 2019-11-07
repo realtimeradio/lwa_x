@@ -323,6 +323,7 @@ static void *run(hashpipe_thread_args_t * args)
    hputu8(st.buf, "NBL4SEC", binfo[1].baselines);
    hputu8(st.buf, "NBL8SEC", binfo[2].baselines);
    hputu8(st.buf, "NBL16SEC",binfo[3].baselines);
+   hputu8(st.buf, "NBDABLS", total_baseslines);
    hputu4(st.buf, "BDASAMP", 0);
    hashpipe_status_unlock_safe(&st);
 
@@ -336,6 +337,7 @@ static void *run(hashpipe_thread_args_t * args)
        buf->header[j].ant_pair_0 = (uint16_t *) malloc(binfo[j].baselines * sizeof(uint16_t));
        buf->header[j].ant_pair_1 = (uint16_t *) malloc(binfo[j].baselines * sizeof(uint16_t));
        buf->header[j].bcnt       = (uint32_t *) malloc(binfo[j].baselines * binfo[j].samp_in_bin * sizeof(uint32_t));
+       buf->header[j].mcnt       = (uint64_t *) malloc(binfo[j].baselines * binfo[j].samp_in_bin * sizeof(uint64_t));
      }
      
      init_bda_block_header(buf, 0);
@@ -367,6 +369,7 @@ static void *run(hashpipe_thread_args_t * args)
    int int_count; // number of mcnts integrated in GPU
    uint64_t start_bda_mcount; // mcount to start BD integration 
    uint64_t sample = 0;
+   uint64_t prev_samp = -1;
    int sample_loc, bl_samp_loc;
 
    while (run_threads()) {
@@ -380,7 +383,7 @@ static void *run(hashpipe_thread_args_t * args)
            != HASHPIPE_OK) {
        if (rv==HASHPIPE_TIMEOUT) {
            hashpipe_status_lock_safe(&st);
-           hputs(st.buf, status_key, "blocked");
+           hputs(st.buf, status_key, "blocked_in");
            hashpipe_status_unlock_safe(&st);
            continue;
        } else {
@@ -425,17 +428,20 @@ static void *run(hashpipe_thread_args_t * args)
      hgeti4(st.buf, "INTCOUNT", &int_count);
      hashpipe_status_unlock_safe(&st);
 
-     clock_gettime(CLOCK_MONOTONIC, &start);
-
      sample = get_sample_from_mcnt(idb->block[curblock_in].header.mcnt, 
                                    start_bda_mcount+int_count, int_count);
+     if (sample != (prev_samp+1)){
+        fprintf(stderr, "Missed sample %ld!!\n", prev_samp);
+        prev_samp = sample-1;
+     }
+     prev_samp++;
 
      if (sample%N_MAX_INTTIME == 0){
         // Wait for new output block to be free
         while ((rv=hera_bda_databuf_wait_free(odb, curblock_out)) != HASHPIPE_OK) {
             if (rv==HASHPIPE_TIMEOUT) {
                 hashpipe_status_lock_safe(&st);
-                hputs(st.buf, status_key, "blocked");
+                hputs(st.buf, status_key, "blocked_out");
                 hashpipe_status_unlock_safe(&st);
                 continue;
             } else {
@@ -460,6 +466,7 @@ static void *run(hashpipe_thread_args_t * args)
      hputu4(st.buf, "BDASAMP", sample);
      hashpipe_status_unlock_safe(&st);
      
+     clock_gettime(CLOCK_MONOTONIC, &start);
 
      /* Perform the baseline dependent averaging  */
 
@@ -470,9 +477,6 @@ static void *run(hashpipe_thread_args_t * args)
 
        // Location of this sample within the bin: sample_loc
        sample_loc = (sample/(1<<j)) % binfo[j].samp_in_bin;
-       if (buf->header[j].baselines > 0){
-          buf->header[j].mcnt[sample_loc] = idb->block[curblock_in].header.mcnt;
-       }
 
        for(bl=0; bl< buf->header[j].baselines; bl++){
          //fprintf(stderr,"Bin:%d, 2**j:%d\n",j,(1<<j));
@@ -482,6 +486,7 @@ static void *run(hashpipe_thread_args_t * args)
 
          // baseline dependent offset of this sample
          bl_samp_loc = bl*binfo[j].samp_in_bin + sample_loc;
+         buf->header[j].mcnt[bl_samp_loc] = idb->block[curblock_in].header.mcnt;
 
          //fprintf(stderr, "blk:%d\tant0:%d\tant1:%d\tbcnt:%d\n",curblock_out,ant0,ant1,buf->header[j].bcnt[bl_samp_loc]);
 

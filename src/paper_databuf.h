@@ -268,7 +268,7 @@ typedef struct paper_output_databuf {
 
 
 typedef struct hera_bda_header{
-  uint64_t mcnt[8];               // mcnt of the first time sample in the data
+  uint64_t *mcnt;               // mcnt of the first time sample in the data
   uint64_t datsize;               // size of buffer (from no. baselines)
   uint64_t baselines;
   uint16_t *ant_pair_0;
