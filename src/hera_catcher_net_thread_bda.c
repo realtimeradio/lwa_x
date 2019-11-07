@@ -282,9 +282,9 @@ static inline uint32_t process_packet(
 
        // Initialize the newly acquired block
        initialize_block(db, cur_bcnt+BASELINES_PER_BLOCK); 
-       binfo.block_packet_counter[binfo.pkt_block_i] = 0;
-       memset(binfo.flags[binfo.pkt_block_i],     1, PACKETS_PER_BLOCK*sizeof(char));
-       memset(binfo.baselines[binfo.pkt_block_i], 0, BASELINES_PER_BLOCK*sizeof(char));
+       binfo.block_packet_counter[pkt_block_i] = 0;
+       memset(binfo.flags[pkt_block_i],     1, PACKETS_PER_BLOCK*sizeof(char));
+       memset(binfo.baselines[pkt_block_i], 0, BASELINES_PER_BLOCK*sizeof(char));
 
        // Reset out-of-seq counter
        binfo.out_of_seq_cnt = 0;
