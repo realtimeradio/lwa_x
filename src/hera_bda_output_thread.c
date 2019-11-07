@@ -73,12 +73,6 @@ typedef struct struct_pkt {
 // With 16 nodes, amounts to 6.4 Gbps of data
 #define PACKET_DELAY_NS (32 * 8 * OUTPUT_BYTES_PER_PACKET)
 
-static uint32_t get_bcnt_from_mcnt(uint64_t mcnt, uint64_t start_mcnt, 
-                                   int int_count, int total_baseslines){
-    uint64_t sample = (mcnt - (start_mcnt+int_count)) / (TIME_DEMUX * int_count);
-    return (sample/N_MAX_INTTIME)*total_baselines;
-}
-
 // Open and connect a UDP socket to the given host and port.  Note that port is
 // a string and can be a stringified integer (e.g. "7148") or a service name
 // (e.g. "ntp").  Returns -1 on error, otherwise a valid descriptor for an open
@@ -207,10 +201,6 @@ static void *run(hashpipe_thread_args_t * args)
    hera_bda_block_t *buf;
    unsigned int n_samples;
    uint64_t datoffset;
-   uint64_t start_bda_mcount;
-   uint64_t total_baselines;
-   int int_count;
-   uint32_t exp_bcnt;
 
    while (run_threads()) {
 
@@ -232,13 +222,6 @@ static void *run(hashpipe_thread_args_t * args)
            break;
        }
      }
-
-     hashpipe_status_lock_safe(&st);
-     hputs(st.buf, status_key, "processing");
-     hgeti8(st.buf, "INTSYNC", (long int *)&start_bda_mcount);
-     hgeti4(st.buf, "INTCOUNT", &int_count);
-     hgeti8(st.buf, "NBDABLS", (long int *)&total_baselines);
-     hashpipe_status_unlock_safe(&st);
 
      clock_gettime(CLOCK_MONOTONIC, &start);
      nbytes = 0;
@@ -270,16 +253,6 @@ static void *run(hashpipe_thread_args_t * args)
            pkt.hdr.ant0 = ANTENNA(ant0);
 
            for(i=0; i<n_samples; i++){ // Number of time samples of one baseline
-
-             // Before sending each packet, check that the bcnt and mcnt pair
-             // are correct. That there is no mismatch.
-             exp_bcnt = get_bcnt_from_mcnt(buf->header[j].bcnt[bl*n_samples + i],
-                                           start_bda_mcount, int_count, 
-                                           total_baselines);
-
-             if (exp_bcnt != buf->header[j].bcnt[bl*n_samples+i]){
-                fprintf(stderr, "output_thread(): Expencted bcnt %d but got bcnt %d\n", exp_bcnt, buf->header[j].bcnt[bl*n_samples + i]);
-             }
 
              pkt.hdr.baseline_id = BASELINE_ID(buf->header[j].bcnt[bl*n_samples + i]);
              pkt.hdr.timestamp = TIMESTAMP(buf->header[j].mcnt[bl*n_samples + i]);
