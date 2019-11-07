@@ -323,7 +323,7 @@ static void *run(hashpipe_thread_args_t * args)
    hputu8(st.buf, "NBL4SEC", binfo[1].baselines);
    hputu8(st.buf, "NBL8SEC", binfo[2].baselines);
    hputu8(st.buf, "NBL16SEC",binfo[3].baselines);
-   hputu8(st.buf, "NBDABLS", total_baseslines);
+   hputu8(st.buf, "NBDABLS", total_baselines);
    hputu4(st.buf, "BDASAMP", 0);
    hashpipe_status_unlock_safe(&st);
 
