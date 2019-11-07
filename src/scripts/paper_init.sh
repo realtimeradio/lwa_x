@@ -205,7 +205,8 @@ function init() {
       -o XID=$xid \
       -c $netcpu $netthread \
       -m $flfcpu paper_fluff_thread \
-      -c $gpucpu hera_gpu_bda_thread \
+      -c $gpucpu paper_gpu_thread \
+      -c $bdacpu hera_gpu_bda_thread \
       -c $outcpu hera_bda_output_thread
     if [ $USE_REDIS -eq 1 ]
     then
