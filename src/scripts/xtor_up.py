@@ -78,10 +78,15 @@ for host in hosts:
 time.sleep(3)
 
 # Configure the X-engines as even/odd correlators
-for hn, host in enumerate(hosts):
+if (len(hosts) == 1) and (args.timeslices != 1):
    for i in range(args.ninstances):
       key = 'hashpipe://%s/%d/set' % (host, i)
-      r.publish(key, 'TIMEIDX=%d' % (hn//nhosts_per_timeslice))
+      r.publish(key, 'TIMEIDX=%d' % (args.ninstances))
+else: 
+   for hn, host in enumerate(hosts):
+      for i in range(args.ninstances):
+         key = 'hashpipe://%s/%d/set' % (host, i)
+         r.publish(key, 'TIMEIDX=%d' % (hn//nhosts_per_timeslice))
 
 time.sleep(2)
 

@@ -14,9 +14,9 @@ myip=$(getip $(hostname))
 function init() {
   instance=0
   mask=0x003f
-  bindhost=eth3
-  netcpu=0
-  outcpu=3
+  bindhost=eth4
+  netcpu=6
+  outcpu=8
 
   echo taskset $mask \
   hashpipe -p paper_gpu -I $instance \

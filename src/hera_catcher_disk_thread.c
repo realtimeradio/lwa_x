@@ -573,9 +573,9 @@ static void get_ant_pos(hdf5_id_t *id, enu_t *ant_pos) {
 /*
 Turn an mcnt into a UNIX time in double-precision.
 */
-static double mcnt2time(uint64_t mcnt, uint32_t sync_time)
+static double mcnt2time(uint64_t mcnt, uint64_t sync_time_ms)
 {
-    return sync_time + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
+    return (sync_time_ms / 1000.) + (mcnt * (2L * N_CHAN_TOTAL_GENERATED / (double)FENG_SAMPLE_RATE));
 }
 
 static void compute_time_array(double time, double *time_buf)
@@ -595,6 +595,48 @@ static void compute_nsamples_array(float nsamples, float *nsamples_array){
         nsamples_array[i] = nsamples;
     }
 }
+
+/*
+ Add an observation to the M&C system.
+*/
+static void add_mc_obs(char *fname)
+{
+  char cmd[256];
+  int err;
+  fprintf(stdout, "Adding observation %s to M&C\n", fname);
+  // Launch (hard-coded) python script in the background and pass in filename.
+  sprintf(cmd, "/home/hera/hera-venv/bin/mc_add_observation.py %s", fname);
+  if (fork() == 0) {
+    err = system(cmd);
+    if (err != 0) {
+      fprintf(stderr, "Error adding observation %s to M&C\n", fname);
+    }
+    exit(0);
+  }
+}
+
+#if 0
+/*
+ Have the librarian make new sessions.
+*/
+static void make_librarian_sessions(void)
+{
+  char cmd[256];
+  int err;
+  fprintf(stdout, "Making new sessions in the Librarian\n");
+  // Launch (hard-coded) python script in the background using fork.
+  // We want to wait few seconds to give M&C a chance to finish importing the final file,
+  // but don't want to hold up main thread execution.
+  sprintf(cmd, "sleep 10; /home/hera/hera-venv/bin/librarian_assign_sessions.py local-correlator");
+  if (fork() == 0) {
+    err = system(cmd);
+    if (err != 0) {
+      fprintf(stderr, "Error creating new session in the librarian\n");
+    }
+    exit(0);
+  }
+}
+#endif
 
 static void compute_integration_time_array(double integration_time, double *integration_time_buf)
 {
@@ -732,7 +774,7 @@ static void *run(hashpipe_thread_args_t * args)
     char hdf5_fname[128];
 
     // Variables for sync time and computed gps time / JD
-    uint32_t sync_time = 0;
+    uint64_t sync_time_ms = 0;
     double gps_time;
     double julian_time;
     // Variables for data collection parameters
@@ -788,6 +830,9 @@ static void *run(hashpipe_thread_args_t * args)
     // Indicate via redis that we're started but not taking data
     redisCommand(c, "HMSET corr:is_taking_data state False time %d", (int)time(NULL));
     redisCommand(c, "EXPIRE corr:is_taking_data 60");
+
+    // Reinitialize the list of files taken this session
+    redisCommand(c, "DEL rtp:file_list");
 
     /* Loop(s) */
     int32_t *db_in32;
@@ -864,7 +909,7 @@ static void *run(hashpipe_thread_args_t * args)
         hgets(st.buf, "HDF5TPLT", 128, template_fname);
 
         // Get time that F-engines were last sync'd
-        hgetu4(st.buf, "SYNCTIME", &sync_time);
+        hgetu8(st.buf, "SYNCTIME", &sync_time_ms);
 
         hgetu4(st.buf, "MSPERFIL", &ms_per_file);
 
@@ -898,12 +943,14 @@ static void *run(hashpipe_thread_args_t * args)
                 // Create the "corr:is_taking_data" hash. This will be set to state=False
                 // when data taking is complete. Or if this pipeline exits the key will expire.
                 redisCommand(c, "HMSET corr:is_taking_data state True time %d", (int)time(NULL));
+                redisCommand(c, "EXPIRE corr:is_taking_data 60");
             }
         } else if (file_cnt >= nfiles || idle) {
             // If we're transitioning to idle state
             // Indicate via redis that we're no longer taking data
             if (!idle) {
                 redisCommand(c, "HMSET corr:is_taking_data state False time %d", (int)time(NULL));
+                redisCommand(c, "EXPIRE corr:is_taking_data 60");
             }
             idle = 1;
             // Mark input block as free and advance
@@ -931,7 +978,7 @@ static void *run(hashpipe_thread_args_t * args)
         db_in32 = (int32_t *)db_in->block[curblock_in].data;
 
         clock_gettime(CLOCK_MONOTONIC, &start);
-        gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt, sync_time);
+        gps_time = mcnt2time(db_in->block[curblock_in].header.mcnt, sync_time_ms);
         //fprintf(stdout, "Processing new block with: mcnt: %lu (gps time: %lf)\n", db_in->block[curblock_in].header.mcnt, gps_time);
         julian_time = 2440587.5 + (gps_time / (double)(86400.0));
 
@@ -943,12 +990,17 @@ static void *run(hashpipe_thread_args_t * args)
                 close_file(&sum_file, file_stop_t, file_duration, file_nblts, file_nts);
                 close_file(&diff_file, file_stop_t, file_duration, file_nblts, file_nts);
                 file_cnt += 1;
+                add_mc_obs(hdf5_fname);
                 // If this is the last file, mark this block done and get out of the loop
                 if (file_cnt >= nfiles) {
                     fprintf(stdout, "Catcher has written %d file and is going to sleep\n", file_cnt);
                     if(hera_catcher_input_databuf_set_free(db_in, curblock_in) != HASHPIPE_OK) {
                         hashpipe_error(__FUNCTION__, "error marking databuf %d free", curblock_in);
                         pthread_exit(NULL);
+                    }
+                    if (use_redis) {
+                      // Let RTP know we have a new session available
+                      redisCommand(c, "HMSET rtp:has_new_data state True");
                     }
                     curblock_in = (curblock_in + 1) % CATCHER_N_BLOCKS;
                     curr_file_time = -1; //So the next trigger will start a new file
@@ -965,9 +1017,15 @@ static void *run(hashpipe_thread_args_t * args)
             sprintf(hdf5_fname, "zen.%7.5lf.uvh5", julian_time);
             fprintf(stdout, "Opening new file %s\n", hdf5_fname);
             start_file(&sum_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
+            if (use_redis) {
+              redisCommand(c, "RPUSH rtp:file_list %s", hdf5_fname);
+            }
             sprintf(hdf5_fname, "zen.%7.5lf.diff.uvh5", julian_time);
             fprintf(stdout, "Opening new file %s\n", hdf5_fname);
             start_file(&diff_file, template_fname, hdf5_fname, file_obs_id, file_start_t, tag);
+            if (use_redis) {
+              redisCommand(c, "RPUSH rtp:file_list %s", hdf5_fname);
+            }
             // Get the antenna positions and baseline orders
             // These are needed for populating the ant_[1|2]_array and uvw_array
             get_ant_pos(&sum_file, ant_pos);
