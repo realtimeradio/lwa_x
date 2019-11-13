@@ -424,10 +424,11 @@ static void get_corr_to_hera_map(hdf5_id_t *id, int *corr_to_hera_map) {
 
 
 /* Get the integration time for each baseline from header (set by config file) */
-static void get_integration_time(hdf5_id_t *id, double *integration_time_buf) {
+static void get_integration_time(hdf5_id_t *id, double *integration_time_buf, uint32_t acc_len) {
 
     hid_t dataset_id;
     herr_t status;
+    int i;
     dataset_id = H5Dopen(id->header_gid, "integration_time", H5P_DEFAULT);
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to open Header/integration_time dataset");
@@ -442,6 +443,10 @@ static void get_integration_time(hdf5_id_t *id, double *integration_time_buf) {
     if (status < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close Header/integration_time dataset");
     }
+
+    for(i=0; i< bcnts_per_file; i++){
+       integration_time_buf[i] *= acc_len * TIME_DEMUX * 2L * N_CHAN_TOTAL_GENERATED/(double)FENG_SAMPLE_RATE;
+    } 
 }
 
 /*
@@ -1093,7 +1098,7 @@ static void *run(hashpipe_thread_args_t * args)
              // These are needed for populating the ant_[1|2]_array and uvw_array
              //get_ant_pos(&sum_file, ant_pos);
              get_corr_to_hera_map(&sum_file, corr_to_hera_map);
-             get_integration_time(&sum_file, integration_time_buf);
+             get_integration_time(&sum_file, integration_time_buf, acc_len);
        
              // Copy data to the right location
              nbls = stop_bcnt - break_bcnt + 1;

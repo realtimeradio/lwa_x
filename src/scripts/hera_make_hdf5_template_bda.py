@@ -141,7 +141,7 @@ def create_header(h5, config, use_cm=False, use_redis=False):
     for i,t in enumerate(config[:,2]):
         if (t!=0):
            baselines.append([(config[i,0], config[i,1])]*(8//t))
-           integration_time.append(np.repeat(t*2, int(8//t)))
+           integration_time.append(np.repeat(t, int(8//t)))
     baselines = np.concatenate(baselines)
     integration_time = np.asarray(np.concatenate(integration_time), dtype=np.float64)
 
