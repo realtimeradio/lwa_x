@@ -722,7 +722,7 @@ static void *run(hashpipe_thread_args_t * args)
     memset(bl_buf_sum,  0, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
     memset(bl_buf_diff, 0, N_BL_PER_WRITE * N_CHAN_PROCESSED * N_STOKES * 2 * sizeof(int32_t));
 
-    // Init here, realloc after reading baseline distribution from redis
+    // Init here, realloc after reading baseline distribution from sharedmem
     double *integration_time_buf = (double *)malloc(1 * sizeof(double));
     double *time_array_buf       = (double *)malloc(1 * sizeof(double));
     int *ant_0_array             =    (int *)malloc(1 * sizeof(int));
@@ -829,7 +829,7 @@ static void *run(hashpipe_thread_args_t * args)
         elapsed_w_ns = 0.0;
         elapsed_t_ns = 0.0;
 
-        // Get template filename from redis
+        // Get template filename from sharedmem
         hashpipe_status_lock_safe(&st);
         hgets(st.buf, "HDF5TPLT", 128, template_fname);
 
@@ -861,7 +861,7 @@ static void *run(hashpipe_thread_args_t * args)
           hputu4(st.buf, "TRIGGER", 0);
           hputu4(st.buf, "NDONEFIL", file_cnt);
             
-          // Get baseline distribution from redis -- this has to be done here
+          // Get baseline distribution from sharedmem -- this has to be done here
           // to ensure that redis database is updated before reading.
           hgetu8(st.buf,"BDANANT", &Nants);
           hgetu8(st.buf,"NBL2SEC", &baseline_dist[0]);
