@@ -32,7 +32,7 @@ parser.add_argument('host', type=str, help='Host to intialize')
 parser.add_argument('-r', dest='redishost', type=str, default='redishost', help='Host serving redis database')
 parser.add_argument('-t', dest='hdf5template', type=str, default='/tmp/template.h5', 
                     help='Place to put HDF5 header template file')
-parser.add_argument('--nobda', dest='bda', action='store_false', default=True,
+parser.add_argument('--nobda', dest='nobda', action='store_true', default=False,
                     help='Use the baseline dependent averaging version')
 parser.add_argument('--runtweak', dest='runtweak', action='store_true', default=False,
                     help='Run the tweaking script %s on X-hosts prior to starting the correlator' % perf_tweaker)
@@ -54,7 +54,7 @@ if args.runtweak:
     run_on_hosts([args.host], perf_tweaker, user='root', wait=True)
 
 init_args = []
-if args.bda:
+if not args.nobda:
    init_args += ['-a']
 if args.redislog:
    init_args += ['-r']
@@ -73,7 +73,7 @@ time.sleep(15)
 # Upload config file location
 # NOTE: This has to come before template generation!
 # Generate the BDA config file and upload to redis
-if args.bda:
+if not args.nobda:
     print 'Create configuration file'
     p = subprocess.Popen(bda_config_cmd + ['-c', '-r', '/tmp/bdaconfig.txt'])
     p.wait()
@@ -83,7 +83,7 @@ if args.bda:
 time.sleep(10)
 
 # Generate the meta-data template
-if args.bda:
+if not args.nobda:
    run_on_hosts([args.host], python_source_cmd + ['hera_make_hdf5_template_bda.py'] + ['-c', '-r', args.hdf5template], wait=True)
 else:
    run_on_hosts([args.host], python_source_cmd + template_cmd + ['-c', '-r', args.hdf5template], wait=True)
@@ -108,7 +108,7 @@ for v in ['NETWAT', 'NETREC', 'NETPRC']:
 r.publish(pubchan, 'MISSEDPK=0')
 
 # If BDA is requested, write distribution to redis
-if args.bda:
+if not args.nobda:
    baselines = {}
    Nants = 0
    for n in range(4):

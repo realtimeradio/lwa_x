@@ -42,8 +42,8 @@ parser.add_argument('--ibverbs', dest='ibverbs', action='store_true', default=Fa
                     help='Use the IB Verbs netthread. Experimental!')
 parser.add_argument('--redislog', dest='redislog', action='store_true', default=False,
                     help='Use the redis logger to duplicate log messages on redishost\'s log-channel pubsub stream')
-parser.add_argument('--nobda', dest='bda', action='store_false', default=True,
-                    help='Use baseline dependent averaging. (Beta)')
+parser.add_argument('--nobda', dest='nobda', action='store_true', default=False,
+                    help='Use baseline dependent averaging.')
 parser.add_argument('--test', dest='test', action='store_true', default=False,
                     help='Run BDA in test vector mode')
 parser.add_argument('--pypath', dest='pypath', type=str, default="/home/hera/hera-venv",
@@ -69,7 +69,7 @@ if args.ibverbs:
     init_args += ['-i']
 if args.redislog:
     init_args += ['-r']
-if args.bda:
+if not args.nobda:
     init_args += ['-a']
 if args.test:
     init_args += ['-t']
@@ -92,7 +92,7 @@ for host in hosts:
 time.sleep(3)
 
 # Generate the BDA config file and upload to redis
-if args.bda:
+if not args.nobda:
     python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate")+";"]
     run_on_hosts(hosts, python_source_cmd + bda_config_cmd + ["-c", "-r", args.bdaconf], wait=True)
 
