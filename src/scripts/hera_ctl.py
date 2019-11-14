@@ -35,6 +35,8 @@ parser.add_argument('-i', dest='xinstances_per_host', type=int, default=2,
                     help ='Number of X-engine instances per GPU host')
 parser.add_argument('-r', dest='redishost', type=str, default='redishost',
                     help ='Hostname of redis server')
+parser.add_argument('-S', dest='slice_by_xbox', action="store_true",
+                    help ='Set to true to do even/odd samples on the same X-box')
 args = parser.parse_args()
 
 if args.action not in ['start', 'stop']:
@@ -80,13 +82,20 @@ if args.action == 'start':
     # See the docstring at https://github.com/david-macmahon/rb-hashpipe/blob/master/bin/hashpipe_redis_gateway.rb
     # for details about formatting
     
-    for slice in range(args.slices):
-        msg = 'INTSYNC=%d\nINTCOUNT=%d\nINTSTAT=start\nOUTDUMPS=0' % (trig_mcnt + slice*MCNT_STEP_SIZE, acclen)
-        for host in range(args.xhosts):
-            hostname = 'px%d' % (slice * args.xhosts + host + 1)
-            rdb.publish('hashpipe://%s/0/set' % hostname, msg)
-            rdb.publish('hashpipe://%s/1/set' % hostname, msg)
-        #rdb.publish("hashpipe:///set", msg)
+    if args.slice_by_xbox:
+        for host in range(args.slices * args.xhosts):
+            hostname = 'px%d' % (host + 1)
+            for slice in range(args.slices):
+                msg = 'INTSYNC=%d\nINTCOUNT=%d\nINTSTAT=start\nOUTDUMPS=0' % (trig_mcnt + slice*MCNT_STEP_SIZE, acclen)
+                rdb.publish('hashpipe://%s/%s/set' % (hostname, slice), msg)
+                rdb.publish('hashpipe://%s/%s/set' % (hostname, slice), msg)
+    else:
+        for slice in range(args.slices):
+            msg = 'INTSYNC=%d\nINTCOUNT=%d\nINTSTAT=start\nOUTDUMPS=0' % (trig_mcnt + slice*MCNT_STEP_SIZE, acclen)
+            for host in range(args.xhosts):
+                hostname = 'px%d' % (slice * args.xhosts + host + 1)
+                rdb.publish('hashpipe://%s/0/set' % hostname, msg)
+                rdb.publish('hashpipe://%s/1/set' % hostname, msg)
 
     rdb['corr:trig_mcnt'] = trig_mcnt
     rdb['corr:trig_time'] = trig_time

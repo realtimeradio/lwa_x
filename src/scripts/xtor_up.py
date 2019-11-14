@@ -81,7 +81,7 @@ time.sleep(3)
 if (len(hosts) == 1) and (args.timeslices != 1):
    for i in range(args.ninstances):
       key = 'hashpipe://%s/%d/set' % (host, i)
-      r.publish(key, 'TIMEIDX=%d' % (args.ninstances))
+      r.publish(key, 'TIMEIDX=%d' % (i))
 else: 
    for hn, host in enumerate(hosts):
       for i in range(args.ninstances):
