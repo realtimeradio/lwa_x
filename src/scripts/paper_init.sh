@@ -133,8 +133,8 @@ case ${hostname} in
     instances=( 
       #                               GPU       NET FLF GPU OUT
       # mask  bind_host               DEV  XID  CPU CPU CPU CPU
-      "0x00ff eth3                     0  $xid0  0   0x000e   4   5" # Instance 0, eth3
-      "0xff00 eth5                     1  $xid1  8   0x0e00  12  13" # Instance 1, eth5
+      "0x00ff eth3                     0  $xid0  0   0x001c   5   6" # Instance 0, eth3
+      "0xff00 eth5                     1  $xid1  8   0x1c00  13  14" # Instance 1, eth5
     );;
 
   *)
