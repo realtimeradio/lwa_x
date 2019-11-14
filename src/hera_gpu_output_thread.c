@@ -69,9 +69,7 @@ static XGPUInfo xgpu_info;
 
 // Set to 200 Mbps -- OK for two instances per node.
 // With 16 nodes, amounts to 6.4 Gbps of data
-//#define PACKET_DELAY_NS (4 * XENG_CHAN_SUM * 8*OUTPUT_BYTES_PER_PACKET)
-// Blast the packets!
-#define PACKET_DELAY_NS (0)
+#define PACKET_DELAY_NS (OUTPUT_BYTES_PER_PACKET>>2)
 
 // bytes_per_dump depends on xgpu_info.triLength
 static uint64_t bytes_per_dump = 0;
