@@ -9,7 +9,6 @@ import numpy as np
 import time
 import copy
 import redis
-from hera_corr_f import helpers
 
 NANTS = 352
 
