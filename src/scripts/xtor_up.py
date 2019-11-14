@@ -43,7 +43,9 @@ parser.add_argument('--ibverbs', dest='ibverbs', action='store_true', default=Fa
 parser.add_argument('--redislog', dest='redislog', action='store_true', default=False,
                     help='Use the redis logger to duplicate log messages on redishost\'s log-channel pubsub stream')
 parser.add_argument('--nobda', dest='nobda', action='store_true', default=False,
-                    help='Use baseline dependent averaging.')
+                    help='Do not use baseline dependent averaging.')
+parser.add_argument('--nodatabase', dest='nodatabase', action='store_true', default=False,
+                    help='Don\'t try to get configuration from the site database.')
 parser.add_argument('--test', dest='test', action='store_true', default=False,
                     help='Run BDA in test vector mode')
 parser.add_argument('--pypath', dest='pypath', type=str, default="/home/hera/hera-venv",
@@ -94,7 +96,10 @@ time.sleep(3)
 # Generate the BDA config file and upload to redis
 if not args.nobda:
     python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate")+";"]
-    run_on_hosts(hosts, python_source_cmd + bda_config_cmd + ["-c", "-r", args.bdaconf], wait=True)
+    if args.nodatabase:
+        run_on_hosts(hosts, python_source_cmd + bda_config_cmd + [args.bdaconf], wait=True)
+    else:
+        run_on_hosts(hosts, python_source_cmd + bda_config_cmd + ["-c", "-r", args.bdaconf], wait=True)
 
     for hn,host in enumerate(hosts):
        for i in range(args.ninstances):
