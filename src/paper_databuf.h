@@ -30,13 +30,16 @@
 #define N_CHAN_PER_X         XGPU_NFREQUENCY
 
 // Derived from above quantities
-#define N_FENGINES		N_ANTS
+#define N_FENGINES		((N_INPUTS / N_INPUTS_PER_PACKET) * N_INPUTS_PER_PACKET)
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / N_TIME_PER_PACKET)
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK N_TIME_PER_BLOCK
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / 2048)
 #define N_BYTES_PER_BLOCK            (N_TIME_PER_BLOCK * N_CHAN_PER_X * N_INPUTS)
-#define N_PACKETS_PER_BLOCK          (N_BYTES_PER_BLOCK / N_BYTES_PER_PACKET)
-#define N_PACKETS_PER_BLOCK_PER_F    (N_PACKETS_PER_BLOCK * N_INPUTS_PER_PACKET / 2 / N_FENGINES)
+// Number of bytes per block if we assume an integral number of SNAP boards,
+// with all other antennas being fake padding required for XGPU sizing compliance.
+#define N_BYTES_PER_BLOCK_NET        (N_TIME_PER_BLOCK * N_CHAN_PER_X * N_FENGINES)
+#define N_PACKETS_PER_BLOCK          (N_BYTES_PER_BLOCK_NET / N_BYTES_PER_PACKET)
+#define N_PACKETS_PER_BLOCK_PER_F    (N_INPUTS_PER_PACKET * N_PACKETS_PER_BLOCK / N_FENGINES)
 // Number of X-engines per time slice. E.g. for HERA: 16.
 #define N_XENGINES_PER_TIME (N_CHAN_TOTAL / N_CHAN_PER_X)
 
@@ -45,7 +48,7 @@
 #error N_BYTES_PER_PACKET != (N_TIME_PER_PACKET*N_CHAN_PER_PACKET*N_INPUTS_PER_PACKET)
 #endif
 
-#define N_FLUFFED_BYTES_PER_BLOCK  ((N_PACKETS_PER_BLOCK * N_BYTES_PER_PACKET) * 2)
+#define N_FLUFFED_BYTES_PER_BLOCK  (N_BYTES_PER_BLOCK * 2)
 #define N_FLUFFED_WORDS_PER_BLOCK (N_FLUFFED_BYTES_PER_BLOCK / 8) 
 
 // Number of floats in xGPU's "register tile order" output matrix.
@@ -82,7 +85,7 @@
  * INPUT BUFFER STRUCTURES
  */
 
-#define N_INPUT_BLOCKS 4
+#define N_INPUT_BLOCKS 16
 #ifndef N_DEBUG_INPUT_BLOCKS
 #define N_DEBUG_INPUT_BLOCKS 0
 #endif
