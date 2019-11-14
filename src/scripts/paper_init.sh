@@ -131,10 +131,9 @@ case ${hostname} in
     xid1=$(( 2*(mypx-1) + 1))
 
     instances=( 
-      #                               GPU       NET    FLF   GPU  OUT  BDA
       # mask  bind_host               DEV  XID  CPU    CPU   CPU  CPU  CPU
-      "0x00ff eth3                     0  $xid0  0   0x0006   3    4    5 " # Instance 0, eth3
-      "0xff00 eth5                     1  $xid1  8   0x0600  11   12   10 " # Instance 1, eth5
+      "0x00ff eth3                     0  $xid0  0   0x000e   4    5    6 " # Instance 0, eth3
+      "0xff00 eth5                     1  $xid1  8   0x0e00  12   13   14 " # Instance 1, eth5
     );;
 
   *)

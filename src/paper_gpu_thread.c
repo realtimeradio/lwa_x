@@ -51,6 +51,9 @@ static void *run(hashpipe_thread_args_t * args, int doCPU)
     hputi8(st.buf, "GPUDUMPS", 0);
     hgeti4(st.buf, "GPUDEV", &gpu_dev); // No change if not found
     hputi4(st.buf, "GPUDEV", gpu_dev);
+    hputi8(st.buf, "GPUNANT", N_ANTS);
+    hputi8(st.buf, "GPUNCHAN", N_CHAN_PER_X);
+    hputi8(st.buf, "GPUNTIME", N_TIME_PER_BLOCK);
     hashpipe_status_unlock_safe(&st);
 
     /* Loop */

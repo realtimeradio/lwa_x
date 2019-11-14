@@ -614,7 +614,7 @@ static void *run(hashpipe_thread_args_t * args)
     hibv_ctx.send_pkt_num = 1;
     hibv_ctx.recv_pkt_num = 8192;
     hibv_ctx.pkt_size_max = 5000;
-    hibv_ctx.max_flows = 4;
+    hibv_ctx.max_flows = 2;
 
     fprintf(stdout, "Initializing IBV socket\n");
     if(hashpipe_ibv_init(&hibv_ctx)) {
@@ -802,7 +802,7 @@ static void *run(hashpipe_thread_args_t * args)
                 ns_per_wait = (float)elapsed_wait_ns / packet_count;
                 ns_per_recv = (float)elapsed_recv_ns / packet_count;
                 ns_per_proc = (float)elapsed_proc_ns / packet_count;
-                fprintf(stdout, "ns_per_recv: %f, total_ns: %lu, packet count: %lu\n", ns_per_recv, elapsed_recv_ns, packet_count);
+                //fprintf(stdout, "ns_per_recv: %f, total_ns: %lu, packet count: %lu\n", ns_per_recv, elapsed_recv_ns, packet_count);
 
                 hashpipe_status_lock_busywait_safe(&st);
 
@@ -861,6 +861,10 @@ static void *run(hashpipe_thread_args_t * args)
         hputu8(st.buf, "BURSTPKT", burst_packet_count);
         hashpipe_status_unlock_safe(&st);
 
+        // Warn if it looks like overflows are a danger
+        if (burst_packet_count*2 > hibv_ctx.recv_pkt_num) {
+           fprintf(stderr, "WARNING: got %lu packets in last burst\n", burst_packet_count);
+        }
 	// Release packets
         if (hashpipe_ibv_release_pkts(&hibv_ctx, hibv_rpkt)) {
 	    hashpipe_error(__FUNCTION__, "error releasing packets");
