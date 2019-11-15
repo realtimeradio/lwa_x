@@ -88,7 +88,6 @@ typedef struct {
     hid_t nsamples_fs;
     hid_t time_array_fs;
     hid_t integration_time_fs;
-    hid_t uvw_array_fs;
     hid_t ant_1_array_fs;
     hid_t ant_2_array_fs;
 } hdf5_id_t;
@@ -404,6 +403,7 @@ static void close_filespaces(hdf5_id_t *id)
     H5Sclose(id->time_array_fs);
     H5Sclose(id->ant_1_array_fs);
     H5Sclose(id->ant_2_array_fs);
+    H5Sclose(id->integration_time_fs);
 }
 
 // The data in the files should be indexed in real antennas numbers, not 
