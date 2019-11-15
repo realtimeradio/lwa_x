@@ -45,7 +45,7 @@ parser.add_argument('--pypath', dest='pypath', type=str, default="/home/hera/her
 args = parser.parse_args()
 
 # Environment sourcing command required to run remote python jobs
-python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate")+";"]
+python_source_cmd = ["source", os.path.join(args.pypath, "bin/activate"), ";"]
 
 r = redis.Redis(args.redishost)
 
@@ -75,10 +75,8 @@ time.sleep(15)
 # Generate the BDA config file and upload to redis
 if not args.nobda:
     print 'Create configuration file'
-    p = subprocess.Popen(bda_config_cmd + ['-c', '-r', '/tmp/bdaconfig.txt'])
-    p.wait()
-    #run_on_hosts([args.host], python_source_cmd + [';'] + bda_config_cmd + ['-c','-r', '/tmp/bdaconfig.txt'], wait=True)
-    os.system('scp "%s" "%s:%s"' % ('/tmp/bdaconfig.txt','hera-sn1', '/tmp/bdaconfig.txt') )
+    run_on_hosts([args.host], python_source_cmd + bda_config_cmd + ['-c','-r', '/tmp/bdaconfig.txt'], wait=True)
+    os.system('scp "%s:%s" "%s" ' % ('hera-sn1', '/tmp/bdaconfig.txt','/tmp/bdaconfig.txt') )
     
 time.sleep(10)
 
