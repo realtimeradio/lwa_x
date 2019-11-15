@@ -71,7 +71,7 @@ typedef struct struct_pkt {
 
 // Set to 200 Mbps -- OK for two instances per node.
 // With 16 nodes, amounts to 6.4 Gbps of data
-#define PACKET_DELAY_NS (8 * OUTPUT_BYTES_PER_PACKET)
+#define PACKET_DELAY_NS (4 * 8 * OUTPUT_BYTES_PER_PACKET)
 
 // Open and connect a UDP socket to the given host and port.  Note that port is
 // a string and can be a stringified integer (e.g. "7148") or a service name
@@ -213,7 +213,7 @@ static void *run(hashpipe_thread_args_t * args)
            != HASHPIPE_OK) {
        if (rv==HASHPIPE_TIMEOUT) {
            hashpipe_status_lock_safe(&st);
-           hputs(st.buf, status_key, "blocked_in");
+           hputs(st.buf, status_key, "blocked");
            hashpipe_status_unlock_safe(&st);
            continue;
        } else {
