@@ -80,6 +80,7 @@ typedef struct {
     hid_t flags_did;
     hid_t nsamples_did;
     hid_t time_array_did;
+    hid_t integration_time_did;
     hid_t uvw_array_did;
     hid_t ant_1_array_did;
     hid_t ant_2_array_did;
@@ -87,6 +88,7 @@ typedef struct {
     hid_t flags_fs;
     hid_t nsamples_fs;
     hid_t time_array_fs;
+    hid_t integration_time_fs;
     hid_t uvw_array_fs;
     hid_t ant_1_array_fs;
     hid_t ant_2_array_fs;
@@ -233,9 +235,16 @@ static void init_headers_dataset(hdf5_id_t *id) {
        pthread_exit(NULL);
    }
 
+    id->integration_time_did = H5Dcreate(id->header_gid, "integration_time", H5T_NATIVE_DOUBLE, file_space, H5P_DEFAULT, plist, H5P_DEFAULT);
+    if (id->integration_time_did < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to create integration_time dataset");
+        pthread_exit(NULL);
+    }
+
    id->time_array_fs = H5Dget_space(id->time_array_did);
    id->ant_1_array_fs = H5Dget_space(id->ant_1_array_did);
    id->ant_2_array_fs = H5Dget_space(id->ant_2_array_did);
+   id->integration_time_fs = H5Dget_space(id->integration_time_did);
 
    H5Pclose(plist);
    H5Sclose(file_space);
@@ -429,7 +438,7 @@ static void get_integration_time(hdf5_id_t *id, double *integration_time_buf, ui
     hid_t dataset_id;
     herr_t status;
     int i;
-    dataset_id = H5Dopen(id->header_gid, "integration_time", H5P_DEFAULT);
+    dataset_id = H5Dopen(id->header_gid, "integration_bin", H5P_DEFAULT);
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to open Header/integration_time dataset");
         pthread_exit(NULL);
@@ -515,7 +524,7 @@ static void write_baseline_index(hdf5_id_t *id, hsize_t bcnt, hsize_t nblts, hid
  * Write: time, ant0, ant1
  */
 
-static void write_header(hdf5_id_t *id, double *time_array_buf, int *ant_0_array, int *ant_1_array)
+static void write_header(hdf5_id_t *id, double *time_array_buf, int *ant_0_array, int *ant_1_array, double *integration_time_buf)
 {  
    // time stamp of integration
    if (H5Dwrite(id->time_array_did, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, time_array_buf) < 0) {
@@ -530,6 +539,11 @@ static void write_header(hdf5_id_t *id, double *time_array_buf, int *ant_0_array
    // ant1
    if (H5Dwrite(id->ant_2_array_did, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, ant_1_array) < 0) {
        hashpipe_error(__FUNCTION__, "Error writing ant_2_array");
+   }
+
+   // integration_time
+   if (H5Dwrite(id->integration_time_did, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, integration_time_buf) < 0) {
+       hashpipe_error(__FUNCTION__, "Error writing integration time");
    }
 }
 
@@ -1042,12 +1056,12 @@ static void *run(hashpipe_thread_args_t * args)
                  file_stop_t = gps_time;
                  file_duration = file_stop_t - file_start_t;
 
-                 write_header(&sum_file, time_array_buf, ant_0_array, ant_1_array);
+                 write_header(&sum_file, time_array_buf, ant_0_array, ant_1_array, integration_time_buf);
                  close_filespaces(&sum_file);
                  close_file(&sum_file, file_stop_t, file_duration, file_nblts);
 
                  #ifndef SKIP_DIFF 
-                 write_header(&diff_file, time_array_buf, ant_0_array, ant_1_array);
+                 write_header(&diff_file, time_array_buf, ant_0_array, ant_1_array, integration_time_buf);
                  close_filespaces(&diff_file);
                  close_file(&diff_file, file_stop_t, file_duration, file_nblts);
                  #endif

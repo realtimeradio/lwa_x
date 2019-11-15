@@ -136,14 +136,14 @@ def create_header(h5, config, use_cm=False, use_redis=False):
     N_MAX_INTTIME = 8
     config = np.loadtxt(config, dtype=np.int)
     baselines = []
-    integration_time = []
+    integration_bin = []
 
     for i,t in enumerate(config[:,2]):
         if (t!=0):
            baselines.append([(config[i,0], config[i,1])]*(8//t))
-           integration_time.append(np.repeat(t, int(8//t)))
+           integration_bin.append(np.repeat(t, int(8//t)))
     baselines = np.concatenate(baselines)
-    integration_time = np.asarray(np.concatenate(integration_time), dtype=np.float64)
+    integration_bin = np.asarray(np.concatenate(integration_bin), dtype=np.float64)
 
     ant_1_array = np.array([x for (x,y) in baselines])
     ant_2_array = np.array([y for (x,y) in baselines])
@@ -206,7 +206,7 @@ def create_header(h5, config, use_cm=False, use_redis=False):
     header.create_dataset("freq_array",        dtype="<f8", shape=(1, NCHANS), data=freqs) #TODO Get from config
     header.create_dataset("history",   data=np.string_("%s: Template file created\n" % time.ctime()))
     header.create_dataset("instrument", data=np.string_(INSTRUMENT))
-    header.create_dataset("integration_time", dtype="<f8", data=integration_time)
+    header.create_dataset("integration_bin", dtype="<f8", data=integration_bin)
     header.create_dataset("object_name", data=np.string_("zenith"))
     header.create_dataset("phase_type",  data=np.string_("drift"))
     header.create_dataset("polarization_array", dtype="<i8", data=[-5, -6, -7, -8])
