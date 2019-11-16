@@ -80,7 +80,6 @@ typedef struct {
     hid_t nsamples_did;
     hid_t time_array_did;
     hid_t integration_time_did;
-    hid_t uvw_array_did;
     hid_t ant_1_array_did;
     hid_t ant_2_array_did;
     hid_t visdata_fs;
@@ -311,12 +310,12 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/obs_id");
     }
-    H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_obs_id);
-    if (dataset_id < 0) {
+    stat = H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_obs_id);
+    if (stat < 0) {
         hashpipe_error(__FUNCTION__, "Failed to write Header/extra_keywords/obs_id");
     }
-    H5Dclose(dataset_id);
-    if (dataset_id < 0) {
+    stat = H5Dclose(dataset_id);
+    if (stat < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/obs_id");
     }
 
@@ -344,12 +343,12 @@ static void start_file(hdf5_id_t *id, char *template_fname, char *hdf5_fname, ui
     if (dataset_id < 0) {
         hashpipe_error(__FUNCTION__, "Failed to open Header/extra_keywords/startt");
     }
-    H5Dwrite(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_start_t);
-    if (dataset_id < 0) {
+    stat = H5Dwrite(dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_start_t);
+    if (stat < 0) {
         hashpipe_error(__FUNCTION__, "Failed to write Header/extra_keywords/startt");
     }
-    H5Dclose(dataset_id);
-    if (dataset_id < 0) {
+    stat = H5Dclose(dataset_id);
+    if (stat < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close Header/extra_keywords/startt");
     }
 }
@@ -366,6 +365,7 @@ static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, 
     dataset_id = H5Dopen(id->header_gid, "Nblts", H5P_DEFAULT);
     H5Dwrite(dataset_id, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &file_nblts);
     H5Dclose(dataset_id);
+
     // Close datasets
     if (H5Dclose(id->visdata_did) < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close visdata dataset");
@@ -376,6 +376,19 @@ static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, 
     if (H5Dclose(id->nsamples_did) < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close nsamples dataset");
     }
+    if (H5Dclose(id->time_array_did) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close nsamples dataset");
+    }
+    if (H5Dclose(id->ant_1_array_did) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close nsamples dataset");
+    }
+    if (H5Dclose(id->ant_2_array_did) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close nsamples dataset");
+    }
+    if (H5Dclose(id->integration_time_did) < 0) {
+        hashpipe_error(__FUNCTION__, "Failed to close nsamples dataset");
+    }
+
     // Close groups
     if (H5Gclose(id->extra_keywords_gid) < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close extra_keywords group");
@@ -386,6 +399,7 @@ static void close_file(hdf5_id_t *id, double file_stop_t, double file_duration, 
     if (H5Gclose(id->data_gid) < 0) {
         hashpipe_error(__FUNCTION__, "Failed to close data group");
     }
+
     // Close file
     if (H5Fflush(id->file_id, H5F_SCOPE_GLOBAL) < 0) {
         hashpipe_error(__FUNCTION__, "Failed to flush file");
