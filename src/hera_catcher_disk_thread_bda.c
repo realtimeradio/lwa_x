@@ -620,6 +620,22 @@ static void compute_sum_diff(int32_t *in, int32_t *out_sum, int32_t *out_diff, u
 return;
 }
 
+static void add_mc_obs(char *fname)
+{
+  char cmd[256];
+  int err;
+  fprintf(stdout, "Adding observation %s to M&C\n", fname);
+  // Launch (hard-coded) python script in the background and pass in filename
+  sprintf(cmd, "/home/hera/hera-venv/bin/mc_add_observation.py %s", fname);
+  if (fork() == 0) {
+    err = system(cmd);
+    if (err != 0) {
+      fprintf(stderr, "Error adding observation %s to M&C\n", fname);
+    }
+    exit(0);
+  }
+}
+
 static int init(hashpipe_thread_args_t *args)
 {
     //hashpipe_status_t st = args->st;
@@ -1089,6 +1105,9 @@ static void *run(hashpipe_thread_args_t * args)
                  #endif
 
                  file_cnt += 1;
+
+                 // add file to M&C
+                 add_mc_obs(hdf5_fname);
 
                  hashpipe_status_lock_safe(&st);
                  hputr4(st.buf, "FILESEC", file_duration);
