@@ -1227,7 +1227,11 @@ static void *run(hashpipe_thread_args_t * args)
         hputi8(st.buf, "DISKWBL", w_ns/BASELINES_PER_BLOCK);
 
         hgetr4(st.buf, "DISKMING", &min_gbps);
-        gbps = (float)(BASELINES_PER_BLOCK*N_CHAN_PROCESSED*N_STOKES*64L)/ELAPSED_NS(start,finish); //elapsed_w_ns; 
+        #ifndef SKIP_DIFF
+          gbps = (float)(2 * BASELINES_PER_BLOCK*N_CHAN_PROCESSED*N_STOKES*64L)/ELAPSED_NS(start,finish);
+        #else
+          gbps = (float)(BASELINES_PER_BLOCK*N_CHAN_PROCESSED*N_STOKES*64L)/ELAPSED_NS(start,finish); 
+        #endif
         hputr4(st.buf, "DISKGBPS", gbps);
         hputr4(st.buf, "DUMPMS", ELAPSED_NS(start,finish) / 1000000.0);
         if(min_gbps == 0 || gbps < min_gbps) {
