@@ -83,7 +83,7 @@ static void *fake_gpu_thread_run(hashpipe_thread_args_t * args){
    int holdoff = 1;
  
    // Force this thread into holdoff until BDACONF is written
-   fprintf(stderr, "Waiting for someone to supply BDACONF\n");
+   fprintf(stdout, "Waiting for someone to supply BDACONF\n");
    hashpipe_status_lock_safe(&st);
    hputs(st.buf, "BDACONF", "");
    hputs(st.buf, status_key, "holding");
