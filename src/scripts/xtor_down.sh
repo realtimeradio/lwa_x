@@ -49,7 +49,7 @@ done
 shift $((OPTIND-1))
 
 # Name of PAPER server
-PAPER=paper1
+PAPER=hera-corr-head
 
 # Make sure we are on the PAPER server
 hostname=`hostname -s`
@@ -62,7 +62,7 @@ fi
 # If no parameters are given (the normal case), use slices {1..8}
 if [ $# -eq 0 ]
 then
-  set {1..8}
+  set {1..16}
 fi
 
 # Stop taking data
@@ -84,19 +84,9 @@ then
   echo 'timeout!'
 fi
 
-if pgrep cn_rx.py > /dev/null
-then
-  echo 'cn_rx.py still running!'
-fi
-
-# Just to be sure
-echo "killing cn_rx.py (just to be sure)"
-pkill    cn_rx.py
-pkill -9 cn_rx.py
-
 # Stop integrations
 echo "stopping integrations"
-paper_ctl.rb stop
+hera_ctl.py stop
 
 # Stop hashpipe-redis gateways
 echo "stopping hashpipe-redis gateways"
@@ -104,23 +94,34 @@ redis-cli -h redishost publish hashpipe:///gateway quit
 
 # Just to be sure
 echo "killing any remaining hashpipe-redis gateways"
-for x; do ssh px$x pkill    -f hashpipe_redis_gateway.rb; done
-for x; do ssh px$x pkill -9 -f hashpipe_redis_gateway.rb; done
+for x; do ssh root@px$x pkill    -f hashpipe_redis_gateway.rb; done
+for x; do ssh root@px$x pkill -9 -f hashpipe_redis_gateway.rb; done
+
+#Kill any redis loggers
+echo "killing any redis loggers"
+for x; do ssh root@px$x pkill    -f stdin_to_redis.py; done
+for x; do ssh root@px$x pkill -9 -f stdin_to_redis.py; done
 
 # Stop hashpipe instances
 echo "killing hashpipe instances"
-for x; do ssh px$x pkill    hashpipe; done
-for x; do ssh px$x pkill -9 hashpipe; done
+for x; do ssh root@px$x pkill    hashpipe; done
+for x; do ssh root@px$x pkill -9 hashpipe; done
+
+# Stop hashpipe_check_status process, which can hang if something has gone wrong previously
+echo "killing hashpipe_check_status instances"
+for x; do ssh root@px$x pkill    hashpipe_check_status; done
+for x; do ssh root@px$x pkill -9 hashpipe_check_status; done
 
 # Delete shared memory and semaphores
 echo "deleting shared memory and semaphores"
 for x; do
-  for i in {0..3}; do
-    ssh px$x hashpipe_clean_shmem -d -I $i > /dev/null
+  for i in {0..1}; do
+    ssh root@px$x hashpipe_clean_shmem -d -I $i > /dev/null
   done
 done
 
 # Just to be sure
 echo "nuking any remaining shared memory and semaphores"
-for x; do ssh px$x 'ipcs -m | awk "/0x/{print \"ipcrm -m\", \$2}" | sh'; done
-for x; do ssh px$x 'ipcs -s | awk "/0x/{print \"ipcrm -s\", \$2}" | sh'; done
+for x; do ssh root@px$x 'ipcs -m | awk "/0x/{print \"ipcrm -m\", \$2}" | sh'; done
+for x; do ssh root@px$x 'ipcs -s | awk "/0x/{print \"ipcrm -s\", \$2}" | sh'; done
+for x; do ssh root@px$x 'rm /dev/shm/*hashpipe*'; done

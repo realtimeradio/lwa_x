@@ -21,6 +21,7 @@
 #include "hashpipe.h"
 #include "paper_databuf.h"
 
+
 #define DEBUG_NET
 
 #ifndef MIN
@@ -31,15 +32,20 @@
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #endif
 
-#define PKTSOCK_BYTES_PER_FRAME (16384)
-#define PKTSOCK_FRAMES_PER_BLOCK (8)
-#define PKTSOCK_NBLOCKS (800)
+//#define PKTSOCK_BYTES_PER_FRAME (16384)
+//#define PKTSOCK_FRAMES_PER_BLOCK (8)
+//#define PKTSOCK_NBLOCKS (800)
+//#define PKTSOCK_NFRAMES (PKTSOCK_FRAMES_PER_BLOCK * PKTSOCK_NBLOCKS)
+#define PKTSOCK_BYTES_PER_FRAME (4864)
+#define PKTSOCK_FRAMES_PER_BLOCK (128)
+#define PKTSOCK_NBLOCKS (5000)
 #define PKTSOCK_NFRAMES (PKTSOCK_FRAMES_PER_BLOCK * PKTSOCK_NBLOCKS)
 
 typedef struct {
-    uint64_t mcnt;
-    int      fid;	// Fengine ID
-    int      xid;	// Xengine ID
+    uint64_t mcnt;      // m-index of block in output buffer (runs from 0 to Nm)
+    uint64_t time;      // First time sample in a packet
+    int      chan;	// First channel in a packet
+    int      ant;	// Antenna in a packet
 } packet_header_t;
 
 // The fields of a block_info_t structure hold (at least) two different kinds
@@ -53,19 +59,24 @@ typedef struct {
     uint64_t mcnt_log_late;
     int out_of_seq_cnt;
     int block_i;
-    // The m,x,f fields hold three of the five dimensional indices for
-    // the first data word of the current packet (i.e. t=0 and c=0).
-    int m; // formerly known as sub_block_i
-    int f;
+    int m; // m-index of block in output buffer (runs from 0 to Nm)
+    int t; // first time sample in the packet // formerly known as sub_block_i
+    int c; // first channel in the packet
+    int a; // antenna in the packet
     int block_packet_counter[N_INPUT_BLOCKS];
 } block_info_t;
 
 static hashpipe_status_t *st_p;
 
+// A variable to store whether this receiver is processing
+// even or odd samples (or in principle a subset of a higher
+// order 2^<integer> split
+static int time_index;
+
 #if 0
 static void print_pkt_header(packet_header_t * pkt_header) {
 
-    static long long prior_mcnt;
+    static long int prior_mcnt;
 
     printf("packet header : mcnt %012lx (diff from prior %lld) fid %d xid %d\n",
 	   pkt_header->mcnt, pkt_header->mcnt-prior_mcnt, pkt_header->fid, pkt_header->xid);
@@ -76,8 +87,8 @@ static void print_pkt_header(packet_header_t * pkt_header) {
 
 #ifdef DIE_ON_OUT_OF_SEQ_FILL
 static void print_block_info(block_info_t * binfo) {
-    printf("binfo : mcnt_start %012lx block_i %d m=%02d f=%d\n",
-           binfo->mcnt_start, binfo->block_i, binfo->m, binfo->f);
+    printf("binfo : mcnt_start %012lx block_i %d t=%02d c=%d a=%d\n",
+           binfo->mcnt_start, binfo->block_i, binfo->t, binfo->c, binfo->a);
 }
 
 static void print_block_packet_counter(block_info_t * binfo) {
@@ -105,7 +116,14 @@ static void print_ring_mcnts(paper_input_databuf_t *paper_input_databuf_p) {
 // Returns physical block number for given mcnt
 static inline int block_for_mcnt(uint64_t mcnt)
 {
-    return (mcnt / Nm) % N_INPUT_BLOCKS;
+    return ((mcnt / TIME_DEMUX) / N_TIME_PER_BLOCK) % N_INPUT_BLOCKS;
+}
+
+// Returns start mcnt for the block containing a  given mcnt
+static inline uint64_t start_for_mcnt(uint64_t mcnt)
+{
+    uint64_t mcnt_time_index = ((mcnt / N_TIME_PER_PACKET) % TIME_DEMUX);
+    return (mcnt - (mcnt%(N_TIME_PER_BLOCK * TIME_DEMUX)) + (mcnt_time_index*N_TIME_PER_PACKET));
 }
 
 #ifdef LOG_MCNTS
@@ -143,15 +161,19 @@ static inline void get_header (unsigned char *p_frame, packet_header_t * pkt_hea
 #ifdef TIMING_TEST
     static int pkt_counter=0;
     // HERA TODO
-    pkt_header->mcnt = (pkt_counter / (Nx*Nq*Nf)) %  Nm;
-    pkt_header->xid  = (pkt_counter / (   Nq*Nf)) %  Nx;
-    pkt_header->fid  = (pkt_counter             ) % (Nq*Nf);
-    pkt_counter++;
+    //pkt_header->mcnt = (pkt_counter / (Nx*Nq*Nf)) %  Nm;
+    //pkt_header->xid  = (pkt_counter / (   Nq*Nf)) %  Nx;
+    //pkt_header->fid  = (pkt_counter             ) % (Nq*Nf);
+    //pkt_counter++;
 #else
     uint64_t raw_header;
-    raw_header = be64toh(*(unsigned long long *)PKT_UDP_DATA(p_frame));
-    pkt_header->mcnt        = (raw_header >> 27) & ((1<<37)-1);
-    pkt_header->chan        = (raw_header >> 16) & ((1<<11)-1);
+    raw_header = be64toh(*(unsigned long int *)PKT_UDP_DATA(p_frame));
+    // raw header contains value of first time sample, not mcnt, as defined in this code
+    //pkt_header->time        = (raw_header >> 27) & ((1L<<37)-1);
+    //pkt_header->mcnt        = pkt_header->time >> 5;
+    //pkt_header->mcnt        = (raw_header >> 32) & 0xffffffff;
+    pkt_header->mcnt        = (raw_header >> 29) & ((1L<<35)-1);
+    pkt_header->chan        = (raw_header >> 16) & ((1<<13)-1);
     pkt_header->ant         =  raw_header        & ((1<<16)-1);
 #endif
 
@@ -164,7 +186,7 @@ static inline void get_header (unsigned char *p_frame, packet_header_t * pkt_hea
     //}
     // HERA TODO
     if(total_packets_counted == 10*1000*1000) {
-	dump_mcnt_log(pkt_header->xid);
+	dump_mcnt_log(pkt_header->chan);
 	abort();
     }
 #endif
@@ -190,7 +212,7 @@ static uint64_t set_block_filled(paper_input_databuf_t *paper_input_databuf_p, b
 {
     static int last_filled = -1;
 
-    uint32_t block_missed_pkt_cnt=HERA_N_PACKETS_PER_BLOCK, block_missed_mod_cnt, block_missed_feng, missed_pkt_cnt=0;
+    uint32_t block_missed_pkt_cnt=N_PACKETS_PER_BLOCK, block_missed_mod_cnt, block_missed_feng, missed_pkt_cnt=0;
 
     uint32_t block_i = block_for_mcnt(binfo->mcnt_start);
 
@@ -198,6 +220,7 @@ static uint64_t set_block_filled(paper_input_databuf_t *paper_input_databuf_p, b
     last_filled = (last_filled+1) % N_INPUT_BLOCKS;
     if(last_filled != block_i) {
 	printf("block %d being marked filled, but expected block %d!\n", block_i, last_filled);
+
 #ifdef DIE_ON_OUT_OF_SEQ_FILL
 	die(paper_input_databuf_p, binfo);
 #endif
@@ -214,7 +237,7 @@ static uint64_t set_block_filled(paper_input_databuf_t *paper_input_databuf_p, b
 #endif
 
     // If all packets are accounted for, mark this block as good
-    if(binfo->block_packet_counter[block_i] == HERA_N_PACKETS_PER_BLOCK) {
+    if(binfo->block_packet_counter[block_i] == N_PACKETS_PER_BLOCK) {
 	paper_input_databuf_p->block[block_i].header.good_data = 1;
     }
 
@@ -225,13 +248,14 @@ static uint64_t set_block_filled(paper_input_databuf_t *paper_input_databuf_p, b
     }
 
     // Calculate missing packets.
-    block_missed_pkt_cnt = HERA_N_PACKETS_PER_BLOCK - binfo->block_packet_counter[block_i];
+    block_missed_pkt_cnt = N_PACKETS_PER_BLOCK - binfo->block_packet_counter[block_i];
+    //fprintf(stderr, "Packets in block %d: %d, N_PACKETS_PER_BLOCK: %d, N_PACKETS_PER_BLOCK_PER_F: %d,  mod_cnt: %d\n", block_i, binfo->block_packet_counter[block_i], N_PACKETS_PER_BLOCK,  N_PACKETS_PER_BLOCK_PER_F, block_missed_pkt_cnt % N_PACKETS_PER_BLOCK_PER_F);
     // If we missed more than N_PACKETS_PER_BLOCK_PER_F, then assume we
     // are missing one or more F engines.  Any missed packets beyond an
     // integer multiple of N_PACKETS_PER_BLOCK_PER_F will be considered
     // as dropped packets.
-    block_missed_feng    = block_missed_pkt_cnt / HERA_N_PACKETS_PER_BLOCK_PER_F;
-    block_missed_mod_cnt = block_missed_pkt_cnt % HERA_N_PACKETS_PER_BLOCK_PER_F;
+    block_missed_feng    = N_INPUTS_PER_PACKET / 2 * block_missed_pkt_cnt / N_PACKETS_PER_BLOCK_PER_F;
+    block_missed_mod_cnt = block_missed_pkt_cnt % N_PACKETS_PER_BLOCK_PER_F;
 
     // Reinitialize our XID to -1 (unknown until read from status buffer)
     binfo->self_xid = -1;
@@ -241,6 +265,7 @@ static uint64_t set_block_filled(paper_input_databuf_t *paper_input_databuf_p, b
     hputu4(st_p->buf, "NETBKOUT", block_i);
     hputu4(st_p->buf, "MISSEDFE", block_missed_feng);
     if(block_missed_mod_cnt) {
+        //fprintf(stdout, "Expected %d packets, Got %d\n", N_PACKETS_PER_BLOCK, binfo->block_packet_counter[block_i]);
 	// Increment MISSEDPK by number of missed packets for this block
 	hgetu4(st_p->buf, "MISSEDPK", &missed_pkt_cnt);
 	missed_pkt_cnt += block_missed_mod_cnt;
@@ -257,30 +282,33 @@ static uint64_t set_block_filled(paper_input_databuf_t *paper_input_databuf_p, b
 
 static inline int calc_block_indexes(block_info_t *binfo, packet_header_t * pkt_header)
 {
-    if(pkt_header->fid >= Nf) {
+    if(pkt_header->ant >= Na) {
 	hashpipe_error(__FUNCTION__,
-		"current packet FID %u out of range (0-%d)",
-		pkt_header->fid, Nf-1);
+		"current packet Antenna ID %u out of range (0-%d)",
+		pkt_header->ant, Na-1);
 	return -1;
-    } else if(pkt_header->xid != binfo->self_xid && binfo->self_xid != -1) {
-	hashpipe_error(__FUNCTION__,
-		"unexpected packet XID %d (expected %d)",
-		pkt_header->xid, binfo->self_xid);
-	return -1;
+// HERA TODO
+//    } else if(pkt_header->chan != binfo->self_xid && binfo->self_xid != -1) {
+//	hashpipe_error(__FUNCTION__,
+//		"unexpected packet XID %d (expected %d)",
+//		pkt_header->xid, binfo->self_xid);
+//	return -1;
     }
 
-    binfo->m = pkt_header->mcnt % Nm;
-    binfo->f = pkt_header->fid;
+    //binfo->t = pkt_header->time;
+    binfo->m = ((pkt_header->mcnt/TIME_DEMUX) % N_TIME_PER_BLOCK) / N_TIME_PER_PACKET;
+    binfo->a = pkt_header->ant;
+    binfo->c = pkt_header->chan % Nc;
 
     return 0;
 }
 
 // This allows for 2 out of sequence packets from each F engine (in a row)
-#define MAX_OUT_OF_SEQ (2*Nf)
+#define MAX_OUT_OF_SEQ (2*Na)
 
 // This allows packets to be two full databufs late without being considered
 // out of sequence.
-#define LATE_PKT_MCNT_THRESHOLD (2*Nm*N_INPUT_BLOCKS)
+#define LATE_PKT_MCNT_THRESHOLD (2*TIME_DEMUX*N_TIME_PER_BLOCK*N_INPUT_BLOCKS)
 
 // Initialize a block by clearing its "good data" flag and saving the first
 // (i.e. earliest) mcnt of the block.  Note that mcnt does not have to be a
@@ -290,10 +318,15 @@ static inline int calc_block_indexes(block_info_t *binfo, packet_header_t * pkt_
 static inline void initialize_block(paper_input_databuf_t * paper_input_databuf_p, uint64_t mcnt)
 {
     int block_i = block_for_mcnt(mcnt);
+    uint64_t mcnt_time_index;
 
     paper_input_databuf_p->block[block_i].header.good_data = 0;
-    // Round pkt_mcnt down to nearest multiple of Nm
-    paper_input_databuf_p->block[block_i].header.mcnt = mcnt - (mcnt%Nm);
+    // Round pkt_mcnt down to nearest multiple of N_TIME_PER_BLOCK
+    mcnt_time_index = ((mcnt / N_TIME_PER_PACKET) % TIME_DEMUX);
+    if (mcnt_time_index != time_index) {
+        fprintf(stderr, "Expected packets from time index %d, but got index %lu\n", time_index, mcnt_time_index);
+    }
+    paper_input_databuf_p->block[block_i].header.mcnt = start_for_mcnt(mcnt);
 }
 
 // This function must be called once and only once per block_info structure!
@@ -319,8 +352,8 @@ static inline void initialize_block_info(block_info_t * binfo)
     hashpipe_status_unlock_safe(st_p);
 
     // On startup mcnt_start will be zero and mcnt_log_late will be Nm.
-    binfo->mcnt_start = 0;
-    binfo->mcnt_log_late = Nm;
+    binfo->mcnt_start = time_index;
+    binfo->mcnt_log_late = N_TIME_PER_BLOCK*TIME_DEMUX + time_index;
     binfo->block_i = 0;
 
     binfo->out_of_seq_cnt = 0;
@@ -340,11 +373,13 @@ static inline uint64_t process_packet(
     packet_header_t pkt_header;
     const uint64_t *payload_p;
     int pkt_block_i;
+    int i;
     uint64_t *dest_p;
     int64_t pkt_mcnt_dist;
     uint64_t pkt_mcnt;
     uint64_t cur_mcnt;
     uint64_t netmcnt = -1; // Value to return (!=-1 is stored in status memory)
+    //int i;
 #if N_DEBUG_INPUT_BLOCKS == 1
     static uint64_t debug_remaining = -1ULL;
     static off_t debug_offset = 0;
@@ -358,6 +393,8 @@ static inline uint64_t process_packet(
 
     // Parse packet header
     get_header(p_frame, &pkt_header);
+    // mcnt is a spectra count, representing the first
+    // time sample in the packet
     pkt_mcnt = pkt_header.mcnt;
     pkt_block_i = block_for_mcnt(pkt_mcnt);
     cur_mcnt = binfo.mcnt_start;
@@ -368,7 +405,7 @@ static inline uint64_t process_packet(
 
 #if N_DEBUG_INPUT_BLOCKS == 1
     debug_ptr = (uint64_t *)&paper_input_databuf_p->block[N_INPUT_BLOCKS];
-    debug_ptr[debug_offset++] = be64toh(*(unsigned long long *)PKT_UDP_DATA(p_frame));
+    debug_ptr[debug_offset++] = be64toh(*(unsigned long int *)PKT_UDP_DATA(p_frame));
     if(--debug_remaining == 0) {
 	exit(1);
     }
@@ -377,17 +414,32 @@ static inline uint64_t process_packet(
     }
 #endif
 
+    //fprintf(stdout, "mcnt:%lu, time:%lu, ant:%d, chan:%d\n", pkt_header.mcnt,
+    //    pkt_header.time, pkt_header.ant, pkt_header.chan);
+    //if(pkt_header.ant==0){
+    //    fprintf(stdout, "mcnt:%lu, time:%lu, ant:%d, chan:%d, block:%d \n", pkt_header.mcnt,
+    //    pkt_header.time, pkt_header.ant, pkt_header.chan, pkt_block_i);
+    //}
+    //if(pkt_header.ant==69){
+    //    fprintf(stdout, "mcnt:%lu, time:%lu, ant:%d, chan:%d\n", pkt_header.mcnt,
+    //    pkt_header.time, pkt_header.ant, pkt_header.chan);
+    //}
+    //if(pkt_header.ant==138){
+    //    fprintf(stdout, "mcnt:%lu, time:%lu, ant:%d, chan:%d\n", pkt_header.mcnt,
+    //    pkt_header.time, pkt_header.ant, pkt_header.chan);
+    //}
+
     // We expect packets for the current block, the next block, and the block after.
-    if(0 <= pkt_mcnt_dist && pkt_mcnt_dist < 3*Nm) {
+    if(0 <= pkt_mcnt_dist && pkt_mcnt_dist < 3*N_TIME_PER_BLOCK*TIME_DEMUX) {
 	// If the packet is for the block after the next block (i.e. current
 	// block + 2 blocks)
-	if(pkt_mcnt_dist >= 2*Nm) {
+	if(pkt_mcnt_dist >= 2*N_TIME_PER_BLOCK*TIME_DEMUX) {
 	    // Mark the current block as filled
 	    netmcnt = set_block_filled(paper_input_databuf_p, &binfo);
 
 	    // Advance mcnt_start to next block
-	    cur_mcnt += Nm;
-	    binfo.mcnt_start += Nm;
+	    cur_mcnt += N_TIME_PER_BLOCK*TIME_DEMUX;
+	    binfo.mcnt_start += N_TIME_PER_BLOCK*TIME_DEMUX;
 	    binfo.block_i = (binfo.block_i + 1) % N_INPUT_BLOCKS;
 
 	    // Wait (hopefully not long!) to acquire the block after next (i.e.
@@ -427,13 +479,16 @@ static inline uint64_t process_packet(
 	    return -1;
 	}
 
-	// Calculate starting points for unpacking this packet into block's data buffer.
-	dest_p = paper_input_databuf_p->block[pkt_block_i].data
-	    + paper_input_databuf_data_idx(binfo.m, binfo.f, 0, 0);
-	payload_p        = (uint64_t *)(PKT_UDP_DATA(p_frame)+8);
 
 	// Copy data into buffer
-	memcpy(dest_p, payload_p, N_BYTES_PER_PACKET);
+        for(i=0; i<N_INPUTS_PER_PACKET/2; i++) {
+	    // Calculate starting points for unpacking this packet into block's data buffer.
+	    dest_p = (uint64_t *)(paper_input_databuf_p->block[pkt_block_i].data)
+	        + paper_input_databuf_data_idx(binfo.m, binfo.a + i, binfo.c, 0); //time index is always zero
+            //fprintf(stdout, "m:%d, a:%d, c:%d, %lu\n", binfo.m, binfo.a, binfo.c, paper_input_databuf_data_idx(binfo.m, binfo.a, binfo.c, 0));
+	    payload_p        = (uint64_t *)(PKT_UDP_DATA(p_frame)+8+(i*2*N_CHAN_PER_PACKET*N_TIME_PER_PACKET));
+	    memcpy(dest_p, payload_p, 2*N_CHAN_PER_PACKET*N_TIME_PER_PACKET);
+        }
 
 	return netmcnt;
     }
@@ -458,7 +513,7 @@ static inline uint64_t process_packet(
 	if(cur_mcnt != 0 && binfo.out_of_seq_cnt == 0) {
 	    hashpipe_warn("hera_pktsock_thread",
 		    "out of seq mcnt %012lx (expected: %012lx <= mcnt < %012x)",
-		    pkt_mcnt, cur_mcnt, cur_mcnt+3*Nm);
+		    pkt_mcnt, cur_mcnt, cur_mcnt+3*N_TIME_PER_BLOCK*TIME_DEMUX);
 	}
 
 	// Increment out-of-seq packet counter
@@ -474,14 +529,14 @@ static inline uint64_t process_packet(
 	    // same databuf block as the old current mcnt.
 	    if(binfo.block_i > pkt_block_i) {
 		// Advance pkt_mcnt to correspond to binfo.block_i
-		pkt_mcnt += Nm*(binfo.block_i - pkt_block_i);
+		pkt_mcnt += TIME_DEMUX*N_TIME_PER_BLOCK*(binfo.block_i - pkt_block_i);
 	    } else if(binfo.block_i < pkt_block_i) {
 		// Advance pkt_mcnt to binfo.block_i + N_INPUT_BLOCKS blocks
-		pkt_mcnt += Nm*(binfo.block_i + N_INPUT_BLOCKS - pkt_block_i);
+		pkt_mcnt += TIME_DEMUX*N_TIME_PER_BLOCK*(binfo.block_i + N_INPUT_BLOCKS - pkt_block_i);
 	    }
 	    // Round pkt_mcnt down to nearest multiple of Nm
-	    binfo.mcnt_start = pkt_mcnt - (pkt_mcnt%Nm);
-	    binfo.mcnt_log_late = binfo.mcnt_start + Nm;
+	    binfo.mcnt_start = start_for_mcnt(pkt_mcnt);
+	    binfo.mcnt_log_late = binfo.mcnt_start + N_TIME_PER_BLOCK*TIME_DEMUX;
 	    binfo.block_i = block_for_mcnt(binfo.mcnt_start);
 	    hashpipe_warn("hera_pktsock_thread",
 		    "resetting to mcnt %012lx block %d based on packet mcnt %012lx",
@@ -489,7 +544,7 @@ static inline uint64_t process_packet(
 	    // Reinitialize/recycle our two already acquired blocks with new
 	    // mcnt values.
 	    initialize_block(paper_input_databuf_p, binfo.mcnt_start);
-	    initialize_block(paper_input_databuf_p, binfo.mcnt_start+Nm);
+	    initialize_block(paper_input_databuf_p, binfo.mcnt_start+TIME_DEMUX*N_TIME_PER_BLOCK);
 	    // Reset binfo's packet counters for these blocks.
 	    binfo.block_packet_counter[binfo.block_i] = 0;
 	    binfo.block_packet_counter[(binfo.block_i+1)%N_INPUT_BLOCKS] = 0;
@@ -514,6 +569,8 @@ static int init(hashpipe_thread_args_t *args)
     hashpipe_status_t st = args->st;
 
     hashpipe_status_lock_safe(&st);
+    // Record version
+    hputs(st.buf, "GIT_VER", GIT_VERSION);
     // Get info from status buffer if present (no change if not present)
     hgets(st.buf, "BINDHOST", 80, bindhost);
     hgeti4(st.buf, "BINDPORT", &bindport);
@@ -572,6 +629,7 @@ static void *run(hashpipe_thread_args_t * args)
     int holdoff = 1;
 
     // Force ourself into the hold off state
+    fprintf(stdout, "Setting NETHOLD state to 1. Waiting for someone to set it to 0\n");
     hashpipe_status_lock_safe(&st);
     hputi4(st.buf, "NETHOLD", 1);
     hputs(st.buf, status_key, "holding");
@@ -583,10 +641,13 @@ static void *run(hashpipe_thread_args_t * args)
 	hashpipe_status_lock_safe(&st);
 	// Look for NETHOLD value
 	hgeti4(st.buf, "NETHOLD", &holdoff);
+	// Get the time index of this correlator. I.e. is it correlating
+	// even or odd blocks of samples.
+	hgeti4(st.buf, "TIMEIDX", &time_index);
 	if(!holdoff) {
 	    // Done holding, so delete the key
 	    hdel(st.buf, "NETHOLD");
-	    hputs(st.buf, status_key, "running");
+	    hputs(st.buf, status_key, "starting");
 	}
 	hashpipe_status_unlock_safe(&st);
     }
@@ -626,8 +687,8 @@ static void *run(hashpipe_thread_args_t * args)
     }
 
     // Initialize the newly acquired block
-    initialize_block(db, 0);
-    initialize_block(db, Nm);
+    initialize_block(db, time_index);
+    initialize_block(db, N_TIME_PER_BLOCK*TIME_DEMUX + time_index);
 
     /* Read network params */
     int bindport = 8511;
@@ -752,35 +813,35 @@ static void *run(hashpipe_thread_args_t * args)
 
 	    // Get and put min and max values.  The "get-then-put" allows the
 	    // user to reset the min max values in the status buffer.
-	    hgeti8(st.buf, "NETWATMN", (long long *)&status_ns);
+	    hgeti8(st.buf, "NETWATMN", (long int *)&status_ns);
 	    status_ns = MIN(min_wait_ns, status_ns);
             hputi8(st.buf, "NETWATMN", status_ns);
 
-            hgeti8(st.buf, "NETRECMN", (long long *)&status_ns);
+            hgeti8(st.buf, "NETRECMN", (long int *)&status_ns);
 	    status_ns = MIN(min_recv_ns, status_ns);
             hputi8(st.buf, "NETRECMN", status_ns);
 
-            hgeti8(st.buf, "NETPRCMN", (long long *)&status_ns);
+            hgeti8(st.buf, "NETPRCMN", (long int *)&status_ns);
 	    status_ns = MIN(min_proc_ns, status_ns);
             hputi8(st.buf, "NETPRCMN", status_ns);
 
-            hgeti8(st.buf, "NETWATMX", (long long *)&status_ns);
+            hgeti8(st.buf, "NETWATMX", (long int *)&status_ns);
 	    status_ns = MAX(max_wait_ns, status_ns);
             hputi8(st.buf, "NETWATMX", status_ns);
 
-            hgeti8(st.buf, "NETRECMX", (long long *)&status_ns);
+            hgeti8(st.buf, "NETRECMX", (long int *)&status_ns);
 	    status_ns = MAX(max_recv_ns, status_ns);
             hputi8(st.buf, "NETRECMX", status_ns);
 
-            hgeti8(st.buf, "NETPRCMX", (long long *)&status_ns);
+            hgeti8(st.buf, "NETPRCMX", (long int *)&status_ns);
 	    status_ns = MAX(max_proc_ns, status_ns);
             hputi8(st.buf, "NETPRCMX", status_ns);
 
             hputu8(st.buf, "NETPKTS",  pktsock_pkts);
             hputu8(st.buf, "NETDROPS", pktsock_drops);
 
-            hgetu8(st.buf, "NETPKTTL", (long long unsigned int*)&pktsock_pkts_total);
-            hgetu8(st.buf, "NETDRPTL", (long long unsigned int*)&pktsock_drops_total);
+            hgetu8(st.buf, "NETPKTTL", (long unsigned int*)&pktsock_pkts_total);
+            hgetu8(st.buf, "NETDRPTL", (long unsigned int*)&pktsock_drops_total);
             hputu8(st.buf, "NETPKTTL", pktsock_pkts_total + pktsock_pkts);
             hputu8(st.buf, "NETDRPTL", pktsock_drops_total + pktsock_drops);
 
