@@ -297,7 +297,7 @@ static void *run(hashpipe_thread_args_t * args)
      if(!holdoff) {
        // Done holding, so delete the key
        hputs(st.buf, status_key, "starting");
-       fprintf(stderr, "Starting...\n");
+       fprintf(stdout, "Starting...\n");
      }
      hashpipe_status_unlock_safe(&st);
    }
@@ -311,9 +311,9 @@ static void *run(hashpipe_thread_args_t * args)
       total_baselines += binfo[j].samp_in_bin * binfo[j].baselines; 
 
 #ifdef PRINT_TEST
-   fprintf(stderr,"N_ANTS:%d\n", N_ANTS);
-   fprintf(stderr,"Number of channels per X-Eng: %d\n",N_CHAN_PER_X);
-   fprintf(stderr,"Number of BCNTS in a buffer: %ld\n", total_baselines);
+   fprintf(stdout,"N_ANTS:%d\n", N_ANTS);
+   fprintf(stdout,"Number of channels per X-Eng: %d\n",N_CHAN_PER_X);
+   fprintf(stdout,"Number of BCNTS in a buffer: %ld\n", total_baselines);
 #endif
 
    // Write the number of baselines per integration
