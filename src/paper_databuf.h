@@ -9,7 +9,7 @@
 #define N_CHAN_TOTAL_GENERATED (8192)
 #define FENG_SAMPLE_RATE (500000000)
 #define N_CHAN_TOTAL 6144
-#define N_FENGINES   192
+//#define N_FENGINES   192 # isn't this always the same as the number of antennas?
 #define N_CHAN_PER_F N_CHAN_TOTAL
 
 // Number of separate X-engines which deal with
@@ -30,12 +30,16 @@
 #define N_CHAN_PER_X         XGPU_NFREQUENCY
 
 // Derived from above quantities
+#define N_FENGINES		((N_INPUTS / N_INPUTS_PER_PACKET) * N_INPUTS_PER_PACKET)
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / N_TIME_PER_PACKET)
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK N_TIME_PER_BLOCK
 //#define N_SUB_BLOCKS_PER_INPUT_BLOCK (N_TIME_PER_BLOCK / 2048)
 #define N_BYTES_PER_BLOCK            (N_TIME_PER_BLOCK * N_CHAN_PER_X * N_INPUTS)
-#define N_PACKETS_PER_BLOCK          (N_BYTES_PER_BLOCK / N_BYTES_PER_PACKET)
-#define N_PACKETS_PER_BLOCK_PER_F    (N_PACKETS_PER_BLOCK * N_INPUTS_PER_PACKET / 2 / N_FENGINES)
+// Number of bytes per block if we assume an integral number of SNAP boards,
+// with all other antennas being fake padding required for XGPU sizing compliance.
+#define N_BYTES_PER_BLOCK_NET        (N_TIME_PER_BLOCK * N_CHAN_PER_X * N_FENGINES)
+#define N_PACKETS_PER_BLOCK          (N_BYTES_PER_BLOCK_NET / N_BYTES_PER_PACKET)
+#define N_PACKETS_PER_BLOCK_PER_F    (N_INPUTS_PER_PACKET * N_PACKETS_PER_BLOCK / N_FENGINES)
 // Number of X-engines per time slice. E.g. for HERA: 16.
 #define N_XENGINES_PER_TIME (N_CHAN_TOTAL / N_CHAN_PER_X)
 
@@ -44,7 +48,7 @@
 #error N_BYTES_PER_PACKET != (N_TIME_PER_PACKET*N_CHAN_PER_PACKET*N_INPUTS_PER_PACKET)
 #endif
 
-#define N_FLUFFED_BYTES_PER_BLOCK  ((N_PACKETS_PER_BLOCK * N_BYTES_PER_PACKET) * 2)
+#define N_FLUFFED_BYTES_PER_BLOCK  (N_BYTES_PER_BLOCK * 2)
 #define N_FLUFFED_WORDS_PER_BLOCK (N_FLUFFED_BYTES_PER_BLOCK / 8) 
 
 // Number of floats in xGPU's "register tile order" output matrix.
@@ -52,18 +56,6 @@
 
 #define PAGE_SIZE (4096)
 #define CACHE_ALIGNMENT (128)
-
-// Correlator Output parameters
-#define CATCHER_PORT 10000
-#define OUTPUT_BYTES_PER_PACKET (4096)
-#define CATCHER_N_BLOCKS 2
-#define CATCHER_CHAN_SUM 1
-#define XENG_CHAN_SUM 4
-#define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL/XENG_CHAN_SUM * (N_INPUTS * ((N_INPUTS>>1) + 1)))
-#define VIS_MATRIX_ENTRIES_PER_CHAN (N_INPUTS * ((N_INPUTS>>1) + 1))
-#define PACKETS_PER_VIS_MATRIX ((8L*TIME_DEMUX*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
-#define N_STOKES 4
-
 
 // The HERA correlator is based largely on the PAPER correlator.  The main 
 // difference will be in the F engines.  The ROACH2 based F engines are being
@@ -81,7 +73,7 @@
  * INPUT BUFFER STRUCTURES
  */
 
-#define N_INPUT_BLOCKS 4
+#define N_INPUT_BLOCKS 16
 #ifndef N_DEBUG_INPUT_BLOCKS
 #define N_DEBUG_INPUT_BLOCKS 0
 #endif
@@ -244,7 +236,7 @@ typedef struct paper_gpu_input_databuf {
 
 typedef struct paper_output_header {
   uint64_t mcnt;
-  uint64_t flags[(N_CHAN_PER_X+63)/64];
+  uint64_t flags[(N_CHAN_PER_X+63) /64];
 } paper_output_header_t;
 
 typedef uint8_t paper_output_header_cache_alignment[
@@ -263,9 +255,61 @@ typedef struct paper_output_databuf {
   paper_output_block_t block[N_OUTPUT_BLOCKS];
 } paper_output_databuf_t;
 
-/*
- * CATCHER BUFFER STRUCTURES
+/* 
+ * BASELINE DEPENDENT AVERAGING STRUCTURES
  */
+
+#define N_BASELINES               (N_ANTS * (N_ANTS + 1)/2)
+#define N_COMPLEX_PER_BASELINE    (N_STOKES * N_CHAN_PER_X)
+
+#define N_BDABUF_BLOCKS 2
+#define N_BDABUF_BINS   4
+#define N_MAX_INTTIME   8  // The longest baselines are collected for 8 time samples
+
+// integration bin indexing
+#define hera_bda_buf_data_idx(o, c, p) \
+  ((((o)*N_CHAN_PER_X*N_STOKES)+((c)*N_STOKES)+(p))*2)
+
+
+typedef struct hera_bda_header{
+  uint64_t *mcnt;               // mcnt of the first time sample in the data
+  uint64_t datsize;               // size of buffer (from no. baselines)
+  uint64_t baselines;
+  uint16_t *ant_pair_0;
+  uint16_t *ant_pair_1;
+  uint32_t *bcnt; 
+} hera_bda_header_t;
+
+typedef uint8_t hera_bda_header_cache_alignment[
+  CACHE_ALIGNMENT - (sizeof(hera_bda_header_t)%CACHE_ALIGNMENT)
+];
+
+typedef struct hera_bda_block{
+  hera_bda_header_t header[N_BDABUF_BINS];
+  hera_bda_header_cache_alignment padding;
+  int32_t *data[N_BDABUF_BINS];
+} hera_bda_block_t;
+
+typedef struct hera_bda_databuf{
+  hashpipe_databuf_t header;
+  hashpipe_databuf_cache_alignment padding;
+  hera_bda_block_t block[N_BDABUF_BLOCKS];
+} hera_bda_databuf_t;
+
+
+/*
+ * CATCHER BUFFER STRUCTURES     
+ */
+
+#define CATCHER_PORT            10000
+#define OUTPUT_BYTES_PER_PACKET (4096)
+#define CATCHER_N_BLOCKS        4
+#define XENG_CHAN_SUM           4
+#define CATCHER_CHAN_SUM        1
+#define VIS_MATRIX_ENTRIES (N_CHAN_TOTAL/XENG_CHAN_SUM * (N_INPUTS * ((N_INPUTS>>1) + 1)))
+#define VIS_MATRIX_ENTRIES_PER_CHAN (N_INPUTS * ((N_INPUTS>>1) + 1))
+#define PACKETS_PER_VIS_MATRIX ((8L*TIME_DEMUX*VIS_MATRIX_ENTRIES) / OUTPUT_BYTES_PER_PACKET)
+#define N_STOKES                4
 
 typedef struct hera_catcher_input_header{
   uint64_t mcnt;
@@ -295,6 +339,110 @@ typedef struct hera_catcher_input_databuf {
   (2L*TIME_DEMUX*(VIS_MATRIX_ENTRIES_PER_CHAN * (N_CHAN_PER_X/XENG_CHAN_SUM)*(x)) + (TIME_DEMUX*((o)>>2)) + (2*N_STOKES*(t)))
 #define hera_catcher_input_databuf_by_bl_idx32(x, b) \
   (2L*TIME_DEMUX*(N_CHAN_PER_X/XENG_CHAN_SUM)*((VIS_MATRIX_ENTRIES_PER_CHAN * (x)) + (N_STOKES*(b))))
+
+
+/* 
+ * CATCHER -- BDA
+ * Structures and parameters
+ */
+
+#define BASELINES_PER_BLOCK     256 //8192
+#define CATCHER_CHAN_SUM_BDA     4
+#define CHAN_PER_CATCHER_PKT   (OUTPUT_BYTES_PER_PACKET/(N_STOKES * 8L))                    // 128
+#define PACKETS_PER_BASELINE   (N_CHAN_TOTAL/CHAN_PER_CATCHER_PKT)                          //  48
+#define PACKETS_PER_BL_PER_X   (PACKETS_PER_BASELINE/N_XENGINES_PER_TIME)                   //   3
+#define PACKETS_PER_BLOCK      (BASELINES_PER_BLOCK * TIME_DEMUX * PACKETS_PER_BASELINE)    // 1572864
+#define BYTES_PER_BLOCK        (PACKETS_PER_BLOCK * OUTPUT_BYTES_PER_PACKET)                // 6GB
+
+// == hera_catcher_bda_input_databuf_t ==
+//
+// * catcher net thread output
+// * catcher disk thread input
+// Offset determined by baseline_id, time_demux, xend_id, offset
+// * Data field is structured as:
+//
+//  +-- baseline  +-- (even/odd)  +-- freq          +-- stokes  
+//  |             |               |                 |
+//  V             V               V                 V
+//  baseline_id   time_demux     (xeng_id+offset)   
+//  -----------   ----------     ----------------
+//  b0 }--------> even }-------> f0 }-------------> s0
+//                odd            f1                 s1
+//                                                  s2
+//                                                  s3
+
+
+#define hera_bda_buf_data_offset(l, s, b, o) \
+  ((((l)*(b)*N_CHAN_PER_X*N_STOKES)+((s)*N_CHAN_PER_X*N_STOKES)+((o)*CHAN_PER_CATCHER_PKT*N_STOKES))*2)
+
+// b-- bcnt; t-- time_demux ; x-- xeng_id; o-- freq offset(0,1,2)
+#define  hera_catcher_bda_input_databuf_pkt_offset(b, t, x, o) \
+     (((b)*TIME_DEMUX*PACKETS_PER_BASELINE) + ((t)*PACKETS_PER_BASELINE) + ((x)*PACKETS_PER_BL_PER_X) + (o))
+
+#define hera_catcher_bda_input_databuf_by_bcnt_idx32(b,p) \
+      (((b)*TIME_DEMUX*N_CHAN_TOTAL*N_STOKES*2) + ((p)*N_CHAN_TOTAL*N_STOKES*2))
+
+// b- bcnt; p- parity (even=0/odd=1); f- freq; s- stokes
+#define hera_catcher_bda_input_databuf_idx32(b,p,f,s) \
+      (((b)*TIME_DEMUX*N_CHAN_TOTAL*N_STOKES) + ((p)*N_CHAN_PROCESSED*N_STOKES) + ((f)*N_STOKES) + (s))
+
+typedef struct hera_catcher_bda_input_header{
+  uint64_t good_data;
+  uint32_t bcnt[BASELINES_PER_BLOCK];        // starting value of baseline_id for this block
+  uint64_t mcnt[BASELINES_PER_BLOCK];        // times are diff for each baseline 
+  uint16_t ant_pair_0[BASELINES_PER_BLOCK];  // list of antennas in this block
+  uint16_t ant_pair_1[BASELINES_PER_BLOCK]; 
+  //uint8_t flags[BASELINES_PER_BLOCK];
+} hera_catcher_bda_input_header_t;
+
+typedef uint8_t hera_catcher_bda_input_header_cache_alignment[
+  CACHE_ALIGNMENT - (sizeof(hera_catcher_bda_input_header_t)%CACHE_ALIGNMENT)
+];
+
+typedef struct hera_catcher_bda_input_block {
+  hera_catcher_bda_input_header_t header;
+  hera_catcher_bda_input_header_cache_alignment padding; // Maintain cache alignment
+  uint32_t data[BYTES_PER_BLOCK/sizeof(uint32_t)];
+} hera_catcher_bda_input_block_t;
+
+typedef struct hera_catcher_bda_input_databuf {
+  hashpipe_databuf_t header;
+  hashpipe_databuf_cache_alignment padding; // Maintain cache alignment
+  hera_catcher_bda_input_block_t block[CATCHER_N_BLOCKS];
+} hera_catcher_bda_input_databuf_t;
+
+/* 
+ * CATCHER - autocorr buffers
+ */
+
+#define BYTES_AUTOCORR_BLK  (N_CHAN_TOTAL * N_ANTS * N_STOKES * 8L)
+#define AUTOCORR_N_BLOCKS    2
+
+#define hera_catcher_autocorr_databuf_idx32(a) \
+      ((a)*N_CHAN_TOTAL*N_STOKES*2L)
+
+typedef struct hera_catcher_autocorr_header{
+  uint64_t num_ants;
+  double julian_time;
+  uint8_t ant[N_ANTS]; //flag to show if this has been updated
+} hera_catcher_autocorr_header_t;
+
+typedef uint8_t hera_catcher_autocorr_header_cache_alignment[
+  CACHE_ALIGNMENT - (sizeof(hera_catcher_autocorr_header_t) % CACHE_ALIGNMENT)
+];
+
+typedef struct hera_catcher_autocorr_block {
+  hera_catcher_autocorr_header_t header;
+  hera_catcher_autocorr_header_cache_alignment padding;
+  uint32_t data[BYTES_AUTOCORR_BLK/sizeof(uint32_t)];
+} hera_catcher_autocorr_block_t;
+
+typedef struct hera_catcher_autocorr_databuf {
+  hashpipe_databuf_t header;
+  hashpipe_databuf_cache_alignment padding;
+  hera_catcher_autocorr_block_t block[AUTOCORR_N_BLOCKS];
+} hera_catcher_autocorr_databuf_t;
+
 
 /*
  * INPUT BUFFER FUNCTIONS
@@ -383,6 +531,92 @@ int hera_catcher_input_databuf_set_free(hera_catcher_input_databuf_t *d, int blo
 
 int hera_catcher_input_databuf_set_filled(hera_catcher_input_databuf_t *d, int block_id);
 
+/* 
+ * CATCHER BDA BUFFER FUNCTIONS
+ */
+
+hashpipe_databuf_t *hera_catcher_bda_input_databuf_create(int instance_id, int databuf_id);
+
+static inline hera_catcher_bda_input_databuf_t *hera_catcher_bda_input_databuf_attach(int instance_id, int databuf_id)
+{
+    return (hera_catcher_bda_input_databuf_t *)hashpipe_databuf_attach(instance_id, databuf_id);
+}
+
+static inline int hera_catcher_bda_input_databuf_detach(hera_catcher_bda_input_databuf_t *d)
+{
+    return hashpipe_databuf_detach((hashpipe_databuf_t *)d);
+}
+
+static inline void hera_catcher_bda_input_databuf_clear(hera_catcher_bda_input_databuf_t *d)
+{
+    hashpipe_databuf_clear((hashpipe_databuf_t *)d);
+}
+
+static inline int hera_catcher_bda_input_databuf_block_status(hera_catcher_bda_input_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_block_status((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_catcher_bda_input_databuf_total_status(hera_catcher_bda_input_databuf_t *d)
+{
+    return hashpipe_databuf_total_status((hashpipe_databuf_t *)d);
+}
+
+int hera_catcher_bda_input_databuf_wait_free(hera_catcher_bda_input_databuf_t *d, int block_id);
+
+int hera_catcher_bda_input_databuf_busywait_free(hera_catcher_bda_input_databuf_t *d, int block_id);
+
+int hera_catcher_bda_input_databuf_wait_filled(hera_catcher_bda_input_databuf_t *d, int block_id);
+
+int hera_catcher_bda_input_databuf_busywait_filled(hera_catcher_bda_input_databuf_t *d, int block_id);
+
+int hera_catcher_bda_input_databuf_set_free(hera_catcher_bda_input_databuf_t *d, int block_id);
+
+int hera_catcher_bda_input_databuf_set_filled(hera_catcher_bda_input_databuf_t *d, int block_id);
+
+
+/* 
+ * CATCHER AUTOCORR BUFFER FUNCTIONS
+ */
+
+hashpipe_databuf_t *hera_catcher_autocorr_databuf_create(int instance_id, int databuf_id);
+
+static inline hera_catcher_autocorr_databuf_t *hera_catcher_autocorr_databuf_attach(int instance_id, int databuf_id)
+{
+    return (hera_catcher_autocorr_databuf_t *)hashpipe_databuf_attach(instance_id, databuf_id);
+}
+
+static inline int hera_catcher_autocorr_databuf_detach(hera_catcher_autocorr_databuf_t *d)
+{
+    return hashpipe_databuf_detach((hashpipe_databuf_t *)d);
+}
+
+static inline void hera_catcher_autocorr_databuf_clear(hera_catcher_autocorr_databuf_t *d)
+{
+    hashpipe_databuf_clear((hashpipe_databuf_t *)d);
+}
+
+static inline int hera_catcher_autocorr_databuf_block_status(hera_catcher_autocorr_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_block_status((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_catcher_autocorr_databuf_total_status(hera_catcher_autocorr_databuf_t *d)
+{
+    return hashpipe_databuf_total_status((hashpipe_databuf_t *)d);
+}
+
+int hera_catcher_autocorr_databuf_wait_free(hera_catcher_autocorr_databuf_t *d, int block_id);
+
+int hera_catcher_autocorr_databuf_busywait_free(hera_catcher_autocorr_databuf_t *d, int block_id);
+
+int hera_catcher_autocorr_databuf_wait_filled(hera_catcher_autocorr_databuf_t *d, int block_id);
+
+int hera_catcher_autocorr_databuf_busywait_filled(hera_catcher_autocorr_databuf_t *d, int block_id);
+
+int hera_catcher_autocorr_databuf_set_free(hera_catcher_autocorr_databuf_t *d, int block_id);
+
+int hera_catcher_autocorr_databuf_set_filled(hera_catcher_autocorr_databuf_t *d, int block_id);
 
 /*
  * GPU INPUT BUFFER FUNCTIONS
@@ -441,6 +675,67 @@ static inline int paper_gpu_input_databuf_set_free(paper_gpu_input_databuf_t *d,
 }
 
 static inline int paper_gpu_input_databuf_set_filled(paper_gpu_input_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_set_filled((hashpipe_databuf_t *)d, block_id);
+}
+
+/*
+ * BASELINE DEPENDENT AVERAGING BUFFER FUNCTIONS
+ */
+
+hashpipe_databuf_t *hera_bda_databuf_create(int instance_id, int databuf_id);
+
+static inline void hera_bda_databuf_clear(hera_bda_databuf_t *d)
+{
+    hashpipe_databuf_clear((hashpipe_databuf_t *)d);
+}
+
+static inline hera_bda_databuf_t *hera_bda_databuf_attach(int instance_id, int databuf_id)
+{
+    return (hera_bda_databuf_t *)hashpipe_databuf_attach(instance_id, databuf_id);
+}
+
+static inline int hera_bda_databuf_detach(hera_bda_databuf_t *d)
+{
+    return hashpipe_databuf_detach((hashpipe_databuf_t *)d);
+}
+
+static inline int hera_bda_databuf_block_status(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_block_status((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_total_status(hera_bda_databuf_t *d)
+{
+    return hashpipe_databuf_total_status((hashpipe_databuf_t *)d);
+}
+
+static inline int hera_bda_databuf_wait_free(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_wait_free((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_busywait_free(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_busywait_free((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_wait_filled(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_wait_filled((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_busywait_filled(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_busywait_filled((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_set_free(hera_bda_databuf_t *d, int block_id)
+{
+    return hashpipe_databuf_set_free((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hera_bda_databuf_set_filled(hera_bda_databuf_t *d, int block_id)
 {
     return hashpipe_databuf_set_filled((hashpipe_databuf_t *)d, block_id);
 }
