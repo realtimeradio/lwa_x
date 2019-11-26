@@ -12,6 +12,11 @@
 //#define N_FENGINES   192 # isn't this always the same as the number of antennas?
 #define N_CHAN_PER_F N_CHAN_TOTAL
 
+// Number of F-engine source ports used.
+// Using more ports means more IBV receive buffers,
+// which potentially increases performance
+#define N_SRC_PORTS 8
+
 // Number of separate X-engines which deal with
 // alternate time chunks
 #define TIME_DEMUX 2

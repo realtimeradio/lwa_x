@@ -117,7 +117,7 @@ else:
          key = 'hashpipe://%s/%d/set' % (host, i)
          r.publish(key, 'TIMEIDX=%d' % (hn//nhosts_per_timeslice))
 
-time.sleep(2)
+time.sleep(10)
 
 # Let the network threads begin processing
 for hn, host in enumerate(hosts):
