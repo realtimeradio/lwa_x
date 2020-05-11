@@ -1,4 +1,4 @@
-/* hera_pktsock_thread.c
+/* lwa_ibv_thread.c
  *
  * Routine to read packets from network and put them
  * into shared memory blocks.
@@ -15,14 +15,22 @@
 #include <sys/resource.h>
 #include <sys/types.h>
 #include <errno.h>
+#include <time.h>
 
 #include <xgpu.h>
 
 #include "hashpipe.h"
-#include "paper_databuf.h"
+#include "lwa_databuf.h"
+#include "hashpipe_ibverbs.h"
+
+#include <emmintrin.h>
+#include <immintrin.h>
 
 
 #define DEBUG_NET
+
+//number of bytes offset for UDP payload to start
+#define UDP_PAYLOAD_OFFSET 42
 
 #ifndef MIN
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
@@ -31,15 +39,6 @@
 #ifndef MAX
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #endif
-
-//#define PKTSOCK_BYTES_PER_FRAME (16384)
-//#define PKTSOCK_FRAMES_PER_BLOCK (8)
-//#define PKTSOCK_NBLOCKS (800)
-//#define PKTSOCK_NFRAMES (PKTSOCK_FRAMES_PER_BLOCK * PKTSOCK_NBLOCKS)
-#define PKTSOCK_BYTES_PER_FRAME (4864)
-#define PKTSOCK_FRAMES_PER_BLOCK (128)
-#define PKTSOCK_NBLOCKS (5000)
-#define PKTSOCK_NFRAMES (PKTSOCK_FRAMES_PER_BLOCK * PKTSOCK_NBLOCKS)
 
 typedef struct {
     uint64_t mcnt;      // m-index of block in output buffer (runs from 0 to Nm)
@@ -76,7 +75,7 @@ static int time_index;
 #if 0
 static void print_pkt_header(packet_header_t * pkt_header) {
 
-    static long int prior_mcnt;
+    static long long prior_mcnt;
 
     printf("packet header : mcnt %012lx (diff from prior %lld) fid %d xid %d\n",
 	   pkt_header->mcnt, pkt_header->mcnt-prior_mcnt, pkt_header->fid, pkt_header->xid);
@@ -103,12 +102,12 @@ static void print_block_packet_counter(block_info_t * binfo) {
     fprintf(stdout, "\n");
 }
 
-static void print_ring_mcnts(paper_input_databuf_t *paper_input_databuf_p) {
+static void print_ring_mcnts(lwa_input_databuf_t *lwa_input_databuf_p) {
 
     int i;
 
     for(i=0; i < N_INPUT_BLOCKS; i++) {
-	printf("block %d mcnt %012lx\n", i, paper_input_databuf_p->block[i].header.mcnt);
+	printf("block %d mcnt %012lx\n", i, lwa_input_databuf_p->block[i].header.mcnt);
     }
 }
 #endif // DIE_ON_OUT_OF_SEQ_FILL
@@ -156,26 +155,14 @@ void dump_mcnt_log(int xid)
 }
 #endif
 
-static inline void get_header (unsigned char *p_frame, packet_header_t * pkt_header)
+static inline void get_header(unsigned char *p_frame, packet_header_t * pkt_header)
 {
-#ifdef TIMING_TEST
-    static int pkt_counter=0;
-    // HERA TODO
-    //pkt_header->mcnt = (pkt_counter / (Nx*Nq*Nf)) %  Nm;
-    //pkt_header->xid  = (pkt_counter / (   Nq*Nf)) %  Nx;
-    //pkt_header->fid  = (pkt_counter             ) % (Nq*Nf);
-    //pkt_counter++;
-#else
-    uint64_t raw_header;
-    raw_header = be64toh(*(unsigned long int *)PKT_UDP_DATA(p_frame));
+    uint32_t *raw_header;
+    raw_header = (uint32_t *)(p_frame + UDP_PAYLOAD_OFFSET);
     // raw header contains value of first time sample, not mcnt, as defined in this code
-    //pkt_header->time        = (raw_header >> 27) & ((1L<<37)-1);
-    //pkt_header->mcnt        = pkt_header->time >> 5;
-    //pkt_header->mcnt        = (raw_header >> 32) & 0xffffffff;
-    pkt_header->mcnt        = (raw_header >> 29) & ((1L<<35)-1);
-    pkt_header->chan        = (raw_header >> 16) & ((1<<13)-1);
-    pkt_header->ant         =  raw_header        & ((1<<16)-1);
-#endif
+    pkt_header->mcnt        = be64toh(*((uint64_t *)raw_header + 2));
+    pkt_header->chan        = be32toh(raw_header[6]);
+    pkt_header->ant         = be32toh(raw_header[7]);
 
 #ifdef LOG_MCNTS
     total_packets_counted++;
@@ -193,11 +180,11 @@ static inline void get_header (unsigned char *p_frame, packet_header_t * pkt_hea
 }
 
 #ifdef DIE_ON_OUT_OF_SEQ_FILL
-static void die(paper_input_databuf_t *paper_input_databuf_p, block_info_t *binfo)
+static void die(lwa_input_databuf_t *lwa_input_databuf_p, block_info_t *binfo)
 {
     print_block_info(binfo);
     print_block_packet_counter(binfo);
-    print_ring_mcnts(paper_input_databuf_p);
+    print_ring_mcnts(lwa_input_databuf_p);
 #ifdef LOG_MCNTS
     dump_mcnt_log();
 #endif
@@ -208,7 +195,7 @@ static void die(paper_input_databuf_t *paper_input_databuf_p, block_info_t *binf
 // This sets the "current" block to be marked as filled.  The current block is
 // the block corresponding to binfo->mcnt_start.  Returns mcnt of the block
 // being marked filled.
-static uint64_t set_block_filled(paper_input_databuf_t *paper_input_databuf_p, block_info_t *binfo)
+static uint64_t set_block_filled(lwa_input_databuf_t *lwa_input_databuf_p, block_info_t *binfo)
 {
     static int last_filled = -1;
 
@@ -222,7 +209,7 @@ static uint64_t set_block_filled(paper_input_databuf_t *paper_input_databuf_p, b
 	printf("block %d being marked filled, but expected block %d!\n", block_i, last_filled);
 
 #ifdef DIE_ON_OUT_OF_SEQ_FILL
-	die(paper_input_databuf_p, binfo);
+	die(lwa_input_databuf_p, binfo);
 #endif
     }
 
@@ -238,11 +225,11 @@ static uint64_t set_block_filled(paper_input_databuf_t *paper_input_databuf_p, b
 
     // If all packets are accounted for, mark this block as good
     if(binfo->block_packet_counter[block_i] == N_PACKETS_PER_BLOCK) {
-	paper_input_databuf_p->block[block_i].header.good_data = 1;
+	lwa_input_databuf_p->block[block_i].header.good_data = 1;
     }
 
     // Set the block as filled
-    if(paper_input_databuf_set_filled(paper_input_databuf_p, block_i) != HASHPIPE_OK) {
+    if(lwa_input_databuf_set_filled(lwa_input_databuf_p, block_i) != HASHPIPE_OK) {
 	hashpipe_error(__FUNCTION__, "error waiting for databuf filled call");
 	pthread_exit(NULL);
     }
@@ -315,18 +302,18 @@ static inline int calc_block_indexes(block_info_t *binfo, packet_header_t * pkt_
 // multiple of Nm (number of mcnts per block).  In theory, the block's data
 // could be cleared as well, but that takes time and is largely unnecessary in
 // a properly functionong system.
-static inline void initialize_block(paper_input_databuf_t * paper_input_databuf_p, uint64_t mcnt)
+static inline void initialize_block(lwa_input_databuf_t * lwa_input_databuf_p, uint64_t mcnt)
 {
     int block_i = block_for_mcnt(mcnt);
     uint64_t mcnt_time_index;
 
-    paper_input_databuf_p->block[block_i].header.good_data = 0;
+    lwa_input_databuf_p->block[block_i].header.good_data = 0;
     // Round pkt_mcnt down to nearest multiple of N_TIME_PER_BLOCK
     mcnt_time_index = ((mcnt / N_TIME_PER_PACKET) % TIME_DEMUX);
     if (mcnt_time_index != time_index) {
         fprintf(stderr, "Expected packets from time index %d, but got index %lu\n", time_index, mcnt_time_index);
     }
-    paper_input_databuf_p->block[block_i].header.mcnt = start_for_mcnt(mcnt);
+    lwa_input_databuf_p->block[block_i].header.mcnt = start_for_mcnt(mcnt);
 }
 
 // This function must be called once and only once per block_info structure!
@@ -366,20 +353,20 @@ static inline void initialize_block_info(block_info_t * binfo)
 // NETMCNT, so it is important that values other than -1 are returned rarely
 // (i.e. when marking a block as filled)!!!
 static inline uint64_t process_packet(
-	paper_input_databuf_t *paper_input_databuf_p, unsigned char*p_frame)
+	lwa_input_databuf_t *lwa_input_databuf_p, unsigned char *p_frame)
 {
 
     static block_info_t binfo;
     packet_header_t pkt_header;
     const uint64_t *payload_p;
     int pkt_block_i;
-    int i;
+    int i, j;
     uint64_t *dest_p;
     int64_t pkt_mcnt_dist;
     uint64_t pkt_mcnt;
     uint64_t cur_mcnt;
     uint64_t netmcnt = -1; // Value to return (!=-1 is stored in status memory)
-    //int i;
+    __m256i vecbuf;
 #if N_DEBUG_INPUT_BLOCKS == 1
     static uint64_t debug_remaining = -1ULL;
     static off_t debug_offset = 0;
@@ -404,12 +391,12 @@ static inline uint64_t process_packet(
     pkt_mcnt_dist = pkt_mcnt - cur_mcnt;
 
 #if N_DEBUG_INPUT_BLOCKS == 1
-    debug_ptr = (uint64_t *)&paper_input_databuf_p->block[N_INPUT_BLOCKS];
-    debug_ptr[debug_offset++] = be64toh(*(unsigned long int *)PKT_UDP_DATA(p_frame));
+    debug_ptr = (uint64_t *)&lwa_input_databuf_p->block[N_INPUT_BLOCKS];
+    debug_ptr[debug_offset++] = be64toh(*(unsigned long long *)(p_frame + UDP_PAYLOAD_OFFSET));
     if(--debug_remaining == 0) {
 	exit(1);
     }
-    if(debug_offset >= sizeof(paper_input_block_t)/sizeof(uint64_t)) {
+    if(debug_offset >= sizeof(lwa_input_block_t)/sizeof(uint64_t)) {
 	debug_offset = 0;
     }
 #endif
@@ -435,7 +422,7 @@ static inline uint64_t process_packet(
 	// block + 2 blocks)
 	if(pkt_mcnt_dist >= 2*N_TIME_PER_BLOCK*TIME_DEMUX) {
 	    // Mark the current block as filled
-	    netmcnt = set_block_filled(paper_input_databuf_p, &binfo);
+	    netmcnt = set_block_filled(lwa_input_databuf_p, &binfo);
 
 	    // Advance mcnt_start to next block
 	    cur_mcnt += N_TIME_PER_BLOCK*TIME_DEMUX;
@@ -444,7 +431,7 @@ static inline uint64_t process_packet(
 
 	    // Wait (hopefully not long!) to acquire the block after next (i.e.
 	    // the block that gets the current packet).
-	    if(paper_input_databuf_busywait_free(paper_input_databuf_p, pkt_block_i) != HASHPIPE_OK) {
+	    if(lwa_input_databuf_busywait_free(lwa_input_databuf_p, pkt_block_i) != HASHPIPE_OK) {
 		if (errno == EINTR) {
 		    // Interrupted by signal, return -1
 		    hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
@@ -458,7 +445,7 @@ static inline uint64_t process_packet(
 	    }
 
 	    // Initialize the newly acquired block
-	    initialize_block(paper_input_databuf_p, pkt_mcnt);
+	    initialize_block(lwa_input_databuf_p, pkt_mcnt);
 	    // Reset binfo's packet counter for this packet's block
 	    binfo.block_packet_counter[pkt_block_i] = 0;
 	}
@@ -481,13 +468,20 @@ static inline uint64_t process_packet(
 
 
 	// Copy data into buffer
-        for(i=0; i<N_INPUTS_PER_PACKET/2; i++) {
+        // LWA-TODO -- is this the most appropriate way to load the buffer?
+        for(i=0; i<N_CHANS_PER_PACKET; i++) {
 	    // Calculate starting points for unpacking this packet into block's data buffer.
-	    dest_p = (uint64_t *)(paper_input_databuf_p->block[pkt_block_i].data)
-	        + paper_input_databuf_data_idx(binfo.m, binfo.a + i, binfo.c, 0); //time index is always zero
-            //fprintf(stdout, "m:%d, a:%d, c:%d, %lu\n", binfo.m, binfo.a, binfo.c, paper_input_databuf_data_idx(binfo.m, binfo.a, binfo.c, 0));
-	    payload_p        = (uint64_t *)(PKT_UDP_DATA(p_frame)+8+(i*2*N_CHAN_PER_PACKET*N_TIME_PER_PACKET));
-	    memcpy(dest_p, payload_p, 2*N_CHAN_PER_PACKET*N_TIME_PER_PACKET);
+	    dest_p = (uint64_t *)(lwa_input_databuf_p->block[pkt_block_i].data)
+	        + lwa_input_databuf_data_idx(binfo.m, binfo.a + i, binfo.c, 0); //time index is always zero
+            //fprintf(stdout, "m:%d, a:%d, c:%d, %lu\n", binfo.m, binfo.a, binfo.c, lwa_input_databuf_data_idx(binfo.m, binfo.a, binfo.c, 0));
+	    payload_p        = (uint64_t *)((p_frame + UDP_PAYLOAD_OFFSET)+64+(i*N_INPUTS_PER_PACKET*N_TIME_PER_PACKET));
+            for(j=0; j<(N_INPUTS_PER_PACKET >> 5); j+=1) {
+                vecbuf = _mm256_set_epi64x(payload_p[3], payload_p[2], payload_p[1], payload_p[0]);
+                _mm256_stream_si256((__m256i *)dest_p, vecbuf);
+                dest_p += 4;
+                payload_p += 4;
+            }
+	    //memcpy(dest_p, payload_p, 2*N_CHAN_PER_PACKET*N_TIME_PER_PACKET);
         }
 
 	return netmcnt;
@@ -497,7 +491,7 @@ static inline uint64_t process_packet(
     else if(pkt_mcnt_dist < 0 && pkt_mcnt_dist > -LATE_PKT_MCNT_THRESHOLD) {
 	// If not just after an mcnt reset, issue warning.
 	if(cur_mcnt >= binfo.mcnt_log_late) {
-	    hashpipe_warn("hera_pktsock_thread",
+	    hashpipe_warn("lwa_ibv_thread",
 		    "Ignoring late packet (%d mcnts late)",
 		    cur_mcnt - pkt_mcnt);
 	}
@@ -511,7 +505,7 @@ static inline uint64_t process_packet(
 	// If not at start-up and this is the first out of order packet,
 	// issue warning.
 	if(cur_mcnt != 0 && binfo.out_of_seq_cnt == 0) {
-	    hashpipe_warn("hera_pktsock_thread",
+	    hashpipe_warn("lwa_ibv_thread",
 		    "out of seq mcnt %012lx (expected: %012lx <= mcnt < %012x)",
 		    pkt_mcnt, cur_mcnt, cur_mcnt+3*N_TIME_PER_BLOCK*TIME_DEMUX);
 	}
@@ -538,13 +532,13 @@ static inline uint64_t process_packet(
 	    binfo.mcnt_start = start_for_mcnt(pkt_mcnt);
 	    binfo.mcnt_log_late = binfo.mcnt_start + N_TIME_PER_BLOCK*TIME_DEMUX;
 	    binfo.block_i = block_for_mcnt(binfo.mcnt_start);
-	    hashpipe_warn("hera_pktsock_thread",
+	    hashpipe_warn("lwa_ibv_thread",
 		    "resetting to mcnt %012lx block %d based on packet mcnt %012lx",
 		    binfo.mcnt_start, block_for_mcnt(binfo.mcnt_start), pkt_mcnt);
 	    // Reinitialize/recycle our two already acquired blocks with new
 	    // mcnt values.
-	    initialize_block(paper_input_databuf_p, binfo.mcnt_start);
-	    initialize_block(paper_input_databuf_p, binfo.mcnt_start+TIME_DEMUX*N_TIME_PER_BLOCK);
+	    initialize_block(lwa_input_databuf_p, binfo.mcnt_start);
+	    initialize_block(lwa_input_databuf_p, binfo.mcnt_start+TIME_DEMUX*N_TIME_PER_BLOCK);
 	    // Reset binfo's packet counters for these blocks.
 	    binfo.block_packet_counter[binfo.block_i] = 0;
 	    binfo.block_packet_counter[(binfo.block_i+1)%N_INPUT_BLOCKS] = 0;
@@ -581,36 +575,6 @@ static int init(hashpipe_thread_args_t *args)
     hputu4(st.buf, "MISSEDPK", 0);
     hashpipe_status_unlock_safe(&st);
 
-#ifndef TIMING_TEST
-    /* Set up pktsock */
-    struct hashpipe_pktsock *p_ps = (struct hashpipe_pktsock *)
-	malloc(sizeof(struct hashpipe_pktsock));
-
-    if(!p_ps) {
-        perror(__FUNCTION__);
-        return -1;
-    }
-
-    // Make frame_size be a divisor of block size so that frames will be
-    // contiguous in mapped mempory.  block_size must also be a multiple of
-    // page_size.  Easiest way is to oversize the frames to be 16384 bytes, which
-    // is bigger than we need, but keeps things easy.
-    p_ps->frame_size = PKTSOCK_BYTES_PER_FRAME;
-    // total number of frames
-    p_ps->nframes = PKTSOCK_NFRAMES;
-    // number of blocks
-    p_ps->nblocks = PKTSOCK_NBLOCKS;
-
-    int rv = hashpipe_pktsock_open(p_ps, bindhost, PACKET_RX_RING);
-    if (rv!=HASHPIPE_OK) {
-        hashpipe_error("hera_pktsock_thread", "Error opening pktsock.");
-        pthread_exit(NULL);
-    }
-
-    // Store packet socket pointer in args
-    args->user_data = p_ps;
-#endif
-
     // Success!
     return 0;
 }
@@ -618,12 +582,54 @@ static int init(hashpipe_thread_args_t *args)
 static void *run(hashpipe_thread_args_t * args)
 {
     // Local aliases to shorten access to args fields
-    // Our output buffer happens to be a paper_input_databuf
-    paper_input_databuf_t *db = (paper_input_databuf_t *)args->obuf;
+    // Our output buffer happens to be a lwa_input_databuf
+    lwa_input_databuf_t *db = (lwa_input_databuf_t *)args->obuf;
     hashpipe_status_t st = args->st;
     const char * status_key = args->thread_desc->skey;
 
     st_p = &st;	// allow global (this source file) access to the status buffer
+
+    // IB Verbs structures
+    struct hashpipe_ibv_context * hibv_ctx;
+    struct hashpipe_ibv_recv_pkt * hibv_rpkt;
+    struct hashpipe_ibv_recv_pkt * curr_rpkt;
+    char ifname[IFNAMSIZ];
+    int bindport;
+    int i;
+
+    hashpipe_status_lock_safe(&st);
+    hgets(st.buf, "BINDHOST", IFNAMSIZ, ifname);
+    hgeti4(st.buf, "BINDPORT", &bindport);
+    hashpipe_status_unlock_safe(&st);
+
+    fprintf(stdout, "Initializing IBV socket\n");
+    hibv_ctx = (struct hashpipe_ibv_context *)calloc(N_SRC_PORTS, sizeof(struct hashpipe_ibv_context));
+    if (!hibv_ctx) {
+      hashpipe_error(__FUNCTION__, "Failed to allocate IBV context(s)");
+    }
+    for (i=0; i<N_SRC_PORTS; i++) {
+      strncpy(hibv_ctx[i].interface_name, ifname, IFNAMSIZ);
+      hibv_ctx[i].interface_name[IFNAMSIZ-1] = '\0'; // Ensure NUL termination
+      hibv_ctx[i].send_pkt_num = 1;
+      hibv_ctx[i].recv_pkt_num = 8192;
+      hibv_ctx[i].pkt_size_max = 5000;
+      hibv_ctx[i].max_flows = N_SRC_PORTS;
+      if(hashpipe_ibv_init(&(hibv_ctx[i]))) {
+        hashpipe_error(__FUNCTION__, "Failed to initialize IBV (%d)", i);
+      }
+    }
+
+    printf("max_qp_wr=%u\n", hibv_ctx[0].dev_attr.max_qp_wr);
+
+    // Subscribe to RX flows
+    for (i=0; i<N_SRC_PORTS; i++) {
+      fprintf(stdout, "Configuring IBV for port %d\n", bindport+i);
+      if(hashpipe_ibv_flow(&(hibv_ctx[i]), 0, IBV_FLOW_SPEC_UDP,
+            hibv_ctx[i].mac, NULL, 0, 0, 0, 0, bindport+i, bindport)) {
+        hashpipe_error(__FUNCTION__, "Failed to configure IBV flow rule %d", i);
+      }
+    }
+
 
     // Flag that holds off the net thread
     int holdoff = 1;
@@ -651,6 +657,7 @@ static void *run(hashpipe_thread_args_t * args)
 	}
 	hashpipe_status_unlock_safe(&st);
     }
+    fprintf(stdout, "Holdoff released\n");
 
 #ifdef DEBUG_SEMS
     fprintf(stderr, "s/tid %lu/NET/' <<.\n", pthread_self());
@@ -665,7 +672,7 @@ static void *run(hashpipe_thread_args_t * args)
 #endif
 
     // Acquire first two blocks to start
-    if(paper_input_databuf_busywait_free(db, 0) != HASHPIPE_OK) {
+    if(lwa_input_databuf_busywait_free(db, 0) != HASHPIPE_OK) {
 	if (errno == EINTR) {
 	    // Interrupted by signal, return -1
 	    hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
@@ -675,7 +682,7 @@ static void *run(hashpipe_thread_args_t * args)
 	    pthread_exit(NULL);
 	}
     }
-    if(paper_input_databuf_busywait_free(db, 1) != HASHPIPE_OK) {
+    if(lwa_input_databuf_busywait_free(db, 1) != HASHPIPE_OK) {
 	if (errno == EINTR) {
 	    // Interrupted by signal, return -1
 	    hashpipe_error(__FUNCTION__, "interrupted by signal waiting for free databuf");
@@ -691,21 +698,20 @@ static void *run(hashpipe_thread_args_t * args)
     initialize_block(db, N_TIME_PER_BLOCK*TIME_DEMUX + time_index);
 
     /* Read network params */
-    int bindport = 8511;
     // (N_BYTES_PER_PACKET excludes header, so +8 for the header)
-    size_t expected_packet_size = N_BYTES_PER_PACKET + 8;
+    size_t expected_packet_size = N_BYTES_PER_PACKET + 8 + UDP_PAYLOAD_OFFSET; // Inc. Eth/IP/UDP headers
 
 #ifndef TIMING_TEST
-    /* Get pktsock from args*/
-    struct hashpipe_pktsock * p_ps = (struct hashpipe_pktsock*)args->user_data;
-    pthread_cleanup_push(free, p_ps);
-    pthread_cleanup_push((void (*)(void *))hashpipe_pktsock_close, p_ps);
-
     // Drop all packets to date
-    unsigned char *p_frame;
-    while((p_frame=hashpipe_pktsock_recv_frame_nonblock(p_ps))) {
-	hashpipe_pktsock_release_frame(p_frame);
+    fprintf(stdout, "Dropping existing packets\n");
+    int dropcnt = 0;
+    for (i=0; i<N_SRC_PORTS; i++) {
+      while((hibv_rpkt = hashpipe_ibv_recv_pkts(&hibv_ctx[i], 8192))) {
+          hashpipe_ibv_release_pkts(&hibv_ctx[i], hibv_rpkt);
+          dropcnt += 1;
+      }
     }
+    fprintf(stdout, "Dropped waiting packets: %d\n", dropcnt);
 
     hashpipe_status_lock_safe(&st);
     // Get info from status buffer
@@ -718,6 +724,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     /* Main loop */
     uint64_t packet_count = 0;
+    uint64_t burst_packet_count = 0;
     uint64_t wait_ns = 0; // ns for most recent wait
     uint64_t recv_ns = 0; // ns for most recent recv
     uint64_t proc_ns = 0; // ns for most recent proc
@@ -740,120 +747,139 @@ static void *run(hashpipe_thread_args_t * args)
     uint64_t pktsock_drops_total = 0; // Stats total for socket packet
     struct timespec start, stop;
     struct timespec recv_start, recv_stop;
+    struct timespec proc_start;
 
     while (run_threads()) {
 
 #ifndef TIMING_TEST
         /* Read packet */
 	clock_gettime(CLOCK_MONOTONIC, &recv_start);
-	do {
-	    clock_gettime(CLOCK_MONOTONIC, &start);
-	    //p.packet_size = recv(up.sock, p.data, HASHPIPE_MAX_PACKET_SIZE, 0);
-	    p_frame = hashpipe_pktsock_recv_udp_frame_nonblock(p_ps, bindport);
-	    clock_gettime(CLOCK_MONOTONIC, &recv_stop);
-	} while (!p_frame && run_threads());
+        for (i=0; i<N_SRC_PORTS; i++) {
+	  clock_gettime(CLOCK_MONOTONIC, &start);
+          // Try to receive packets with 1ms timeout.
+          // Note that trying to receive from ports with no traffic _will_
+          // degrade performance. Waiting 1ms corresponds to ~80 packets
+          // For 4kB packets, 40Gb/s traffic.
+          hibv_rpkt = hashpipe_ibv_recv_pkts(&hibv_ctx[i], 1);
+	  clock_gettime(CLOCK_MONOTONIC, &recv_stop);
+          // If no packets, move on to the next port
+	  if (!hibv_rpkt && run_threads()) {
+            continue;
+          }
 
-	if(!run_threads()) break;
+	  if(!run_threads()) break;
 
-	// Make sure received packet size matches expected packet size.  Allow
-	// for optional 8 byte CRC in received packet.  Zlib's crc32 function
-	// is too slow to use in realtime, so CRCs cannot be checked on the
-	// fly.  If data errors are suspected, a separate CRC checking utility
-	// should be used to read the packets from the network and verify CRCs.
-        int packet_size = PKT_UDP_SIZE(p_frame) - 8; // -8 for the UDP header
-	if (expected_packet_size != packet_size-8 && expected_packet_size != packet_size) {
-	    // Log warning and ignore wrongly sized packet
-	    #ifdef DEBUG_NET
-	    hashpipe_warn("hera_pktsock_thread", "Invalid pkt size (%d)", packet_size);
-	    #endif
-	    hashpipe_pktsock_release_frame(p_frame);
-	    continue;
-	}
 #endif
-	packet_count++;
+	  wait_ns = ELAPSED_NS(recv_start, start);
+	  recv_ns = ELAPSED_NS(start, recv_stop);
+	  elapsed_wait_ns += wait_ns;
+	  elapsed_recv_ns += recv_ns;
+	  min_wait_ns = MIN(wait_ns, min_wait_ns);
+	  min_recv_ns = MIN(recv_ns, min_recv_ns);
+	  max_wait_ns = MAX(wait_ns, max_wait_ns);
+	  max_recv_ns = MAX(recv_ns, max_recv_ns);
 
-        // Copy packet into any blocks where it belongs.
-        const uint64_t mcnt = process_packet((paper_input_databuf_t *)db, p_frame);
-	// Release frame back to kernel
-	hashpipe_pktsock_release_frame(p_frame);
+          burst_packet_count = 0;
+          for (curr_rpkt = hibv_rpkt; curr_rpkt; curr_rpkt = (struct hashpipe_ibv_recv_pkt *)curr_rpkt->wr.next) {
+	      clock_gettime(CLOCK_MONOTONIC, &proc_start);
+	      packet_count++;
+              burst_packet_count++;
+              // Make sure received packet size matches expected packet size.  Allow
+              // for optional 8 byte CRC in received packet.  Zlib's crc32 function
+              // is too slow to use in realtime, so CRCs cannot be checked on the
+              // fly.  If data errors are suspected, a separate CRC checking utility
+              // should be used to read the packets from the network and verify CRCs.
+              int packet_size = curr_rpkt->length;
+              if (expected_packet_size != packet_size-8 && expected_packet_size != packet_size) {
+                  // Log warning and ignore wrongly sized packet
+                  #ifdef DEBUG_NET
+                  hashpipe_warn(__FUNCTION__, "Invalid pkt size (%d)", packet_size);
+                  #endif
+                  continue;
+              }
+              // Copy packet into any blocks where it belongs.
+              const uint64_t mcnt = process_packet((lwa_input_databuf_t *)db, (unsigned char *)curr_rpkt->wr.sg_list->addr);
 
-	clock_gettime(CLOCK_MONOTONIC, &stop);
-	wait_ns = ELAPSED_NS(recv_start, start);
-	recv_ns = ELAPSED_NS(start, recv_stop);
-	proc_ns = ELAPSED_NS(recv_stop, stop);
-	elapsed_wait_ns += wait_ns;
-	elapsed_recv_ns += recv_ns;
-	elapsed_proc_ns += proc_ns;
-	// Update min max values
-	min_wait_ns = MIN(wait_ns, min_wait_ns);
-	min_recv_ns = MIN(recv_ns, min_recv_ns);
-	min_proc_ns = MIN(proc_ns, min_proc_ns);
-	max_wait_ns = MAX(wait_ns, max_wait_ns);
-	max_recv_ns = MAX(recv_ns, max_recv_ns);
-	max_proc_ns = MAX(proc_ns, max_proc_ns);
+	      clock_gettime(CLOCK_MONOTONIC, &stop);
+	      proc_ns = ELAPSED_NS(proc_start, stop);
+	      elapsed_proc_ns += proc_ns;
+	      // Update min max values
+	      min_proc_ns = MIN(proc_ns, min_proc_ns);
+	      max_proc_ns = MAX(proc_ns, max_proc_ns);
 
-        if(mcnt != -1) {
-            // Update status
-            ns_per_wait = (float)elapsed_wait_ns / packet_count;
-            ns_per_recv = (float)elapsed_recv_ns / packet_count;
-            ns_per_proc = (float)elapsed_proc_ns / packet_count;
+              if(mcnt != -1) {
+                  // Update status
+                  ns_per_wait = (float)elapsed_wait_ns / packet_count;
+                  ns_per_recv = (float)elapsed_recv_ns / packet_count;
+                  ns_per_proc = (float)elapsed_proc_ns / packet_count;
+                  //fprintf(stdout, "ns_per_recv: %f, total_ns: %lu, packet count: %lu\n", ns_per_recv, elapsed_recv_ns, packet_count);
 
-	    // Get stats from packet socket
-	    hashpipe_pktsock_stats(p_ps, &pktsock_pkts, &pktsock_drops);
+                  hashpipe_status_lock_busywait_safe(&st);
 
-            hashpipe_status_lock_busywait_safe(&st);
+                  hputu8(st.buf, "NETMCNT", mcnt);
+	          // Gbps = bits_per_packet / ns_per_packet
+	          // (N_BYTES_PER_PACKET excludes header, so +8 for the header)
+                  hputr4(st.buf, "NETGBPS", 8*(N_BYTES_PER_PACKET+8)/(ns_per_recv+ns_per_proc));
+                  hputr4(st.buf, "NETWATNS", ns_per_wait);
+                  hputr4(st.buf, "NETRECNS", ns_per_recv);
+                  hputr4(st.buf, "NETPRCNS", ns_per_proc);
 
-            hputu8(st.buf, "NETMCNT", mcnt);
-	    // Gbps = bits_per_packet / ns_per_packet
-	    // (N_BYTES_PER_PACKET excludes header, so +8 for the header)
-            hputr4(st.buf, "NETGBPS", 8*(N_BYTES_PER_PACKET+8)/(ns_per_recv+ns_per_proc));
-            hputr4(st.buf, "NETWATNS", ns_per_wait);
-            hputr4(st.buf, "NETRECNS", ns_per_recv);
-            hputr4(st.buf, "NETPRCNS", ns_per_proc);
+	          // Get and put min and max values.  The "get-then-put" allows the
+	          // user to reset the min max values in the status buffer.
+	          hgeti8(st.buf, "NETWATMN", (long *)&status_ns);
+	          status_ns = MIN(min_wait_ns, status_ns);
+                  hputi8(st.buf, "NETWATMN", status_ns);
 
-	    // Get and put min and max values.  The "get-then-put" allows the
-	    // user to reset the min max values in the status buffer.
-	    hgeti8(st.buf, "NETWATMN", (long int *)&status_ns);
-	    status_ns = MIN(min_wait_ns, status_ns);
-            hputi8(st.buf, "NETWATMN", status_ns);
+                  hgeti8(st.buf, "NETRECMN", (long *)&status_ns);
+	          status_ns = MIN(min_recv_ns, status_ns);
+                  hputi8(st.buf, "NETRECMN", status_ns);
 
-            hgeti8(st.buf, "NETRECMN", (long int *)&status_ns);
-	    status_ns = MIN(min_recv_ns, status_ns);
-            hputi8(st.buf, "NETRECMN", status_ns);
+                  hgeti8(st.buf, "NETPRCMN", (long *)&status_ns);
+	          status_ns = MIN(min_proc_ns, status_ns);
+                  hputi8(st.buf, "NETPRCMN", status_ns);
 
-            hgeti8(st.buf, "NETPRCMN", (long int *)&status_ns);
-	    status_ns = MIN(min_proc_ns, status_ns);
-            hputi8(st.buf, "NETPRCMN", status_ns);
+                  hgeti8(st.buf, "NETWATMX", (long *)&status_ns);
+	          status_ns = MAX(max_wait_ns, status_ns);
+                  hputi8(st.buf, "NETWATMX", status_ns);
 
-            hgeti8(st.buf, "NETWATMX", (long int *)&status_ns);
-	    status_ns = MAX(max_wait_ns, status_ns);
-            hputi8(st.buf, "NETWATMX", status_ns);
+                  hgeti8(st.buf, "NETRECMX", (long *)&status_ns);
+	          status_ns = MAX(max_recv_ns, status_ns);
+                  hputi8(st.buf, "NETRECMX", status_ns);
 
-            hgeti8(st.buf, "NETRECMX", (long int *)&status_ns);
-	    status_ns = MAX(max_recv_ns, status_ns);
-            hputi8(st.buf, "NETRECMX", status_ns);
+                  hgeti8(st.buf, "NETPRCMX", (long *)&status_ns);
+	          status_ns = MAX(max_proc_ns, status_ns);
+                  hputi8(st.buf, "NETPRCMX", status_ns);
 
-            hgeti8(st.buf, "NETPRCMX", (long int *)&status_ns);
-	    status_ns = MAX(max_proc_ns, status_ns);
-            hputi8(st.buf, "NETPRCMX", status_ns);
+                  hputu8(st.buf, "NETPKTS",  pktsock_pkts);
+                  hputu8(st.buf, "NETDROPS", pktsock_drops);
 
-            hputu8(st.buf, "NETPKTS",  pktsock_pkts);
-            hputu8(st.buf, "NETDROPS", pktsock_drops);
+                  hgetu8(st.buf, "NETPKTTL", (long unsigned int*)&pktsock_pkts_total);
+                  hgetu8(st.buf, "NETDRPTL", (long unsigned int*)&pktsock_drops_total);
+                  hputu8(st.buf, "NETPKTTL", pktsock_pkts_total + pktsock_pkts);
+                  hputu8(st.buf, "NETDRPTL", pktsock_drops_total + pktsock_drops);
 
-            hgetu8(st.buf, "NETPKTTL", (long unsigned int*)&pktsock_pkts_total);
-            hgetu8(st.buf, "NETDRPTL", (long unsigned int*)&pktsock_drops_total);
-            hputu8(st.buf, "NETPKTTL", pktsock_pkts_total + pktsock_pkts);
-            hputu8(st.buf, "NETDRPTL", pktsock_drops_total + pktsock_drops);
+                  hashpipe_status_unlock_safe(&st);
 
-            hashpipe_status_unlock_safe(&st);
+	          // Start new average
+	          elapsed_wait_ns = 0;
+	          elapsed_recv_ns = 0;
+	          elapsed_proc_ns = 0;
+	          packet_count = 0;
+              }
+          }
+          hashpipe_status_lock_safe(&st);
+          hputu8(st.buf, "BURSTPKT", burst_packet_count);
+          hashpipe_status_unlock_safe(&st);
 
-	    // Start new average
-	    elapsed_wait_ns = 0;
-	    elapsed_recv_ns = 0;
-	    elapsed_proc_ns = 0;
-	    packet_count = 0;
+          // Warn if it looks like overflows are a danger
+          if (burst_packet_count*2 > hibv_ctx[i].recv_pkt_num) {
+             fprintf(stderr, "WARNING: got %lu packets in last burst\n", burst_packet_count);
+          }
+	  // Release packets
+          if (hashpipe_ibv_release_pkts(&hibv_ctx[i], hibv_rpkt)) {
+	      hashpipe_error(__FUNCTION__, "error releasing packets");
+          }
         }
-
 #if defined TIMING_TEST || defined NET_TIMING_TEST
 
 #define END_LOOP_COUNT (1*1000*1000)
@@ -877,27 +903,21 @@ static void *run(hashpipe_thread_args_t * args)
         pthread_testcancel();
     }
 
-#ifndef TIMING_TEST
-    /* Have to close all push's */
-    pthread_cleanup_pop(1); /* Closes push(hashpipe_pktsock_close) */
-    pthread_cleanup_pop(1); /* Closes push(hashpipe_udp_close) */
-#endif
-
     return NULL;
 }
 
-static hashpipe_thread_desc_t pktsock_thread = {
-    name: "hera_pktsock_thread",
+static hashpipe_thread_desc_t ibv_thread = {
+    name: "lwa_ibv_thread",
     skey: "NETSTAT",
     init: init,
     run:  run,
     ibuf_desc: {NULL},
-    obuf_desc: {paper_input_databuf_create}
+    obuf_desc: {lwa_input_databuf_create}
 };
 
 static __attribute__((constructor)) void ctor()
 {
-  register_hashpipe_thread(&pktsock_thread);
+  register_hashpipe_thread(&ibv_thread);
 }
 
 // vi: set ts=8 sw=4 noet :

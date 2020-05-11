@@ -8,7 +8,6 @@ AM_CPPFLAGS     =
 
 AM_CPPFLAGS += -I"@HASHPIPE_INCDIR@"
 AM_CPPFLAGS += -I"@XGPU_INCDIR@"
-AM_CPPFLAGS += -I/usr/include/hdf5/serial/
 AM_CPPFLAGS += -I/usr/include/hiredis/
 
 # AM_CFLAGS is used for all C compiles
@@ -29,20 +28,8 @@ paper_threads = paper_fake_net_thread.c          \
                 hera_pktsock_thread.c            \
                 hera_ibv_thread.c                \
                 hera_fake_gpu_thread.c           \
-                paper_crc_thread.c               \
                 hera_gpu_output_thread.c         \
-                hera_gpu_bda_thread.c            \
-                hera_bda_output_thread.c         \
-                hera_null_thread.c               \
-                hera_catcher_net_thread_bda.c    \
-                hera_catcher_net_thread.c        \
-                hera_catcher_disk_thread_bda.c   \
-                hera_catcher_disk_thread.c       \
-                hera_catcher_autocorr_thread.c   \
-                lzf/lzf_c.c                      \
-                lzf/lzf_d.c                      \
-                lzf_filter.c                     \
-                lzf_filter.h
+                hera_null_thread.c               
 
 paper_fluff = paper_fluff.h \
 	          paper_fluff.c
